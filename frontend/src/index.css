@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+    -webkit-text-size-adjust: 100%;
+    height: 100%;
+  }
+  body {
+    @apply font-sans text-gray-800 antialiased bg-white;
+    overflow-x: hidden;
+    min-height: 100%;
+  }
+  #root {
+    min-height: 100%;
+  }
+  /* Prevent overflow on small screens */
+  img, video, iframe {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+}
+
+/* Strip marquee: single row, bullet items (below hero) */
+@keyframes marquee-strip {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee-strip {
+  animation: marquee-strip 30s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .animate-marquee-strip {
+    animation: none;
+  }
+}
+
+/* About page & section reveal animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.65s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.about-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+.about-reveal.in-view {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.about-reveal-stagger-1 { transition-delay: 0.1s; }
+.about-reveal-stagger-2 { transition-delay: 0.2s; }
+.about-reveal-stagger-3 { transition-delay: 0.3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .about-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .about-reveal.in-view { opacity: 1; }
+  .animate-fade-in-up,
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.Python
+*.so
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+dist/
+frontend/dist/
+backend/instance/
+*.egg-info/
+.eggs/

@@ -1,0 +1,9 @@
+# XpertIntern Backend — Python 3.11+ (per Tech Stack Guide)
+flask>=3.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
+# Auth (Phase 1): Flask-JWT-Extended, bcrypt
+# DB: pymongo or MongoEngine
+# Payment: razorpay
+# Email: sendgrid
+# Excel: openpyxl
