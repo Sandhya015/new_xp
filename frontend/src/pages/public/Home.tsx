@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Building2,
@@ -21,6 +22,25 @@ import {
 } from 'lucide-react'
 import { CourseCard } from '@/components/CourseCard'
 import { useCountUp } from '@/hooks/useCountUp'
+
+function useInView(once = true) {
+  const ref = useRef<HTMLElement>(null)
+  const [inView, setInView] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setInView(true)
+        else if (!once) setInView(false)
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -30px 0px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [once])
+  return { ref, inView }
+}
 
 const stats = [
   { end: 50000, suffix: '+', label: 'Students Trained' },
@@ -97,12 +117,26 @@ const testimonials = [
 ]
 
 export function Home() {
+  const [heroVisible, setHeroVisible] = useState(false)
+  const whoRef = useInView()
+  const whyRef = useInView()
+  const reachRef = useInView()
+  const howRef = useInView()
+  const modesRef = useInView()
+  const programsRef = useInView()
+  const complianceRef = useInView()
+  const ctaRef = useInView()
+  const testimonialsRef = useInView()
+  const subscribeRef = useInView()
+
+  useEffect(() => setHeroVisible(true), [])
+
   return (
     <>
-      {/* Hero — height so marquee is visible without scrolling */}
+      {/* Hero — entrance animation + height so marquee is visible */}
       <section className="relative min-h-[calc(100vh-7rem)] flex flex-col bg-gradient-to-br from-brand-navy via-primary-900 to-primary-950 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.04\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-80" />
-        <div className="relative flex flex-1 flex-col justify-center mx-auto max-w-7xl w-full px-4 py-10 sm:py-16 sm:px-6 lg:px-8 lg:py-24">
+        <div className={`relative flex flex-1 flex-col justify-center mx-auto max-w-7xl w-full px-4 py-10 sm:py-16 sm:px-6 lg:px-8 lg:py-24 ${heroVisible ? 'animate-fade-in-up' : 'opacity-0 translate-y-8'}`}>
           <p className="text-primary-300 text-xs sm:text-sm font-medium uppercase tracking-wider">AICTE & UGC Approved Programs</p>
           <h1 className="mt-3 sm:mt-4 text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl lg:text-6xl">
             India&apos;s Leading Training
@@ -113,8 +147,8 @@ export function Home() {
             Skill-based training and industry internships as per AICTE and UGC guidelines. We provide structured programs for technical and non-technical students across India.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-wrap gap-3 sm:gap-4">
-            <Link to="/training" className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-lg hover:bg-primary-600 transition min-h-[44px]">Explore Trainings</Link>
-            <Link to="/internship" className="inline-flex items-center justify-center rounded-lg border-2 border-white/40 bg-white/5 px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white backdrop-blur hover:bg-white/10 transition min-h-[44px]">Apply for Internship</Link>
+            <Link to="/training" className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-lg hover:bg-primary-600 hover:scale-105 transition min-h-[44px]">Explore Trainings</Link>
+            <Link to="/internship" className="inline-flex items-center justify-center rounded-lg border-2 border-white/40 bg-white/5 px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white backdrop-blur hover:bg-white/10 hover:scale-105 transition min-h-[44px]">Apply for Internship</Link>
           </div>
           <div className="mt-10 sm:mt-16 grid grid-cols-2 gap-4 sm:gap-8 sm:grid-cols-4">
             {stats.map(({ end, suffix, label }) => (
@@ -137,11 +171,11 @@ export function Home() {
       </section>
 
       {/* About Us — Who We Are: stats card left, content right */}
-      <section className="bg-white py-12 sm:py-16 lg:py-24">
+      <section ref={whoRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-24 about-reveal ${whoRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="grid gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             {/* Left: blue gradient stats card */}
-            <div className="rounded-2xl bg-gradient-to-b from-primary-700 to-brand-navy p-6 sm:p-8 lg:p-10 text-white shadow-xl order-2 lg:order-1">
+            <div className="rounded-2xl bg-gradient-to-b from-primary-700 to-brand-navy p-6 sm:p-8 lg:p-10 text-white shadow-xl order-2 lg:order-1 transition-transform duration-300 hover:scale-[1.02]">
               <div className="flex justify-center mb-6 sm:mb-8">
                 <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-white/10">
                   <Building2 className="h-8 w-8 sm:h-10 sm:w-10 text-white" />
@@ -189,14 +223,14 @@ export function Home() {
       </section>
 
       {/* Why Choose Us — 6 cards, 3x2 */}
-      <section className="bg-brand-light-bg py-12 sm:py-16 lg:py-20">
+      <section ref={whyRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${whyRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <span className="inline-block rounded-full bg-white border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Why Choose Us</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">What Makes XpertIntern Different</h2>
           <p className="mt-2 text-sm sm:text-base text-slate-gray">We combine industry expertise with academic compliance to deliver the best training experience.</p>
           <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-6 lg:gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {whyUsCards.map(({ title, desc, Icon, color }) => (
-              <div key={title} className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm transition hover:shadow-md text-center min-w-0">
+              <div key={title} className="home-stagger-card rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm transition hover:shadow-lg hover:-translate-y-1 text-center min-w-0">
                 <div className="mx-auto flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center">
                   <Icon className={`h-8 w-8 sm:h-10 sm:w-10 ${color}`} strokeWidth={1.5} />
                 </div>
@@ -209,7 +243,7 @@ export function Home() {
       </section>
 
       {/* Our Reach — Universities (marquee) */}
-      <section className="bg-white py-12 sm:py-16 lg:py-20 overflow-hidden">
+      <section ref={reachRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-20 overflow-hidden about-reveal ${reachRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-brand-light-bg border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Our Reach</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">Top Universities & Boards We Serve</h2>
@@ -230,7 +264,7 @@ export function Home() {
       </section>
 
       {/* How It Works — 5 steps with numbered badges and icons */}
-      <section className="bg-brand-light-bg py-12 sm:py-16 lg:py-20">
+      <section ref={howRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${howRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-white border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Simple Process</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">How It Works</h2>
@@ -239,7 +273,7 @@ export function Home() {
             {steps.map((step, i) => {
               const StepIcon = step.Icon
               return (
-                <div key={step.num} className="flex items-start sm:items-center justify-center">
+                <div key={step.num} className="home-stagger-card flex items-start sm:items-center justify-center">
                   <div className="flex flex-col items-center text-center min-w-[120px] sm:min-w-0 sm:w-36 lg:w-40">
                     <div className="relative">
                       <span className="absolute -top-1 -right-1 flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-brand-navy text-[10px] sm:text-xs font-bold text-white">{step.num}</span>
@@ -259,7 +293,7 @@ export function Home() {
       </section>
 
       {/* Training Modes — 3 cards, center highlighted */}
-      <section className="bg-white py-12 sm:py-16 lg:py-20">
+      <section ref={modesRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-20 ${modesRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-brand-light-bg border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Flexible Learning</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">Training Modes Available</h2>
@@ -269,7 +303,7 @@ export function Home() {
               return (
               <div
                 key={mode.title}
-                className={`relative rounded-xl border p-4 sm:p-6 shadow-sm min-w-0 ${
+                className={`home-stagger-card relative rounded-xl border p-4 sm:p-6 shadow-sm min-w-0 transition-transform duration-300 hover:scale-[1.02] ${
                   mode.popular ? 'bg-brand-navy border-brand-navy text-white shadow-lg md:scale-105' : 'bg-white border-gray-200'
                 }`}
               >
@@ -297,13 +331,15 @@ export function Home() {
       </section>
 
       {/* Popular Programs */}
-      <section className="bg-brand-light-bg py-12 sm:py-16 lg:py-20">
+      <section ref={programsRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${programsRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <h2 className="text-2xl font-bold text-brand-navy sm:text-3xl">Popular Programs</h2>
           <p className="mt-2 text-sm sm:text-base text-slate-gray">Transform your career with industry-leading courses</p>
           <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-6 lg:gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {programsPreview.map((prog) => (
-              <CourseCard key={prog.id} id={prog.id} title={prog.title} duration={prog.duration} tag={prog.tag} />
+              <div key={prog.id} className="home-stagger-card">
+                <CourseCard id={prog.id} title={prog.title} duration={prog.duration} tag={prog.tag} />
+              </div>
             ))}
           </div>
           <div className="mt-8 sm:mt-10 text-center">
@@ -313,13 +349,13 @@ export function Home() {
       </section>
 
       {/* Approved & Compliant Programs */}
-      <section className="bg-white py-12 sm:py-16 lg:py-20">
+      <section ref={complianceRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-20 ${complianceRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-brand-light-bg border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Compliance</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">Approved & Compliant Programs</h2>
           <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-6 lg:gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {complianceCards.map(({ title, desc, Icon: ComplianceIcon }) => (
-              <div key={title} className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm min-w-0">
+              <div key={title} className="home-stagger-card rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm min-w-0 transition-transform duration-300 hover:scale-[1.02]">
                 <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-brand-light-bg">
                   <ComplianceIcon className="h-5 w-5 sm:h-6 sm:w-6 text-brand-navy" />
                 </div>
@@ -332,7 +368,7 @@ export function Home() {
       </section>
 
       {/* Request a Free Call Back */}
-      <section className="bg-gray-50 py-12 sm:py-16 lg:py-20">
+      <section ref={ctaRef.ref as React.RefObject<HTMLElement>} className={`bg-gray-50 py-12 sm:py-16 lg:py-20 about-reveal ${ctaRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <div className="grid gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16">
             <div className="min-w-0">
@@ -348,7 +384,7 @@ export function Home() {
                 ))}
               </ul>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm min-w-0">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm min-w-0 transition-shadow hover:shadow-md">
               <form className="space-y-3 sm:space-y-4" onSubmit={(e) => e.preventDefault()}>
                 <input type="text" placeholder="Full Name *" className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm" />
                 <input type="tel" placeholder="Phone Number *" className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm" />
@@ -376,13 +412,13 @@ export function Home() {
       </section>
 
       {/* What Our Students Say — separate content section (not part of footer) */}
-      <section className="bg-gradient-to-b from-primary-900 to-brand-navy text-white py-12 sm:py-16">
+      <section ref={testimonialsRef.ref as React.RefObject<HTMLElement>} className={`bg-gradient-to-b from-primary-900 to-brand-navy text-white py-12 sm:py-16 ${testimonialsRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <h2 className="text-2xl font-bold sm:text-3xl">What Our Students Say</h2>
           <p className="mt-2 text-sm sm:text-base text-gray-400">Real stories from the community</p>
           <div className="mt-8 sm:mt-10 grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {testimonials.map((t) => (
-              <blockquote key={t.name} className="rounded-xl bg-white/10 border border-white/10 p-4 sm:p-6 backdrop-blur min-w-0">
+              <blockquote key={t.name} className="home-stagger-card rounded-xl bg-white/10 border border-white/10 p-4 sm:p-6 backdrop-blur min-w-0 transition-transform duration-300 hover:scale-[1.02]">
                 <p className="text-gray-200 text-sm sm:text-base">&ldquo;{t.quote}&rdquo;</p>
                 <footer className="mt-3 sm:mt-4">
                   <p className="font-semibold text-white text-sm sm:text-base">{t.name}</p>
@@ -395,7 +431,7 @@ export function Home() {
       </section>
 
       {/* Subscribe for Updates */}
-      <section className="bg-brand-navy py-8 sm:py-10 border-t border-white/10">
+      <section ref={subscribeRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-navy py-8 sm:py-10 border-t border-white/10 about-reveal ${subscribeRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 sm:gap-6 min-w-0">
           <div className="text-center sm:text-left min-w-0">
             <h2 className="text-lg sm:text-xl font-bold text-white">Subscribe for Updates</h2>
