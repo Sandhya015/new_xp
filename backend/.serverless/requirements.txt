@@ -1,7 +1,0 @@
-bcrypt>=4.1.0
-flask-cors>=4.0.0
-flask-jwt-extended>=4.6.0
-flask>=3.0.0
-pymongo[srv]>=4.6.0
-python-dotenv>=1.0.0
-serverless-wsgi>=3.0.0

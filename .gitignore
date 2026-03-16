@@ -15,5 +15,8 @@ __pycache__/
 dist/
 frontend/dist/
 backend/instance/
+# Serverless deploy output (do not commit)
+backend/.serverless/
+.serverless/
 *.egg-info/
 .eggs/
