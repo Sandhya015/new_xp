@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { authService } from '@/services/authService'
@@ -9,6 +10,7 @@ type Tab = 'student' | 'company'
 
 export function Login() {
   const [tab, setTab] = useState<Tab>('student')
+  const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -77,13 +79,23 @@ export function Login() {
               </div>
               <div>
                 <label htmlFor="login-password" className="block text-sm font-medium text-gray-700">Password *</label>
-                <input
-                  id="login-password"
-                  type="password"
-                  {...register('password', { required: 'Password is required' })}
-                  placeholder="Your password"
-                  className="mt-1.5 block w-full min-w-0 rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 focus:outline-none"
-                />
+                <div className="mt-1.5 relative">
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    {...register('password', { required: 'Password is required' })}
+                    placeholder="Your password"
+                    className="block w-full min-w-0 rounded-lg border border-gray-300 px-3.5 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
                 {errors.password && <p className="mt-1 text-sm text-error-red">{errors.password.message}</p>}
               </div>
               <div className="flex justify-end">

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { User, Building2, Info, CheckCircle } from 'lucide-react'
+import { User, Building2, Info, CheckCircle, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 
 const UNIVERSITIES = [
@@ -25,6 +25,10 @@ export function Register() {
   const [authError, setAuthError] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [showSuccessToast, setShowSuccessToast] = useState(false)
+  const [showStudentPassword, setShowStudentPassword] = useState(false)
+  const [showStudentConfirm, setShowStudentConfirm] = useState(false)
+  const [showCompanyPassword, setShowCompanyPassword] = useState(false)
+  const [showCompanyConfirm, setShowCompanyConfirm] = useState(false)
   const [studentForm, setStudentForm] = useState({
     fullName: '',
     email: '',
@@ -199,11 +203,17 @@ export function Register() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Password *</label>
-                      <input type="password" required placeholder="Create password" value={studentForm.password} onChange={(e) => setStudentForm((f) => ({ ...f, password: e.target.value }))} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                      <div className="mt-1 relative">
+                        <input type={showStudentPassword ? 'text' : 'password'} required placeholder="Create password" value={studentForm.password} onChange={(e) => setStudentForm((f) => ({ ...f, password: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                        <button type="button" onClick={() => setShowStudentPassword((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none" aria-label={showStudentPassword ? 'Hide password' : 'Show password'}>{showStudentPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Confirm Password *</label>
-                      <input type="password" required placeholder="Confirm password" value={studentForm.confirmPassword} onChange={(e) => setStudentForm((f) => ({ ...f, confirmPassword: e.target.value }))} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                      <div className="mt-1 relative">
+                        <input type={showStudentConfirm ? 'text' : 'password'} required placeholder="Confirm password" value={studentForm.confirmPassword} onChange={(e) => setStudentForm((f) => ({ ...f, confirmPassword: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                        <button type="button" onClick={() => setShowStudentConfirm((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none" aria-label={showStudentConfirm ? 'Hide password' : 'Show password'}>{showStudentConfirm ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+                      </div>
                     </div>
                   </div>
                   <div>
@@ -283,11 +293,17 @@ export function Register() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Password *</label>
-                      <input type="password" required placeholder="Create password" value={companyForm.password} onChange={(e) => setCompanyForm((f) => ({ ...f, password: e.target.value }))} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                      <div className="mt-1 relative">
+                        <input type={showCompanyPassword ? 'text' : 'password'} required placeholder="Create password" value={companyForm.password} onChange={(e) => setCompanyForm((f) => ({ ...f, password: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                        <button type="button" onClick={() => setShowCompanyPassword((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none" aria-label={showCompanyPassword ? 'Hide password' : 'Show password'}>{showCompanyPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Confirm Password *</label>
-                      <input type="password" required placeholder="Confirm password" value={companyForm.confirmPassword} onChange={(e) => setCompanyForm((f) => ({ ...f, confirmPassword: e.target.value }))} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                      <div className="mt-1 relative">
+                        <input type={showCompanyConfirm ? 'text' : 'password'} required placeholder="Confirm password" value={companyForm.confirmPassword} onChange={(e) => setCompanyForm((f) => ({ ...f, confirmPassword: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                        <button type="button" onClick={() => setShowCompanyConfirm((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none" aria-label={showCompanyConfirm ? 'Hide password' : 'Show password'}>{showCompanyConfirm ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+                      </div>
                     </div>
                   </div>
                   <div className="flex gap-2 rounded-lg bg-brand-light-bg border border-primary-200 p-3">

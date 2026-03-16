@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Lock, Mail } from 'lucide-react'
+import { Lock, Mail, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
 
 export function AdminLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -73,13 +74,21 @@ export function AdminLogin() {
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     id="admin-password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full min-w-0 rounded-lg border border-gray-300 py-2.5 pl-10 pr-3 text-base sm:text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                    className="block w-full min-w-0 rounded-lg border border-gray-300 py-2.5 pl-10 pr-10 text-base sm:text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
                     placeholder="••••••••"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
               </div>
               {error && <p className="text-sm text-red-600">{error}</p>}
