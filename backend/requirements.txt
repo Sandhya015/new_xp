@@ -1,9 +1,12 @@
 # XpertIntern Backend — Python 3.11+ (per Tech Stack Guide)
 flask>=3.0.0
 flask-cors>=4.0.0
+flask-jwt-extended>=4.6.0
 python-dotenv>=1.0.0
-# Auth (Phase 1): Flask-JWT-Extended, bcrypt
-# DB: pymongo or MongoEngine
+pymongo[srv]>=4.6.0
+bcrypt>=4.1.0
+# Lambda deployment (serverless-wsgi)
+serverless-wsgi>=3.0.0
 # Payment: razorpay
 # Email: sendgrid
 # Excel: openpyxl

@@ -1,0 +1,55 @@
+# XpertIntern API — AWS Lambda + API Gateway (serverless, pay-per-request, no always-on)
+# Deploy: from backend/ run  npx serverless deploy --stage dev|staging|production
+service: xpertintern-api
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: ap-south-1
+  stage: ${opt:stage, 'dev'}
+  environment:
+    FLASK_ENV: ${self:provider.stage}
+    MONGODB_URI: ${env:MONGODB_URI, ''}
+    SECRET_KEY: ${env:SECRET_KEY, ''}
+    JWT_SECRET_KEY: ${env:JWT_SECRET_KEY, ''}
+    CORS_ORIGINS: ${env:CORS_ORIGINS, 'http://localhost:5173'}
+    CORS_ORIGIN: ${env:CORS_ORIGIN, 'http://localhost:5173'}
+  # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
+  # vpc: ...
+
+plugins:
+  - serverless-wsgi
+  - serverless-python-requirements
+
+custom:
+  wsgi:
+    app: app_wsgi.app
+  pythonRequirements:
+    slim: true
+    # Use dockerizePip: true if you hit platform issues (e.g. building on Mac for Lambda Linux)
+    noDeploy:
+      - pytest
+      - pytest-cov
+
+functions:
+  api:
+    handler: wsgi_handler.handler
+    timeout: 30
+    memorySize: 256
+    events:
+      - http:
+          path: /
+          method: ANY
+          cors:
+            origin: ${env:CORS_ORIGIN, 'http://localhost:5173'}
+            headers: Content-Type, Authorization
+            allowCredentials: true
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors:
+            origin: ${env:CORS_ORIGIN, 'http://localhost:5173'}
+            headers: Content-Type, Authorization
+            allowCredentials: true
+
+# No scheduled events / cron — nothing runs in a loop; Lambda only on request

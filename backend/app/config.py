@@ -8,14 +8,17 @@ from typing import List
 class Config:
     """Base config."""
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY", "dev-jwt-secret-change-in-production")
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 86400))  # 24h default
     CORS_ORIGINS: List[str] = []
-    MONGODB_URI = os.environ.get("MONGODB_URI", "")
+    MONGODB_URI = os.environ.get("MONGODB_URI", "") or os.environ.get("MONGO_URI", "")
 
 
 class DevelopmentConfig(Config):
     ENV = "development"
     DEBUG = True
-    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+    _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    CORS_ORIGINS = [o.strip() for o in _origins.split(",") if o.strip()] or ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 class StagingConfig(Config):
