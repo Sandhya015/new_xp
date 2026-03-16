@@ -15,14 +15,17 @@ import { Login } from './pages/public/Login'
 import { Register } from './pages/public/Register'
 import { ForgotPassword } from './pages/public/ForgotPassword'
 import { Dashboard } from './pages/student/Dashboard'
+import { StudentTraining } from './pages/student/StudentTraining'
+import { StudentTrainingDetail } from './pages/student/StudentTrainingDetail'
 import { MyCourses } from './pages/student/MyCourses'
 import { CourseContent } from './pages/student/CourseContent'
+import { Internships } from './pages/student/Internships'
+import { AppliedInternships } from './pages/student/AppliedInternships'
 import { Invoices } from './pages/student/Invoices'
 import { Notifications } from './pages/student/Notifications'
 import { Certificates } from './pages/student/Certificates'
 import { Profile } from './pages/student/Profile'
 import { Support } from './pages/student/Support'
-import { Internships } from './pages/student/Internships'
 import { CompanyDashboard } from './pages/company/CompanyDashboard'
 import { CompanyProfile } from './pages/company/CompanyProfile'
 import { PostInternship } from './pages/company/PostInternship'
@@ -31,16 +34,21 @@ import { Applicants } from './pages/company/Applicants'
 import { SelectedCandidates } from './pages/company/SelectedCandidates'
 import { Reports } from './pages/company/Reports'
 import { CompanySupport } from './pages/company/CompanySupport'
+import { CompanyNotifications } from './pages/company/CompanyNotifications'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { CourseManager } from './pages/admin/CourseManager'
 import { StudentList } from './pages/admin/StudentList'
 import { CertificateUpload } from './pages/admin/CertificateUpload'
 import { LeadTracker } from './pages/admin/LeadTracker'
 import { PaymentList } from './pages/admin/PaymentList'
-import { OfferLetters } from './pages/admin/OfferLetters'
 import { SystemSettings } from './pages/admin/SystemSettings'
 import { CompanyManagement } from './pages/admin/CompanyManagement'
+import { InternshipManagement } from './pages/admin/InternshipManagement'
+import { AdminReports } from './pages/admin/AdminReports'
+import { AdminNotifications } from './pages/admin/AdminNotifications'
+import { AdminManagement } from './pages/admin/AdminManagement'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
 
 function App() {
   return (
@@ -49,14 +57,17 @@ function App() {
       {/* Student dashboard: no navbar/footer */}
       <Route path="/dashboard" element={<StudentLayout />}>
         <Route index element={<Dashboard />} />
-        <Route path="courses" element={<MyCourses />} />
-        <Route path="courses/:id" element={<CourseContent />} />
-        <Route path="invoices" element={<Invoices />} />
-        <Route path="notifications" element={<Notifications />} />
+        <Route path="training" element={<StudentTraining />} />
+        <Route path="training/:id" element={<StudentTrainingDetail />} />
+        <Route path="internships" element={<Internships />} />
+        <Route path="my-courses" element={<MyCourses />} />
+        <Route path="my-courses/:id" element={<CourseContent />} />
+        <Route path="applied-internships" element={<AppliedInternships />} />
         <Route path="certificates" element={<Certificates />} />
+        <Route path="payments" element={<Invoices />} />
+        <Route path="notifications" element={<Notifications />} />
         <Route path="profile" element={<Profile />} />
         <Route path="support" element={<Support />} />
-        <Route path="internships" element={<Internships />} />
       </Route>
       {/* Company dashboard: no navbar/footer */}
       <Route path="/company" element={<CompanyLayout />}>
@@ -67,6 +78,7 @@ function App() {
         <Route path="applicants" element={<Applicants />} />
         <Route path="selected" element={<SelectedCandidates />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="notifications" element={<CompanyNotifications />} />
         <Route path="support" element={<CompanySupport />} />
       </Route>
       {/* Admin panel: no navbar/footer */}
@@ -77,9 +89,12 @@ function App() {
         <Route path="certificates" element={<CertificateUpload />} />
         <Route path="leads" element={<LeadTracker />} />
         <Route path="payments" element={<PaymentList />} />
-        <Route path="offer-letters" element={<OfferLetters />} />
-        <Route path="settings" element={<SystemSettings />} />
         <Route path="companies" element={<CompanyManagement />} />
+        <Route path="internships" element={<InternshipManagement />} />
+        <Route path="reports" element={<AdminReports />} />
+        <Route path="notifications" element={<AdminNotifications />} />
+        <Route path="admins" element={<AdminManagement />} />
+        <Route path="settings" element={<SystemSettings />} />
       </Route>
       <Route path="/*" element={
         <Layout>
@@ -95,6 +110,11 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/terms" element={<LegalPlaceholder title="Terms and Conditions" />} />
+            <Route path="/privacy" element={<LegalPlaceholder title="Privacy Policy" />} />
+            <Route path="/refund" element={<LegalPlaceholder title="Refund & Cancellation Policy" />} />
+            <Route path="/certificate-policy" element={<LegalPlaceholder title="Certificate Authenticity Policy" />} />
+            <Route path="/disclaimer" element={<LegalPlaceholder title="Disclaimer" />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Layout>

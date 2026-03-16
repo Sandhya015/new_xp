@@ -1,21 +1,42 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Lock, Mail } from 'lucide-react'
+import { authService } from '@/services/authService'
+import { useAuthStore } from '@/store/authStore'
 
 export function AdminLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { setToken, setUser } = useAuthStore()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: call admin auth API, then redirect to /admin
-    navigate('/admin')
+    setError('')
+    setLoading(true)
+    try {
+      const data = await authService.login(email, password)
+      if (data.user?.role !== 'admin') {
+        setError('Admin access only. Use the main site to sign in as student or company.')
+        return
+      }
+      setToken(data.token)
+      setUser(data.user)
+      navigate('/admin')
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : 'Login failed'
+      setError(msg || 'Invalid email or password')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row min-w-0">
-      {/* Left: branding (admin dashboard style) */}
       <div className="bg-brand-navy text-white p-6 sm:p-8 md:p-12 md:w-2/5 flex flex-col justify-center min-w-0">
         <div className="flex items-center gap-3 mb-6 sm:mb-8">
           <img src="/logo.png" alt="XpertIntern" className="h-14 sm:h-16 md:h-20 w-auto object-contain" />
@@ -25,7 +46,6 @@ export function AdminLogin() {
         <p className="mt-2 text-gray-300 text-xs sm:text-sm">Sign in to manage trainings, certificates, and students.</p>
       </div>
 
-      {/* Right: form */}
       <div className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8 bg-gray-50 min-w-0">
         <div className="w-full max-w-md min-w-0">
           <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 md:p-8 shadow-sm">
@@ -62,11 +82,13 @@ export function AdminLogin() {
                   />
                 </div>
               </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
               <button
                 type="submit"
-                className="w-full rounded-lg bg-brand-accent py-2.5 min-h-[44px] text-sm font-semibold text-white hover:bg-primary-600 transition"
+                disabled={loading}
+                className="w-full rounded-lg bg-brand-accent py-2.5 min-h-[44px] text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-50"
               >
-                Sign in
+                {loading ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
             <p className="mt-6 text-center text-sm text-gray-500">

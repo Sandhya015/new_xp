@@ -1,18 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
+import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
 
 type LoginForm = { email: string; password: string }
 type Tab = 'student' | 'company'
-
-/** Derive a display name from email (e.g. "john.doe@example.com" -> "John Doe") for mock auth */
-function nameFromEmail(email: string): string {
-  const local = email.split('@')[0] ?? 'Student'
-  const parts = local.split(/[._-]/).filter(Boolean)
-  if (parts.length === 0) return 'Student'
-  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ')
-}
 
 export function Login() {
   const [tab, setTab] = useState<Tab>('student')
@@ -26,18 +19,16 @@ export function Login() {
     setError(null)
     setSubmitting(true)
     try {
-      // Mock auth until backend is wired: accept any email + password and sign in
-      const name = nameFromEmail(data.email)
-      setUser({
-        id: 'mock-user-id',
-        name,
-        email: data.email,
-        role: tab === 'student' ? 'student' : 'company',
-      })
-      setToken('mock-token')
-      navigate(tab === 'student' ? '/dashboard' : '/company', { replace: true })
-    } catch {
-      setError('Sign in failed. Please try again.')
+      const res = await authService.login(data.email, data.password)
+      setToken(res.token)
+      setUser(res.user)
+      if (res.user?.role === 'company') navigate('/company', { replace: true })
+      else navigate('/dashboard', { replace: true })
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : 'Sign in failed'
+      setError(msg || 'Invalid email or password')
     } finally {
       setSubmitting(false)
     }
@@ -47,7 +38,6 @@ export function Login() {
     <div className="bg-gray-50 flex justify-center px-4 py-8 sm:py-10 min-w-0">
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-gray-200/80 bg-white shadow-xl overflow-hidden">
-          {/* Tabs */}
           <div className="flex border-b border-gray-200">
             <button
               type="button"
@@ -97,17 +87,15 @@ export function Login() {
                 {errors.password && <p className="mt-1 text-sm text-error-red">{errors.password.message}</p>}
               </div>
               <div className="flex justify-end">
-                <Link to="/forgot-password" className="text-sm font-medium text-brand-accent hover:text-primary-700 hover:underline transition">
+                <Link to="/forgot-password" className="text-sm font-medium text-brand-accent hover:underline transition">
                   Forgot Password?
                 </Link>
               </div>
-              {error && (
-                <p className="text-sm text-error-red">{error}</p>
-              )}
+              {error && <p className="text-sm text-red-600">{error}</p>}
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full rounded-lg bg-brand-accent py-2.5 min-h-[44px] text-sm font-semibold text-white hover:bg-primary-600 focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 transition shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                className="w-full rounded-lg bg-brand-accent py-2.5 min-h-[44px] text-sm font-semibold text-white focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 transition shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {submitting ? 'Signing in…' : 'Sign in'}
               </button>

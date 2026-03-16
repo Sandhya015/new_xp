@@ -4,8 +4,8 @@ import { Menu, X } from 'lucide-react'
 
 const navLinks = [
   { to: '/', label: 'Home' },
-  { to: '/training', label: 'Trainings' },
-  { to: '/internship', label: 'Internships' },
+  { to: '/training', label: 'Training' },
+  { to: '/internship', label: 'Internship' },
   { to: '/verify', label: 'Certificate Verification' },
   { to: '/about', label: 'About Us' },
   { to: '/contact', label: 'Contact Us' },
@@ -47,7 +47,7 @@ export function Navbar() {
                 to="/register"
                 className="rounded-lg bg-brand-accent px-3 lg:px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 transition shadow-sm min-h-[44px] md:min-h-0 inline-flex items-center justify-center"
               >
-                Sign Up
+                Register
               </Link>
             </div>
           </div>
@@ -76,7 +76,7 @@ export function Navbar() {
             ))}
             <div className="pt-2 flex gap-2 px-4">
               <Link to="/login" className="flex-1 rounded-lg border-2 border-brand-accent py-3 min-h-[44px] flex items-center justify-center text-sm font-semibold text-brand-accent" onClick={() => setOpen(false)}>Login</Link>
-              <Link to="/register" className="flex-1 rounded-lg bg-brand-accent py-3 min-h-[44px] flex items-center justify-center text-sm font-semibold text-white" onClick={() => setOpen(false)}>Sign Up</Link>
+              <Link to="/register" className="flex-1 rounded-lg bg-brand-accent py-3 min-h-[44px] flex items-center justify-center text-sm font-semibold text-white" onClick={() => setOpen(false)}>Register</Link>
             </div>
           </div>
         )}

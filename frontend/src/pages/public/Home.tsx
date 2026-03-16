@@ -10,14 +10,12 @@ import {
   UserPlus,
   Search,
   BookOpen,
-  Rocket,
   Laptop,
   Users,
   Layers,
   Check,
   GraduationCap,
   ScrollText,
-  Phone,
   Send,
 } from 'lucide-react'
 import { CourseCard } from '@/components/CourseCard'
@@ -82,14 +80,32 @@ const whyUsCards = [
   { title: 'Affordable Fees', desc: 'High-quality training at student-friendly pricing with flexible options.', Icon: IndianRupee, color: 'text-error-red' },
 ]
 
-const universities = ['BEU', 'SBTE', 'JUT', 'AKTU', 'Patna University', 'Patliputra University', 'Magadh University', 'Nalanda Open University', 'Munger University', 'LNMU', 'Purnea University', 'VKS University']
+const universities = [
+  'BEU — Bihar Engineering University',
+  'SBTE — State Board of Technical Education',
+  'JUT — Jharkhand University of Technology',
+  'AKTU — Dr. A.P.J. Abdul Kalam Technical Univ.',
+  'Patna University',
+  'Patliputra University',
+  'Munger University',
+  'Lalit Narayan Mithila University',
+  'Veer Kunwar Singh University',
+  'Tilka Majhi Bhagalpur University',
+  'Bhupendra Narayan Mandal University',
+  'Jai Prakash University',
+  'Magadh University',
+  'Purnea University',
+  'Nalanda Open University',
+  'Babasaheb Bhimrao Ambedkar Bihar University',
+]
 
 const steps = [
-  { num: '01', title: 'Register', desc: 'Create your free account with your university details', Icon: UserPlus },
-  { num: '02', title: 'Choose Training', desc: 'Browse and select the right training for your branch', Icon: Search },
-  { num: '03', title: 'Complete Training', desc: 'Attend sessions, complete assignments & quizzes', Icon: BookOpen },
-  { num: '04', title: 'Get Certificate', desc: 'Receive verified QR-coded certificate instantly', Icon: Award },
-  { num: '05', title: 'Apply Internship', desc: 'Apply to partner companies and launch your career', Icon: Rocket },
+  { num: '01', title: 'Register', desc: 'Create your free account on the XpertIntern platform', Icon: UserPlus },
+  { num: '02', title: 'Choose Program', desc: 'Browse and select a training or internship program', Icon: Search },
+  { num: '03', title: 'Enroll / Apply', desc: 'Enroll in training or apply for an internship', Icon: BookOpen },
+  { num: '04', title: 'Complete Program', desc: 'Complete the training or internship over the chosen duration', Icon: Check },
+  { num: '05', title: 'Get Certified', desc: 'Receive your certificate upon successful completion', Icon: Award },
+  { num: '06', title: 'Verify Certificate', desc: 'Certificate can be verified online via ID or QR Code', Icon: Search },
 ]
 
 const trainingModes = [
@@ -104,11 +120,18 @@ const complianceCards = [
   { title: 'NEP 2020', desc: 'Structured as per National Education Policy 2020 framework', Icon: Building2 },
 ]
 
+const technicalBranches = ['Computer Science Engineering (CSE)', 'Civil Engineering', 'Electrical Engineering', 'Electronics & Communication Engineering (ECE)', 'Mechanical Engineering', 'Information Technology (IT)']
+const nonTechnicalCourses = ['BA — Bachelor of Arts', 'BSc — Bachelor of Science', 'BCom — Bachelor of Commerce', 'BBA — Bachelor of Business Administration', 'BCA — Bachelor of Computer Applications']
+
 const programsPreview = [
   { id: '1', title: 'Full Stack Web Development', duration: '4 Weeks', tag: 'MERN Stack' },
   { id: '2', title: 'Artificial Intelligence & ML', duration: '4 Weeks', tag: 'AI/ML' },
   { id: '3', title: 'Data Science', duration: '4 Weeks', tag: 'Python & Analytics' },
 ]
+
+const INLINE_CONTACT_COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
+const INLINE_CONTACT_STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
+const QUERY_FOR_OPTIONS = ['Training', 'Internship', 'Certificate', 'General']
 
 const testimonials = [
   { name: 'Rahul Kumar', role: 'B.Tech CSE', quote: 'This training helped me gain real project experience and I got an internship after completing it. XpertIntern changed my career path!' },
@@ -118,11 +141,24 @@ const testimonials = [
 
 export function Home() {
   const [heroVisible, setHeroVisible] = useState(false)
+  const [inlineContact, setInlineContact] = useState({
+    fullName: '',
+    contactNumber: '',
+    university: '',
+    collegeName: '',
+    semester: '',
+    course: '',
+    stream: '',
+    queryFor: '',
+    message: '',
+  })
+  const [inlineContactSubmitted, setInlineContactSubmitted] = useState(false)
   const whoRef = useInView()
   const whyRef = useInView()
   const reachRef = useInView()
   const howRef = useInView()
   const modesRef = useInView()
+  const branchesRef = useInView()
   const programsRef = useInView()
   const complianceRef = useInView()
   const ctaRef = useInView()
@@ -130,6 +166,12 @@ export function Home() {
   const subscribeRef = useInView()
 
   useEffect(() => setHeroVisible(true), [])
+
+  const showStream = inlineContact.course === 'B.Tech' || inlineContact.course === 'Diploma'
+  const handleInlineContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setInlineContactSubmitted(true)
+  }
 
   return (
     <>
@@ -147,8 +189,8 @@ export function Home() {
             Skill-based training and industry internships as per AICTE and UGC guidelines. We provide structured programs for technical and non-technical students across India.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-wrap gap-3 sm:gap-4">
-            <Link to="/training" className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-lg hover:bg-primary-600 hover:scale-105 transition min-h-[44px]">Explore Trainings</Link>
-            <Link to="/internship" className="inline-flex items-center justify-center rounded-lg border-2 border-white/40 bg-white/5 px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white backdrop-blur hover:bg-white/10 hover:scale-105 transition min-h-[44px]">Apply for Internship</Link>
+            <Link to="/training" className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-lg hover:bg-primary-600 hover:scale-105 transition min-h-[44px]">Explore Training</Link>
+            <Link to="/internship" className="inline-flex items-center justify-center rounded-lg border-2 border-white/40 bg-white/5 px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white backdrop-blur hover:bg-white/10 hover:scale-105 transition min-h-[44px]">Explore Internship</Link>
           </div>
           <div className="mt-10 sm:mt-16 grid grid-cols-2 gap-4 sm:gap-8 sm:grid-cols-4">
             {stats.map(({ end, suffix, label }) => (
@@ -173,24 +215,14 @@ export function Home() {
       {/* About Us — Who We Are: stats card left, content right */}
       <section ref={whoRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-24 about-reveal ${whoRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-center">
-            {/* Left: blue gradient stats card */}
-            <div className="rounded-2xl bg-gradient-to-b from-primary-700 to-brand-navy p-6 sm:p-8 lg:p-10 text-white shadow-xl order-2 lg:order-1 transition-transform duration-300 hover:scale-[1.02]">
-              <div className="flex justify-center mb-6 sm:mb-8">
-                <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl bg-white/10">
-                  <Building2 className="h-8 w-8 sm:h-10 sm:w-10 text-white" />
-                </div>
-              </div>
-              <div className="flex justify-around gap-4 sm:gap-6">
-                <div className="text-center">
-                  <p className="text-3xl sm:text-4xl font-bold">50,000+</p>
-                  <p className="mt-1 text-xs sm:text-sm text-white/90">Students</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl sm:text-4xl font-bold">20+</p>
-                  <p className="mt-1 text-xs sm:text-sm text-white/90">Universities</p>
-                </div>
-              </div>
+          <div className="grid gap-8 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-stretch">
+            {/* Left: About Us illustration — same height as text column */}
+            <div className="order-2 lg:order-1 min-w-0 h-full min-h-[300px] sm:min-h-[360px] flex items-center justify-center">
+              <img
+                src="/images/about-us-section.png"
+                alt="About XpertIntern — students, mentor, and platform reach across India"
+                className="max-w-full w-full h-full min-h-[280px] object-contain object-center rounded-2xl shadow-lg"
+              />
             </div>
             {/* Right: Who We Are content */}
             <div className="order-1 lg:order-2 min-w-0">
@@ -263,7 +295,7 @@ export function Home() {
         </div>
       </section>
 
-      {/* How It Works — 5 steps with numbered badges and icons */}
+      {/* How It Works — 6 steps with numbered badges and icons */}
       <section ref={howRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${howRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-white border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Simple Process</span>
@@ -330,6 +362,37 @@ export function Home() {
         </div>
       </section>
 
+      {/* Branches & Streams Covered — doc 4.2.8 */}
+      <section ref={branchesRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${branchesRef.inView ? 'home-stagger-inview' : ''}`}>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
+          <span className="inline-block rounded-full bg-white border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Programs</span>
+          <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">Branches & Streams Covered</h2>
+          <p className="mt-2 text-sm sm:text-base text-slate-gray">Technical and non-technical courses for B.Tech, Diploma, and graduation streams.</p>
+          <div className="mt-8 sm:mt-12 grid gap-6 sm:grid-cols-2">
+            <div className="home-stagger-card rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm">
+              <h3 className="text-base font-semibold text-brand-navy sm:text-lg">Technical (B.Tech / Diploma)</h3>
+              <ul className="mt-3 space-y-1.5 text-sm text-slate-gray">
+                {technicalBranches.map((b) => (
+                  <li key={b} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-success-green flex-shrink-0" /> {b}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="home-stagger-card rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm">
+              <h3 className="text-base font-semibold text-brand-navy sm:text-lg">Non-Technical</h3>
+              <ul className="mt-3 space-y-1.5 text-sm text-slate-gray">
+                {nonTechnicalCourses.map((c) => (
+                  <li key={c} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-success-green flex-shrink-0" /> {c}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Popular Programs */}
       <section ref={programsRef.ref as React.RefObject<HTMLElement>} className={`bg-brand-light-bg py-12 sm:py-16 lg:py-20 ${programsRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
@@ -385,27 +448,43 @@ export function Home() {
               </ul>
             </div>
             <div className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm min-w-0 transition-shadow hover:shadow-md">
-              <form className="space-y-3 sm:space-y-4" onSubmit={(e) => e.preventDefault()}>
-                <input type="text" placeholder="Full Name *" className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm" />
-                <input type="tel" placeholder="Phone Number *" className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm" />
-                <select className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray">
-                  <option>Course Interested *</option>
-                  <option>Web Development</option>
-                  <option>Python Programming</option>
-                  <option>Data Science</option>
-                  <option>Digital Marketing</option>
-                  <option>Other</option>
-                </select>
-                <select className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray">
-                  <option>Preferred Time</option>
-                  <option>Morning (9AM - 12PM)</option>
-                  <option>Afternoon (12PM - 3PM)</option>
-                  <option>Evening (3PM - 6PM)</option>
-                </select>
-                <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-navy py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition">
-                  <Phone className="h-4 w-4" /> Request Call Back
-                </button>
-              </form>
+              {inlineContactSubmitted ? (
+                <p className="rounded-lg border border-success-green bg-green-50 p-4 text-sm text-brand-navy">
+                  Thank you! Your query has been received. Our team will contact you within 24–48 hours.
+                </p>
+              ) : (
+                <form className="space-y-3 sm:space-y-4" onSubmit={handleInlineContactSubmit}>
+                  <input type="text" required placeholder="Full Name *" value={inlineContact.fullName} onChange={(e) => setInlineContact((c) => ({ ...c, fullName: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  <input type="tel" required placeholder="Contact Number (10-digit) *" maxLength={10} value={inlineContact.contactNumber} onChange={(e) => setInlineContact((c) => ({ ...c, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 10) }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  <select required value={inlineContact.university} onChange={(e) => setInlineContact((c) => ({ ...c, university: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">University *</option>
+                    {universities.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <input type="text" required placeholder="College Name *" value={inlineContact.collegeName} onChange={(e) => setInlineContact((c) => ({ ...c, collegeName: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  <select required value={inlineContact.semester} onChange={(e) => setInlineContact((c) => ({ ...c, semester: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">Semester *</option>
+                    {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <select required value={inlineContact.course} onChange={(e) => setInlineContact((c) => ({ ...c, course: e.target.value, stream: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">Course *</option>
+                    {INLINE_CONTACT_COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  {showStream && (
+                    <select required value={inlineContact.stream} onChange={(e) => setInlineContact((c) => ({ ...c, stream: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                      <option value="">Stream *</option>
+                      {INLINE_CONTACT_STREAMS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  )}
+                  <select required value={inlineContact.queryFor} onChange={(e) => setInlineContact((c) => ({ ...c, queryFor: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">Query For *</option>
+                    {QUERY_FOR_OPTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                  <textarea placeholder="Message / Query (optional)" rows={3} value={inlineContact.message} onChange={(e) => setInlineContact((c) => ({ ...c, message: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-navy py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition">
+                    <Send className="h-4 w-4" /> Submit
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         </div>

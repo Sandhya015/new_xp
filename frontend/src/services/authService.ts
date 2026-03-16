@@ -1,6 +1,7 @@
 import axios from 'axios'
+import { useAuthStore } from '@/store/authStore'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:5000'
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -8,16 +9,20 @@ const api = axios.create({
   withCredentials: true,
 })
 
-// TODO: add response interceptor to refresh JWT and attach token to requests
-// api.interceptors.response.use(..., handle 401 refresh)
+// Attach JWT to requests when present
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
 export const authService = {
   async login(email: string, password: string) {
     const { data } = await api.post('/api/auth/login', { email, password })
     return data
   },
-  async register(name: string, email: string, password: string, mobile?: string) {
-    const { data } = await api.post('/api/auth/register', { name, email, password, mobile })
+  async register(body: { name: string; email: string; password: string; mobile?: string; role?: string; hrName?: string }) {
+    const { data } = await api.post('/api/auth/register', body)
     return data
   },
   async me() {

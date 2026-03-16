@@ -3,6 +3,17 @@ import { Link } from 'react-router-dom'
 import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube } from 'lucide-react'
 import { Notification } from '@/components/Notification'
 
+const UNIVERSITIES = [
+  'BEU — Bihar Engineering University', 'SBTE — State Board of Technical Education', 'JUT — Jharkhand University of Technology',
+  'AKTU — Dr. A.P.J. Abdul Kalam Technical Univ.', 'Patna University', 'Patliputra University', 'Munger University',
+  'Lalit Narayan Mithila University', 'Veer Kunwar Singh University', 'Tilka Majhi Bhagalpur University',
+  'Bhupendra Narayan Mandal University', 'Jai Prakash University', 'Magadh University', 'Purnea University',
+  'Nalanda Open University', 'Babasaheb Bhimrao Ambedkar Bihar University',
+]
+const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
+const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
+const QUERY_FOR_OPTIONS = ['Training', 'Internship', 'Certificate', 'General']
+
 export function Contact() {
   const [submitted, setSubmitted] = useState(false)
   const [form, setForm] = useState({
@@ -10,6 +21,10 @@ export function Contact() {
     email: '',
     phone: '',
     university: '',
+    semester: '',
+    course: '',
+    stream: '',
+    queryFor: '',
     message: '',
   })
 
@@ -178,33 +193,99 @@ export function Contact() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label htmlFor="contact-phone" className="block text-sm font-medium text-gray-700">
+                      Contact Number *
+                    </label>
+                    <input
+                      id="contact-phone"
+                      type="tel"
+                      required
+                      maxLength={10}
+                      placeholder="10-digit mobile number"
+                      value={form.phone}
+                      onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                      className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="contact-university" className="block text-sm font-medium text-gray-700">
+                      University *
+                    </label>
+                    <select
+                      id="contact-university"
+                      required
+                      value={form.university}
+                      onChange={(e) => setForm({ ...form, university: e.target.value })}
+                      className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                    >
+                      <option value="">Select University</option>
+                      {UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label htmlFor="contact-phone" className="block text-sm font-medium text-gray-700">
-                        Phone
+                      <label htmlFor="contact-semester" className="block text-sm font-medium text-gray-700">
+                        Semester *
                       </label>
-                      <input
-                        id="contact-phone"
-                        type="tel"
-                        placeholder="+91 XXXXXXXXXX"
-                        value={form.phone}
-                        onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                      />
+                      <select
+                        id="contact-semester"
+                        required
+                        value={form.semester}
+                        onChange={(e) => setForm({ ...form, semester: e.target.value })}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select Semester</option>
+                        {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
                     </div>
                     <div>
-                      <label htmlFor="contact-university" className="block text-sm font-medium text-gray-700">
-                        University
+                      <label htmlFor="contact-course" className="block text-sm font-medium text-gray-700">
+                        Course *
                       </label>
-                      <input
-                        id="contact-university"
-                        type="text"
-                        placeholder="Your university name"
-                        value={form.university}
-                        onChange={(e) => setForm({ ...form, university: e.target.value })}
-                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                      />
+                      <select
+                        id="contact-course"
+                        required
+                        value={form.course}
+                        onChange={(e) => setForm({ ...form, course: e.target.value, stream: '' })}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select Course</option>
+                        {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </div>
+                  </div>
+                  {(form.course === 'B.Tech' || form.course === 'Diploma') && (
+                    <div>
+                      <label htmlFor="contact-stream" className="block text-sm font-medium text-gray-700">
+                        Stream *
+                      </label>
+                      <select
+                        id="contact-stream"
+                        required
+                        value={form.stream}
+                        onChange={(e) => setForm({ ...form, stream: e.target.value })}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select Stream</option>
+                        {STREAMS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label htmlFor="contact-query" className="block text-sm font-medium text-gray-700">
+                      Query For *
+                    </label>
+                    <select
+                      id="contact-query"
+                      required
+                      value={form.queryFor}
+                      onChange={(e) => setForm({ ...form, queryFor: e.target.value })}
+                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                    >
+                      <option value="">Select</option>
+                      {QUERY_FOR_OPTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label htmlFor="contact-message" className="block text-sm font-medium text-gray-700">

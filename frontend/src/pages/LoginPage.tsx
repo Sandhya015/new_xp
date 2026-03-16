@@ -1,14 +1,34 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
+import { authService } from '@/services/authService'
+import { useAuthStore } from '@/store/authStore'
 
 export function LoginPage() {
+  const navigate = useNavigate()
+  const { setToken, setUser } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: call auth API when backend is wired
-    console.log({ email, password })
+    setError('')
+    setLoading(true)
+    try {
+      const data = await authService.login(email, password)
+      setToken(data.token)
+      setUser(data.user)
+      if (data.user?.role === 'company') navigate('/company')
+      else navigate('/dashboard')
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : 'Login failed'
+      setError(msg || 'Invalid email or password')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -40,11 +60,13 @@ export function LoginPage() {
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
             />
           </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"
-            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+            disabled={loading}
+            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-50"
           >
-            Sign in
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-gray-600">
@@ -52,7 +74,6 @@ export function LoginPage() {
           <Link to="/register" className="font-semibold text-brand-accent hover:underline">Register</Link>
         </p>
       </div>
-      <p className="mt-4 text-center text-xs text-gray-500">Auth will connect to backend when API is ready.</p>
     </div>
   )
 }

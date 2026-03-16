@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Bell, CheckCheck } from 'lucide-react'
 
 /**
- * Student Dashboard — Notifications (Part 3A §10). Filters + list. API later.
+ * Company Dashboard — Notifications (Part 4A §10). Filter tabs + list. API later.
  */
-const FILTERS = ['All', 'Unread', 'Training', 'Internship', 'Certificates', 'Payments', 'System']
+const FILTERS = ['All', 'Unread', 'Applications', 'Listings', 'Selected', 'System', 'Security']
 
-export function Notifications() {
+export function CompanyNotifications() {
   const [activeFilter, setActiveFilter] = useState('All')
 
   return (
@@ -40,7 +40,7 @@ export function Notifications() {
         <div className="p-6 text-center text-slate-gray">
           <Bell className="mx-auto h-10 w-10 text-gray-300" />
           <p className="mt-2 font-medium text-gray-600">No notifications yet</p>
-          <p className="mt-1 text-sm">Activity and updates will appear here when connected to the backend.</p>
+          <p className="mt-1 text-sm">Application and listing alerts will appear here when connected to the backend.</p>
         </div>
       </div>
     </div>

@@ -1,16 +1,21 @@
 import { Link } from 'react-router-dom'
-import { Mail, Phone, MapPin, ChevronRight, Linkedin, Instagram, Facebook, Youtube } from 'lucide-react'
+import { Mail, Phone, MapPin, ChevronRight, Linkedin, Instagram, Facebook, Youtube, Twitter } from 'lucide-react'
 
 const quickLinks = [
-  { to: '/training', label: 'Trainings' },
-  { to: '/internship', label: 'Internships' },
+  { to: '/', label: 'Home' },
+  { to: '/training', label: 'Training' },
+  { to: '/internship', label: 'Internship' },
   { to: '/verify', label: 'Certificate Verification' },
-  { to: '/login', label: 'Student Login' },
+  { to: '/about', label: 'About Us' },
+  { to: '/contact', label: 'Contact Us' },
+  { to: '/login', label: 'Register / Login' },
 ]
 const legalLinks = [
-  { to: '/terms', label: 'Terms & Conditions' },
   { to: '/privacy', label: 'Privacy Policy' },
-  { to: '/refund', label: 'Refund Policy' },
+  { to: '/terms', label: 'Terms and Conditions' },
+  { to: '/refund', label: 'Refund & Cancellation Policy' },
+  { to: '/certificate-policy', label: 'Certificate Authenticity Policy' },
+  { to: '/disclaimer', label: 'Disclaimer' },
 ]
 const supportLinks = [
   { to: '/contact', label: 'Contact Us' },
@@ -29,8 +34,8 @@ export function Footer() {
             </Link>
             <p className="mt-1.5 text-sm leading-relaxed line-clamp-2 sm:line-clamp-none">Training and internship platform providing university-based programs across India.</p>
             <div className="mt-3 space-y-1.5 sm:space-y-2 text-sm break-words">
-              <a href="mailto:info@xpertintern.com" className="flex items-center gap-2 hover:text-white transition break-all">
-                <Mail className="h-4 w-4 flex-shrink-0" /> info@xpertintern.com
+              <a href="mailto:support@xpertintern.com" className="flex items-center gap-2 hover:text-white transition break-all">
+                <Mail className="h-4 w-4 flex-shrink-0" /> support@xpertintern.com
               </a>
               <a href="tel:+919876543210" className="flex items-center gap-2 hover:text-white transition">
                 <Phone className="h-4 w-4 flex-shrink-0" /> +91 9876543210
@@ -84,11 +89,13 @@ export function Footer() {
             </div>
             <div>
               <h3 className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-white">Follow Us</h3>
-              <div className="mt-1.5 sm:mt-2.5 flex gap-2">
+              <div className="mt-1.5 sm:mt-2.5 flex flex-wrap gap-2">
                 <a href="#" className="text-gray-500 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-5 w-5" /></a>
                 <a href="#" className="text-gray-500 hover:text-white transition" aria-label="Instagram"><Instagram className="h-5 w-5" /></a>
-                <a href="#" className="text-gray-500 hover:text-white transition" aria-label="Facebook"><Facebook className="h-5 w-5" /></a>
                 <a href="#" className="text-gray-500 hover:text-white transition" aria-label="YouTube"><Youtube className="h-5 w-5" /></a>
+                <a href="#" className="text-gray-500 hover:text-white transition" aria-label="Facebook"><Facebook className="h-5 w-5" /></a>
+                <a href="#" className="text-gray-500 hover:text-white transition" aria-label="Twitter/X"><Twitter className="h-5 w-5" /></a>
+                <a href="https://wa.me/919876543210" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-white transition" aria-label="WhatsApp">WhatsApp</a>
               </div>
             </div>
           </div>

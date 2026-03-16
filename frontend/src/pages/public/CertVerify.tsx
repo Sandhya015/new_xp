@@ -3,12 +3,17 @@ import { Search, QrCode, Fingerprint, Database } from 'lucide-react'
 
 export function CertVerify() {
   const [certId, setCertId] = useState('')
-  const [result, setResult] = useState<{ valid: boolean; message: string } | null>(null)
+  type VerifyResult =
+  | { valid: true; studentName: string; programName: string; university: string; completionDate: string; certificateId: string }
+  | { valid: false; message: string }
+  | null
+const [result, setResult] = useState<VerifyResult>(null)
   const [dragOver, setDragOver] = useState(false)
 
   const handleVerify = (e: React.FormEvent) => {
     e.preventDefault()
     // TODO: GET /api/certificates/verify/:certNo when backend is ready
+    if (!certId.trim()) return
     setResult({ valid: false, message: 'Verification API not connected yet. Enter certificate ID to test UI.' })
   }
 
@@ -120,12 +125,37 @@ export function CertVerify() {
 
           {result && (
             <div
-              className={`mt-6 rounded-lg border p-4 ${
-                result.valid ? 'border-success-green bg-green-50' : 'border-gray-200 bg-gray-50'
+              className={`mt-6 rounded-xl border p-4 sm:p-6 ${
+                result.valid ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'
               }`}
             >
-              <p className="font-medium">{result.valid ? 'Certificate is valid' : 'Verification result'}</p>
-              <p className="mt-1 text-sm text-gray-600">{result.message}</p>
+              {result.valid ? (
+                <>
+                  <div className="flex items-center gap-2 text-green-800">
+                    <span className="inline-flex items-center rounded-full bg-green-200 px-2.5 py-0.5 text-sm font-semibold">Valid</span>
+                    <span className="font-medium">Certificate verified successfully</span>
+                  </div>
+                  <dl className="mt-4 grid gap-2 sm:grid-cols-2 text-sm">
+                    <div><dt className="text-gray-500">Student Name</dt><dd className="font-medium text-gray-900">{result.studentName}</dd></div>
+                    <div><dt className="text-gray-500">Program / Course</dt><dd className="font-medium text-gray-900">{result.programName}</dd></div>
+                    <div><dt className="text-gray-500">University / Board</dt><dd className="font-medium text-gray-900">{result.university}</dd></div>
+                    <div><dt className="text-gray-500">Completion Date</dt><dd className="font-medium text-gray-900">{result.completionDate}</dd></div>
+                    <div><dt className="text-gray-500">Certificate ID</dt><dd className="font-medium text-gray-900">{result.certificateId}</dd></div>
+                    <div><dt className="text-gray-500">Verification Status</dt><dd><span className="font-semibold text-green-700">Valid</span></dd></div>
+                  </dl>
+                  <button
+                    type="button"
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 transition"
+                  >
+                    Download Certificate
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium text-gray-900">Verification result</p>
+                  <p className="mt-1 text-sm text-gray-600">{result.message}</p>
+                </>
+              )}
             </div>
           )}
         </div>
