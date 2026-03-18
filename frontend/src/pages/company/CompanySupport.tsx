@@ -116,8 +116,8 @@ export function CompanySupport() {
           <a href="https://wa.me/919876543210" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-slate-gray hover:text-brand-accent">
             <MessageCircle className="h-4 w-4" /> WhatsApp Support
           </a>
-          <a href="mailto:support@xpertintern.com" className="flex items-center gap-2 text-sm text-slate-gray hover:text-brand-accent">
-            <Mail className="h-4 w-4" /> support@xpertintern.com
+          <a href="mailto:contact@xpertintern.com" className="flex items-center gap-2 text-sm text-slate-gray hover:text-brand-accent">
+            <Mail className="h-4 w-4" /> 
           </a>
           <a href="tel:+919876543210" className="flex items-center gap-2 text-sm text-slate-gray hover:text-brand-accent">
             <Phone className="h-4 w-4" /> Call Support

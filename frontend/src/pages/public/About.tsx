@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, Check, Target, Rocket, Trophy, GraduationCap, ScrollText } from 'lucide-react'
+import { Check, Target, Rocket, Trophy, GraduationCap, ScrollText } from 'lucide-react'
 
 function useInView(once = true) {
   const ref = useRef<HTMLElement>(null)
@@ -48,26 +48,16 @@ export function About() {
         </div>
       </section>
 
-      {/* Who We Are — stats card left, content right */}
+      {/* Who We Are — image left, content right */}
       <section ref={whoRef.ref} className={`bg-white py-14 sm:py-16 lg:py-24 about-reveal ${whoRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="grid gap-10 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-center">
-            <div className="rounded-2xl bg-gradient-to-b from-primary-700 to-brand-navy p-8 sm:p-10 lg:p-12 text-white shadow-2xl order-2 lg:order-1 transition-transform duration-300 hover:scale-[1.02]">
-              <div className="flex justify-center mb-8">
-                <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-sm">
-                  <Building2 className="h-10 w-10 sm:h-12 sm:w-12 text-white" />
-                </div>
-              </div>
-              <div className="flex justify-around gap-6">
-                <div className="text-center">
-                  <p className="text-4xl sm:text-5xl font-bold">50,000+</p>
-                  <p className="mt-1 text-sm sm:text-base text-white/90">Students</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-4xl sm:text-5xl font-bold">20+</p>
-                  <p className="mt-1 text-sm sm:text-base text-white/90">Universities</p>
-                </div>
-              </div>
+          <div className="grid gap-10 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-stretch">
+            <div className="order-2 lg:order-1 min-w-0 h-full min-h-[320px] sm:min-h-[400px]">
+              <img
+                src="/images/about-us-banner.png"
+                alt="About Us — XpertIntern: students, mentors, India map, education and growth"
+                className="w-full h-full min-h-[320px] sm:min-h-[400px] rounded-2xl shadow-xl object-cover object-center"
+              />
             </div>
             <div className="order-1 lg:order-2 min-w-0">
               <span className="inline-block rounded-full bg-brand-light-bg border border-primary-200 px-4 py-2 text-sm font-medium text-brand-accent">

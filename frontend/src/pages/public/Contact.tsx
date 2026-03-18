@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube } from 'lucide-react'
+import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube, X } from 'lucide-react'
 import { Notification } from '@/components/Notification'
+import { contactService } from '@/services/contactService'
 
 const UNIVERSITIES = [
   'BEU — Bihar Engineering University', 'SBTE — State Board of Technical Education', 'JUT — Jharkhand University of Technology',
@@ -12,10 +13,18 @@ const UNIVERSITIES = [
 ]
 const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
 const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
-const QUERY_FOR_OPTIONS = ['Training', 'Internship', 'Certificate', 'General']
+function WhatsAppIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
+  )
+}
 
 export function Contact() {
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -24,14 +33,33 @@ export function Contact() {
     semester: '',
     course: '',
     stream: '',
-    queryFor: '',
     message: '',
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: POST /api/contact when backend is ready
-    setSubmitted(true)
+    setError(null)
+    setLoading(true)
+    try {
+      await contactService.submit({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        university: form.university || undefined,
+        semester: form.semester || undefined,
+        course: form.course || undefined,
+        stream: form.stream || undefined,
+        message: form.message || undefined,
+      })
+      setSubmitted(true)
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : 'Failed to submit. Please try again.'
+      setError(msg || 'Failed to submit.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -74,8 +102,8 @@ export function Contact() {
                     <a href="mailto:info@xpertintern.com" className="mt-1 block text-slate-gray hover:text-brand-accent transition">
                       info@xpertintern.com
                     </a>
-                    <a href="mailto:support@xpertintern.com" className="mt-0.5 block text-slate-gray hover:text-brand-accent transition">
-                      support@xpertintern.com
+                    <a href="mailto:contact@xpertintern.com" className="mt-0.5 block text-slate-gray hover:text-brand-accent transition">
+                      contact@xpertintern.com
                     </a>
                   </div>
                 </div>
@@ -140,6 +168,22 @@ export function Contact() {
                       aria-label="YouTube"
                     >
                       <Youtube className="h-5 w-5" />
+                    </a>
+                    <a
+                      href="#"
+                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-900 text-white hover:opacity-90 transition"
+                      aria-label="X (Twitter)"
+                    >
+                      <X className="h-5 w-5" />
+                    </a>
+                    <a
+                      href="https://wa.me/919876543210"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#25D366] text-white hover:opacity-90 transition"
+                      aria-label="WhatsApp"
+                    >
+                      <WhatsAppIcon className="h-5 w-5" />
                     </a>
                   </div>
                 </div>
@@ -273,21 +317,6 @@ export function Contact() {
                     </div>
                   )}
                   <div>
-                    <label htmlFor="contact-query" className="block text-sm font-medium text-gray-700">
-                      Query For *
-                    </label>
-                    <select
-                      id="contact-query"
-                      required
-                      value={form.queryFor}
-                      onChange={(e) => setForm({ ...form, queryFor: e.target.value })}
-                      className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    >
-                      <option value="">Select</option>
-                      {QUERY_FOR_OPTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-                    </select>
-                  </div>
-                  <div>
                     <label htmlFor="contact-message" className="block text-sm font-medium text-gray-700">
                       Message *
                     </label>
@@ -301,11 +330,13 @@ export function Contact() {
                       className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent resize-none"
                     />
                   </div>
+                  {error && <p className="text-sm text-red-600">{error}</p>}
                   <button
                     type="submit"
-                    className="flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition"
+                    disabled={loading}
+                    className="flex w-full sm:w-auto items-center justify-center gap-2 rounded-lg bg-brand-navy px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition disabled:opacity-70"
                   >
-                    Send Message
+                    {loading ? 'Sending...' : 'Send Message'}
                     <Send className="h-4 w-4" />
                   </button>
                 </form>

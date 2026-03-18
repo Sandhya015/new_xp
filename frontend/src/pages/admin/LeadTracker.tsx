@@ -1,22 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, Download } from 'lucide-react'
+import { adminService } from '@/services/adminService'
 
-/**
- * Admin — Lead Management. Part 5A §8. Contact form submissions, status pipeline, follow-up.
- */
 const STATUS_TABS = [
   { id: 'all', label: 'All' },
-  { id: 'new', label: 'New', count: 8 },
-  { id: 'contacted', label: 'Contacted', count: 12 },
-  { id: 'interested', label: 'Interested', count: 5 },
-  { id: 'enrolled', label: 'Enrolled', count: 4 },
+  { id: 'new', label: 'New' },
+  { id: 'contacted', label: 'Contacted' },
+  { id: 'interested', label: 'Interested' },
+  { id: 'enrolled', label: 'Enrolled' },
   { id: 'not_interested', label: 'Not Interested' },
   { id: 'no_response', label: 'No Response' },
-]
-
-const SAMPLE_LEADS = [
-  { id: '1', name: 'Amit Singh', mobile: '9876543210', email: 'amit@example.com', university: 'BEU', course: 'B.Tech CSE', queryType: 'Training', submitted: '2025-03-04', status: 'New', assignedTo: '—' },
-  { id: '2', name: 'Neha R.', mobile: '9876543211', email: 'neha@example.com', university: 'AKTU', course: 'BCA', queryType: 'Internship', submitted: '2025-03-03', status: 'Contacted', assignedTo: 'John' },
 ]
 
 const STATUS_COLORS: Record<string, string> = {
@@ -30,6 +23,18 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function LeadTracker() {
   const [activeTab, setActiveTab] = useState('all')
+  const [items, setItems] = useState<Array<{ id: string; name: string; mobile: string; email: string; university: string; course: string; queryType: string; submitted: string; status: string; assignedTo: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    adminService.getLeads({ search: search || undefined, status: activeTab === 'all' ? undefined : activeTab })
+      .then((res) => { if (!cancelled) setItems(res.items || []) })
+      .catch(() => { if (!cancelled) setItems([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [search, activeTab])
 
   return (
     <div className="space-y-6 w-full">
@@ -53,13 +58,13 @@ export function LeadTracker() {
               activeTab === tab.id ? 'bg-brand-accent text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            {tab.label} {'count' in tab && tab.count != null && tab.count > 0 ? `(${tab.count})` : ''}
+            {tab.label}
           </button>
         ))}
       </div>
 
       <div className="flex flex-wrap gap-4">
-        <input type="search" placeholder="Search by name, mobile, email..." className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input type="search" placeholder="Search by name, mobile, email..." value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         <select className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
           <option value="">Query Type</option>
           <option>Training</option>
@@ -69,6 +74,9 @@ export function LeadTracker() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+        {loading ? (
+          <div className="px-4 py-8 text-center text-slate-gray text-sm">Loading leads…</div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -84,7 +92,7 @@ export function LeadTracker() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {SAMPLE_LEADS.map((row) => (
+              {items.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-medium text-brand-navy">{row.name}</td>
                   <td className="px-4 py-3 text-sm text-slate-gray">{row.mobile} · {row.email}</td>
@@ -105,6 +113,7 @@ export function LeadTracker() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   )

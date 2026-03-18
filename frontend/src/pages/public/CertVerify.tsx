@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Search, QrCode, Fingerprint, Database } from 'lucide-react'
+import { certificateService } from '@/services/certificateService'
 
 export function CertVerify() {
   const [certId, setCertId] = useState('')
@@ -7,14 +8,23 @@ export function CertVerify() {
   | { valid: true; studentName: string; programName: string; university: string; completionDate: string; certificateId: string }
   | { valid: false; message: string }
   | null
-const [result, setResult] = useState<VerifyResult>(null)
+  const [result, setResult] = useState<VerifyResult>(null)
+  const [loading, setLoading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
-  const handleVerify = (e: React.FormEvent) => {
+  const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: GET /api/certificates/verify/:certNo when backend is ready
     if (!certId.trim()) return
-    setResult({ valid: false, message: 'Verification API not connected yet. Enter certificate ID to test UI.' })
+    setLoading(true)
+    setResult(null)
+    try {
+      const res = await certificateService.verify(certId)
+      setResult(res)
+    } catch {
+      setResult({ valid: false, message: 'Verification failed. Please try again.' })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -117,9 +127,10 @@ const [result, setResult] = useState<VerifyResult>(null)
 
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white hover:bg-primary-600 transition"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-70"
             >
-              <Search className="h-4 w-4" /> Verify Certificate
+              <Search className="h-4 w-4" /> {loading ? 'Verifying...' : 'Verify Certificate'}
             </button>
           </form>
 

@@ -27,6 +27,46 @@ def get_users_collection() -> Collection:
     return get_db()["users"]
 
 
+def get_courses_collection() -> Collection:
+    """Courses / programs (training)."""
+    return get_db()["courses"]
+
+
+def get_contacts_collection() -> Collection:
+    """Contact form submissions (leads)."""
+    return get_db()["contacts"]
+
+
+def get_certificates_collection() -> Collection:
+    """Certificates (certNo, studentId, programName, etc.)."""
+    return get_db()["certificates"]
+
+
+def get_enrollments_collection() -> Collection:
+    """Enrollments (userId, courseId, orderId, etc.)."""
+    return get_db()["enrollments"]
+
+
+def get_orders_collection() -> Collection:
+    """Payment orders / invoices."""
+    return get_db()["orders"]
+
+
+def get_internships_collection() -> Collection:
+    """Internship postings (companyId, title, etc.)."""
+    return get_db()["internships"]
+
+
+def get_applications_collection() -> Collection:
+    """Internship applications (studentId, internshipId, status)."""
+    return get_db()["applications"]
+
+
+def get_visitors_collection() -> Collection:
+    """Visitor / lead tracking (page views, course views)."""
+    return get_db()["visitors"]
+
+
 def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:
     """Initialize connection. Call from create_app after config is loaded. Returns db or None if URI empty."""
     if not uri or not uri.strip():

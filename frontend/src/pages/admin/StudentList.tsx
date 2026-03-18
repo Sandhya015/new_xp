@@ -1,16 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, Download } from 'lucide-react'
-
-/**
- * Admin — Student Management. Part 5A §9. List students, profile view, account actions.
- */
-const SAMPLE_STUDENTS = [
-  { id: '1', name: 'Rahul Kumar', email: 'rahul@example.com', mobile: '9876543210', university: 'BEU', course: 'B.Tech CSE', registered: '2025-02-15', status: 'Active' },
-  { id: '2', name: 'Priya Sharma', email: 'priya@example.com', mobile: '9876543211', university: 'AKTU', course: 'BCA', registered: '2025-02-10', status: 'Active' },
-]
+import { adminService } from '@/services/adminService'
 
 export function StudentList() {
   const [statusFilter, setStatusFilter] = useState('all')
+  const [items, setItems] = useState<Array<{ id: string; name: string; email: string; mobile: string; university: string; course: string; registered: string; status: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    adminService.getStudents({ search: search || undefined })
+      .then((res) => { if (!cancelled) setItems(res.items || []) })
+      .catch(() => { if (!cancelled) setItems([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [search])
 
   return (
     <div className="space-y-6 w-full">
@@ -41,9 +46,10 @@ export function StudentList() {
         <select className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
           <option value="">All Courses</option>
         </select>
-        <input type="search" placeholder="Search by name, email, mobile..." className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+        <input type="search" placeholder="Search by name, email, mobile..." value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </div>
 
+      {loading && <p className="text-sm text-gray-500">Loading...</p>}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -59,7 +65,7 @@ export function StudentList() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {SAMPLE_STUDENTS.map((row) => (
+              {items.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-medium text-brand-navy">{row.name}</td>
                   <td className="px-4 py-3 text-sm text-slate-gray">{row.email}</td>

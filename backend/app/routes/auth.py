@@ -25,7 +25,7 @@ def _check_password(password: str, hashed: str) -> bool:
 
 def _user_to_response(user: dict) -> dict:
     """Return safe user object for frontend (no password)."""
-    return {
+    out = {
         "id": str(user["_id"]),
         "name": user.get("name") or user.get("fullName") or "",
         "email": user.get("email", ""),
@@ -33,6 +33,13 @@ def _user_to_response(user: dict) -> dict:
         "companyName": user.get("companyName"),
         "hrName": user.get("hrName"),
     }
+    if user.get("role") == "student":
+        out["university"] = user.get("university") or ""
+        out["course"] = user.get("course") or ""
+        out["semester"] = user.get("semester") or ""
+        out["stream"] = user.get("stream") or ""
+        out["collegeName"] = user.get("collegeName") or ""
+    return out
 
 
 def _validate_email(email: str) -> bool:
@@ -54,13 +61,19 @@ def register():
         return jsonify({"error": "Database not configured"}), 503
 
     data = request.get_json() or {}
-    name = (data.get("name") or data.get("fullName") or "").strip()
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    mobile = (data.get("mobile") or "").strip()
     role = (data.get("role") or "student").strip().lower()
     if role not in ("student", "company"):
         role = "student"
+
+    if role == "company":
+        name = (data.get("companyName") or data.get("name") or "").strip()
+        email = (data.get("companyEmail") or data.get("email") or "").strip().lower()
+    else:
+        name = (data.get("name") or data.get("fullName") or "").strip()
+        email = (data.get("email") or "").strip().lower()
+
+    password = data.get("password") or ""
+    mobile = (data.get("mobile") or "").strip()
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -73,6 +86,10 @@ def register():
     ok, msg = _validate_password(password)
     if not ok:
         return jsonify({"error": msg}), 400
+    if role == "company" and data.get("confirmPassword") and data["confirmPassword"] != password:
+        return jsonify({"error": "Passwords do not match"}), 400
+    if role == "student" and data.get("confirmPassword") and data["confirmPassword"] != password:
+        return jsonify({"error": "Passwords do not match"}), 400
 
     users = get_users_collection()
     if users.find_one({"email": email}):
@@ -82,13 +99,26 @@ def register():
         "email": email,
         "password": _hash_password(password),
         "name": name,
+        "fullName": name,
         "mobile": mobile or None,
         "role": role,
         "createdAt": datetime.utcnow(),
     }
     if role == "company":
         doc["companyName"] = name
-        doc["hrName"] = data.get("hrName", "").strip() or name
+        doc["hrName"] = (data.get("hrName") or "").strip() or name
+        doc["hrMobile"] = (data.get("hrMobile") or "").strip() or None
+        doc["industryType"] = (data.get("industryType") or "").strip() or None
+        doc["address"] = (data.get("address") or "").strip() or None
+        doc["website"] = (data.get("website") or "").strip() or None
+    else:
+        doc["university"] = (data.get("university") or "").strip() or None
+        doc["collegeName"] = (data.get("collegeName") or "").strip() or None
+        doc["semester"] = (data.get("semester") or "").strip() or None
+        doc["collegeRegNo"] = (data.get("collegeRegNo") or "").strip() or None
+        doc["course"] = (data.get("course") or "").strip() or None
+        doc["stream"] = (data.get("stream") or "").strip() or None
+        doc["linkedin"] = (data.get("linkedin") or "").strip() or None
 
     result = users.insert_one(doc)
     user = {**doc, "_id": result.inserted_id}

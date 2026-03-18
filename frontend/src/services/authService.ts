@@ -20,7 +20,29 @@ export const authService = {
     const { data } = await api.post('/api/auth/login', { email, password })
     return data
   },
-  async register(body: { name: string; email: string; password: string; mobile?: string; role?: string; hrName?: string }) {
+  async register(body: {
+    name?: string
+    fullName?: string
+    email?: string
+    password: string
+    confirmPassword?: string
+    mobile?: string
+    role?: 'student' | 'company'
+    hrName?: string
+    companyName?: string
+    companyEmail?: string
+    hrMobile?: string
+    industryType?: string
+    address?: string
+    website?: string
+    university?: string
+    collegeName?: string
+    semester?: string
+    collegeRegNo?: string
+    course?: string
+    stream?: string
+    linkedin?: string
+  }) {
     const { data } = await api.post('/api/auth/register', body)
     return data
   },

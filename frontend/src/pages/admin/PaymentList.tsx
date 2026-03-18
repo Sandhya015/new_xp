@@ -1,24 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CreditCard, Download, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { adminService } from '@/services/adminService'
 
-/**
- * Admin — Payments & Invoices. Part 5A §7. Overview cards, payment records, refund workflow.
- */
 const OVERVIEW_CARDS = [
-  { label: 'Total Revenue', value: '₹12.4L', icon: CreditCard },
-  { label: 'Successful Payments', value: '1,142', sub: '₹11.8L', icon: CheckCircle },
-  { label: 'Failed Payments', value: '28', icon: XCircle },
-  { label: 'Pending Payments', value: '5', icon: Clock },
-  { label: 'Refunds Issued', value: '12', sub: '₹48K', icon: CreditCard },
-]
-
-const SAMPLE_PAYMENTS = [
-  { id: 'TXN001', student: 'Rahul Kumar', program: 'Web Dev Bootcamp', amount: '₹4,999', method: 'UPI', date: '2025-03-04 10:30', status: 'Success' },
-  { id: 'TXN002', student: 'Priya S.', program: 'Data Science', amount: '₹6,499', method: 'Card', date: '2025-03-03 14:20', status: 'Success' },
+  { label: 'Total Revenue', value: '—', icon: CreditCard },
+  { label: 'Successful Payments', value: '—', sub: '', icon: CheckCircle },
+  { label: 'Failed Payments', value: '—', icon: XCircle },
+  { label: 'Pending Payments', value: '—', icon: Clock },
+  { label: 'Refunds Issued', value: '—', sub: '', icon: CreditCard },
 ]
 
 export function PaymentList() {
   const [statusFilter, setStatusFilter] = useState('all')
+  const [items, setItems] = useState<Array<{ id: string; orderId: string; studentId: string; amount: number; status: string; createdAt: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    adminService.getPayments({ search: search || undefined })
+      .then((res) => { if (!cancelled) setItems(res.items || []) })
+      .catch(() => { if (!cancelled) setItems([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [search])
 
   return (
     <div className="space-y-6 w-full">
@@ -58,31 +63,28 @@ export function PaymentList() {
             <option value="pending">Pending</option>
             <option value="refunded">Refunded</option>
           </select>
-          <input type="search" placeholder="Search by student, TXN ID..." className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input type="search" placeholder="Search by student, TXN ID..." value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
         </div>
+        {loading && <p className="p-4 text-sm text-gray-500">Loading...</p>}
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Transaction ID</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Student</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Program</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Method</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Status</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {SAMPLE_PAYMENTS.map((row) => (
+              {items.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm font-medium text-brand-navy">{row.id}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.student}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.program}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.amount}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.method}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.date}</td>
+                  <td className="px-4 py-3 text-sm font-medium text-brand-navy">{row.orderId || row.id}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{row.studentId || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">₹{row.amount?.toLocaleString('en-IN') ?? '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{row.createdAt}</td>
                   <td className="px-4 py-3">
                     <span className="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
                       {row.status}
@@ -90,8 +92,6 @@ export function PaymentList() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button type="button" className="text-sm font-medium text-brand-accent hover:underline">View</button>
-                    <span className="mx-2 text-gray-300">|</span>
-                    <button type="button" className="text-sm font-medium text-slate-gray hover:underline">Invoice</button>
                   </td>
                 </tr>
               ))}

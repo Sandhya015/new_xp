@@ -1,22 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Briefcase, Search, MapPin } from 'lucide-react'
+import { internshipService } from '@/services/internshipService'
 
-/**
- * Student Dashboard — Internships listing (Part 3A §5). Browse, filter, apply. API later.
- */
+type Item = { id: string; title: string; companyName: string; domain: string; duration: string; type: string; stipend: string; deadline: string; featured?: boolean }
+
 export function Internships() {
   const [search, setSearch] = useState('')
+  const [items, setItems] = useState<Item[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const items = [
-    { id: '1', title: 'Web Development Intern', company: 'Tech Solutions Pvt Ltd', domain: 'Web Dev', duration: '2 Months', type: 'Remote', stipend: 'Paid', deadline: 'Mar 15, 2025', featured: true },
-    { id: '2', title: 'Data Science Intern', company: 'DataCorp India', domain: 'Data Science', duration: '3 Months', type: 'Hybrid', stipend: 'Paid', deadline: 'Mar 20, 2025', featured: false },
-  ]
+  useEffect(() => {
+    let cancelled = false
+    internshipService.list({ search: search || undefined })
+      .then((res) => { if (!cancelled) setItems(res.items || []) })
+      .catch(() => { if (!cancelled) setError('Failed to load internships') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [search])
 
   return (
     <div className="space-y-6 w-full">
       <div className="rounded-lg border border-primary-200 bg-primary-50/50 px-4 py-3 text-sm text-brand-navy">
-        <strong>Matching Your Profile</strong> — Internships matching your course and stream will appear here when the backend is connected.
+        <strong>Matching Your Profile</strong> — Internships from companies are listed below.
       </div>
 
       <div className="relative max-w-md">
@@ -30,8 +37,8 @@ export function Internships() {
         />
       </div>
 
-      <p className="text-sm text-slate-gray">Filters: Domain, Type, Duration, Stipend, Eligibility, Status, Sort — (API wiring later)</p>
-
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {loading && <p className="text-sm text-slate-gray">Loading...</p>}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -40,7 +47,7 @@ export function Internships() {
             )}
             <Briefcase className="h-10 w-10 text-brand-accent mb-2" />
             <h3 className="font-semibold text-brand-navy">{item.title}</h3>
-            <p className="mt-1 text-sm text-slate-gray">{item.company}</p>
+            <p className="mt-1 text-sm text-slate-gray">{item.companyName}</p>
             <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-slate-gray">
               <span>{item.domain}</span>
               <span>·</span>
@@ -48,9 +55,9 @@ export function Internships() {
               <span>·</span>
               <span className="flex items-center gap-0.5"><MapPin className="h-3 w-3" /> {item.type}</span>
               <span>·</span>
-              <span>{item.stipend}</span>
+              <span>{item.stipend || '—'}</span>
             </div>
-            <p className="mt-2 text-xs text-slate-gray">Apply by {item.deadline}</p>
+            {item.deadline && <p className="mt-2 text-xs text-slate-gray">Apply by {item.deadline}</p>}
             <div className="mt-4 flex gap-2">
               <Link to={`/dashboard/internships/${item.id}`} className="flex-1 rounded-lg border border-gray-300 py-2 text-center text-sm font-medium text-gray-700 hover:bg-gray-50">
                 View Details
@@ -62,6 +69,9 @@ export function Internships() {
           </div>
         ))}
       </div>
+      {!loading && !error && items.length === 0 && (
+        <p className="text-sm text-slate-gray">No internships posted yet.</p>
+      )}
     </div>
   )
 }

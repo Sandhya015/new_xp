@@ -86,12 +86,17 @@ export function Register() {
     setAuthLoading(true)
     try {
       await authService.register({
-        name: companyForm.companyName,
-        email: companyForm.companyEmail,
+        companyName: companyForm.companyName,
+        companyEmail: companyForm.companyEmail,
         password: companyForm.password,
+        confirmPassword: companyForm.confirmPassword,
         mobile: companyForm.mobile,
         role: 'company',
         hrName: companyForm.hrName,
+        hrMobile: companyForm.hrMobile,
+        industryType: companyForm.industryType,
+        address: companyForm.address,
+        website: companyForm.website,
       })
       setShowSuccessToast(true)
       setTimeout(() => navigate('/login'), TOAST_DURATION_MS)

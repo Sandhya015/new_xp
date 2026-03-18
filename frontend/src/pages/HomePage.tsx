@@ -4,7 +4,7 @@ const stats = [
   { value: '50,000+', label: 'Students Trained' },
   { value: '200+', label: 'Partner Companies' },
   { value: '100+', label: 'Courses' },
-  { value: '20+', label: 'Universities' },
+  { value: '30+', label: 'Universities' },
 ]
 
 const whyUs = [

@@ -1,13 +1,33 @@
 """
-Certificates: verify (public), upload/bulk/send-email (admin). DB to be wired.
+Certificates: verify (public). Admin upload/bulk/send-email stubbed for later.
 """
-from flask import Blueprint, jsonify
+from flask import Blueprint, request, jsonify
+
+from app.db import get_db, get_certificates_collection
+
 certificates_bp = Blueprint("certificates", __name__)
 
 
 @certificates_bp.route("/verify/<cert_no>", methods=["GET"])
 def verify(cert_no):
-    return jsonify({"valid": False, "message": "Verification — DB not connected yet"}), 501
+    db = get_db()
+    if db is None:
+        return jsonify({"valid": False, "message": "Service unavailable"}), 503
+    cert_no = (cert_no or "").strip().upper()
+    if not cert_no:
+        return jsonify({"valid": False, "message": "Certificate ID is required"}), 400
+    coll = get_certificates_collection()
+    c = coll.find_one({"certNo": cert_no})
+    if not c:
+        return jsonify({"valid": False, "message": "Certificate not found or invalid."})
+    return jsonify({
+        "valid": True,
+        "certificateId": c.get("certNo", cert_no),
+        "studentName": c.get("studentName", ""),
+        "programName": c.get("programName", ""),
+        "university": c.get("university", ""),
+        "completionDate": c.get("completionDate", ""),
+    })
 
 
 @certificates_bp.route("", methods=["POST"])

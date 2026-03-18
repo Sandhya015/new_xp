@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { courseService } from '@/services/courseService'
 import {
   Search,
   Filter,
@@ -61,86 +62,24 @@ interface Course {
   Icon: LucideIcon
 }
 
-const COURSES: Course[] = [
-  {
-    id: '1',
-    title: 'Web Development (Full Stack)',
-    description: 'Learn HTML, CSS, JavaScript, React, Node.js and build real-world projects.',
-    category: 'technical',
-    duration: '8 Weeks',
-    mode: 'Hybrid',
-    universities: 'BEU, SBTE',
-    price: 2499,
-    tagColor: 'bg-emerald-100 text-emerald-800',
-    iconBg: 'bg-blue-100 text-blue-600',
-    Icon: Code2,
-  },
-  {
-    id: '2',
-    title: 'Python Programming',
-    description: 'Core Python, OOP, data structures, file handling and mini projects.',
-    category: 'technical',
-    duration: '6 Weeks',
-    mode: 'Online',
-    universities: 'AKTU, JUT',
-    price: 1999,
-    tagColor: 'bg-emerald-100 text-emerald-800',
-    iconBg: 'bg-emerald-100 text-emerald-600',
-    Icon: Cpu,
-  },
-  {
-    id: '3',
-    title: 'Data Science & ML',
-    description: 'Python, Pandas, NumPy, Machine Learning algorithms and model deployment.',
-    category: 'technical',
-    duration: '12 Weeks',
-    mode: 'Online',
-    universities: 'BEU, AKTU',
-    price: 4999,
-    tagColor: 'bg-violet-100 text-violet-800',
-    iconBg: 'bg-violet-100 text-violet-600',
-    Icon: Brain,
-  },
-  {
-    id: '4',
-    title: 'Digital Marketing',
-    description: 'SEO, Social Media, Google Ads, Email Marketing and Analytics.',
-    category: 'non-technical',
-    duration: '60 Hours',
-    mode: 'Online',
-    universities: 'Patna Univ.',
-    price: 1499,
-    tagColor: 'bg-red-100 text-red-800',
-    iconBg: 'bg-red-100 text-red-600',
-    Icon: Megaphone,
-  },
-  {
-    id: '5',
-    title: 'Android App Development',
-    description: 'Java/Kotlin, Android Studio, Firebase integration and app deployment.',
-    category: 'technical',
-    duration: '8 Weeks',
-    mode: 'Offline',
-    universities: 'BEU, SBTE',
-    price: 3499,
-    tagColor: 'bg-amber-100 text-amber-800',
-    iconBg: 'bg-amber-100 text-amber-600',
-    Icon: Smartphone,
-  },
-  {
-    id: '6',
-    title: 'Business Analytics',
-    description: 'Excel, Power BI, data visualization and business decision making.',
-    category: 'non-technical',
-    duration: '80 Hours',
-    mode: 'Hybrid',
-    universities: 'Magadh Univ.',
-    price: 1799,
-    tagColor: 'bg-teal-100 text-teal-800',
-    iconBg: 'bg-teal-100 text-teal-600',
-    Icon: BarChart3,
-  },
-]
+const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
+function courseFromApi(c: { id: string; title: string; description: string; category: string; duration: string; mode: string; universities: string; price: number }, i: number): Course {
+  const isTech = (c.category || 'technical') === 'technical'
+  const mode: Mode = ['Online', 'Offline', 'Hybrid'].includes(c.mode) ? c.mode as Mode : 'Online'
+  return {
+    id: c.id,
+    title: c.title,
+    description: c.description,
+    category: isTech ? 'technical' : 'non-technical',
+    duration: c.duration,
+    mode,
+    universities: c.universities,
+    price: c.price,
+    tagColor: isTech ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
+    iconBg: isTech ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600',
+    Icon: ICON_MAP[i % ICON_MAP.length],
+  }
+}
 
 function ModeIcon({ mode }: { mode: Mode }) {
   if (mode === 'Online') return <Laptop className="h-4 w-4 shrink-0 text-slate-500" />
@@ -149,6 +88,8 @@ function ModeIcon({ mode }: { mode: Mode }) {
 }
 
 export function Training() {
+  const [courses, setCourses] = useState<Course[]>([])
+  const [coursesLoading, setCoursesLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<Category>('all')
   const [branches, setBranches] = useState<Set<string>>(new Set())
@@ -215,8 +156,19 @@ export function Training() {
     })
   }
 
+  useEffect(() => {
+    let cancelled = false
+    courseService.list({ limit: 50 })
+      .then((res) => {
+        if (!cancelled && res.items)
+          setCourses((res.items as Array<{ id: string; title: string; description: string; category: string; duration: string; mode: string; universities: string; price: number }>).map((c, i) => courseFromApi(c, i)))
+      })
+      .finally(() => { if (!cancelled) setCoursesLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
   const filteredCourses = useMemo(() => {
-    return COURSES.filter((c) => {
+    return courses.filter((c) => {
       const matchSearch =
         !search ||
         c.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -237,7 +189,7 @@ export function Training() {
         modes.size === 0 || modes.has(c.mode)
       return matchSearch && matchCategory && matchDuration && matchMode
     })
-  }, [search, category, durationWeeks, durationHours, modes])
+  }, [courses, search, category, durationWeeks, durationHours, modes])
 
   return (
     <div className="min-h-screen bg-gray-50/50 min-w-0">
@@ -450,6 +402,7 @@ export function Training() {
 
         {/* Course grid */}
         <div className="flex-1 min-w-0">
+          {coursesLoading && <p className="text-sm text-slate-gray py-4">Loading courses...</p>}
           <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {filteredCourses.map((course) => {
               const CourseIcon = course.Icon

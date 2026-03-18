@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 
+const AUTH_KEY = 'xpertintern_auth'
+
 interface User {
   id: string
   name: string
@@ -7,6 +9,11 @@ interface User {
   role?: 'student' | 'admin' | 'company'
   companyName?: string
   hrName?: string
+  university?: string
+  course?: string
+  semester?: string
+  stream?: string
+  collegeName?: string
 }
 
 interface AuthState {
@@ -17,10 +24,39 @@ interface AuthState {
   logout: () => void
 }
 
+function loadStored(): { user: User | null; token: string | null } {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY)
+    if (!raw) return { user: null, token: null }
+    const data = JSON.parse(raw) as { user: User | null; token: string | null }
+    if (data.token && data.user) return { user: data.user, token: data.token }
+  } catch {
+    /* ignore */
+  }
+  return { user: null, token: null }
+}
+
+function saveStored(user: User | null, token: string | null) {
+  try {
+    if (token && user) localStorage.setItem(AUTH_KEY, JSON.stringify({ user, token }))
+    else localStorage.removeItem(AUTH_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  token: null,
-  setUser: (user) => set({ user }),
-  setToken: (token) => set({ token }),
-  logout: () => set({ user: null, token: null }),
+  ...loadStored(),
+  setUser: (user) => set((s) => {
+    saveStored(user, s.token)
+    return { user }
+  }),
+  setToken: (token) => set((s) => {
+    saveStored(s.user, token)
+    return { token }
+  }),
+  logout: () => {
+    saveStored(null, null)
+    set({ user: null, token: null })
+  },
 }))

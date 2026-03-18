@@ -1,17 +1,32 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import { authService } from '@/services/authService'
 
 export function RegisterPage() {
+  const navigate = useNavigate()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: call auth API when backend is wired
-    console.log({ name, email, password })
+    setError('')
+    setLoading(true)
+    try {
+      await authService.register({ name, email, password })
+      navigate('/login')
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : 'Registration failed'
+      setError(msg || 'Registration failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -66,11 +81,13 @@ export function RegisterPage() {
               </button>
             </div>
           </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"
-            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+            disabled={loading}
+            className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-70"
           >
-            Register
+            {loading ? 'Registering...' : 'Register'}
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-gray-600">
@@ -78,7 +95,6 @@ export function RegisterPage() {
           <Link to="/login" className="font-semibold text-brand-accent hover:underline">Login</Link>
         </p>
       </div>
-      <p className="mt-4 text-center text-xs text-gray-500">Registration will connect to backend when API is ready.</p>
     </div>
   )
 }
