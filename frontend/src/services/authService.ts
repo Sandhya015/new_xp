@@ -50,6 +50,17 @@ export const authService = {
     const { data } = await api.get('/api/auth/me')
     return data
   },
+  async updateProfile(payload: Record<string, string | number | null | undefined>) {
+    const { data } = await api.patch('/api/auth/me', payload)
+    return data
+  },
+  async changePassword(currentPassword: string, newPassword: string) {
+    const { data } = await api.post('/api/auth/change-password', {
+      currentPassword,
+      newPassword,
+    })
+    return data
+  },
   async refresh() {
     const { data } = await api.post('/api/auth/refresh')
     return data

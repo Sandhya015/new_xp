@@ -37,10 +37,16 @@ import { CompanySupport } from './pages/company/CompanySupport'
 import { CompanyNotifications } from './pages/company/CompanyNotifications'
 import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { CourseManager } from './pages/admin/CourseManager'
+import { AddTraining } from './pages/admin/AddTraining'
+import { ManageTraining } from './pages/admin/ManageTraining'
+import { EditTraining } from './pages/admin/EditTraining'
 import { StudentList } from './pages/admin/StudentList'
+import { StudentDetail } from './pages/admin/StudentDetail'
 import { CertificateUpload } from './pages/admin/CertificateUpload'
 import { LeadTracker } from './pages/admin/LeadTracker'
+import { LeadDetail } from './pages/admin/LeadDetail'
 import { PaymentList } from './pages/admin/PaymentList'
+import { PaymentDetail } from './pages/admin/PaymentDetail'
 import { SystemSettings } from './pages/admin/SystemSettings'
 import { CompanyManagement } from './pages/admin/CompanyManagement'
 import { InternshipManagement } from './pages/admin/InternshipManagement'
@@ -85,10 +91,16 @@ function App() {
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<AdminDashboard />} />
         <Route path="courses" element={<CourseManager />} />
+        <Route path="courses/new" element={<AddTraining />} />
+        <Route path="courses/:id/manage" element={<ManageTraining />} />
+        <Route path="courses/:id/edit" element={<EditTraining />} />
         <Route path="students" element={<StudentList />} />
+        <Route path="students/:id" element={<StudentDetail />} />
         <Route path="certificates" element={<CertificateUpload />} />
         <Route path="leads" element={<LeadTracker />} />
+        <Route path="leads/:id" element={<LeadDetail />} />
         <Route path="payments" element={<PaymentList />} />
+        <Route path="payments/:id" element={<PaymentDetail />} />
         <Route path="companies" element={<CompanyManagement />} />
         <Route path="internships" element={<InternshipManagement />} />
         <Route path="reports" element={<AdminReports />} />

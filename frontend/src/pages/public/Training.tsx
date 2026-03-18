@@ -19,6 +19,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { UNIVERSITIES_LIST } from '@/constants/universities'
 
 const BRANCHES = [
   'Computer Science',
@@ -31,7 +32,7 @@ const BRANCHES = [
   'BBA / BCA',
 ] as const
 
-const UNIVERSITIES = [
+const UNIVERSITIES_FILTER = [
   'BEU',
   'SBTE',
   'JUT',
@@ -382,7 +383,7 @@ export function Training() {
                     University
                   </p>
                   <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {UNIVERSITIES.map((u) => (
+                    {UNIVERSITIES_FILTER.map((u) => (
                       <label key={u} className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
@@ -540,8 +541,8 @@ export function Training() {
                       className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
                     >
                       <option value="">Select</option>
-                      {UNIVERSITIES.map((u) => (
-                        <option key={u} value={u}>{u}</option>
+                      {UNIVERSITIES_LIST.map((u) => (
+                        <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>
                       ))}
                     </select>
                   </div>

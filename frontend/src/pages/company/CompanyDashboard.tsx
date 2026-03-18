@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ClipboardList,
@@ -11,24 +12,9 @@ import {
   ListChecks,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { companyService, type CompanyDashboardData } from '@/services/companyService'
 
 const DEFAULT_COMPANY_NAME = 'TechSolutions Pvt. Ltd.'
-
-const STAT_CARDS = [
-  { value: 5, label: 'Total Internships Posted', icon: ClipboardList, color: 'bg-blue-500 text-white' },
-  { value: 3, label: 'Active Listings', icon: CheckCircle, color: 'bg-emerald-500 text-white' },
-  { value: 47, label: 'Total Applicants', icon: Users, color: 'bg-violet-500 text-white' },
-  { value: 12, label: 'Shortlisted Candidates', icon: Star, color: 'bg-amber-500 text-white' },
-  { value: 5, label: 'Selected Candidates', icon: UserCheck, color: 'bg-teal-500 text-white' },
-  { value: 2, label: 'Internships Closed', icon: XCircle, color: 'bg-gray-600 text-white' },
-]
-
-const RECENT_ACTIVITY = [
-  { text: 'New application received — Rahul K. for Web Dev Intern', icon: Users, time: '2 hours ago' },
-  { text: 'Candidate Priya S. shortlisted for Data Science Intern', icon: Star, time: '5 hours ago' },
-  { text: 'Internship "Full Stack Intern" published', icon: ClipboardList, time: '1 day ago' },
-  { text: 'Listing "Marketing Intern" closed', icon: XCircle, time: '2 days ago' },
-]
 
 const QUICK_ACTIONS = [
   { to: '/company/post-internship', label: 'Post New Internship', icon: Plus, primary: true },
@@ -36,14 +22,81 @@ const QUICK_ACTIONS = [
   { to: '/company/internships', label: 'View Active Listings', icon: ListChecks, primary: true },
 ]
 
+function formatActivityTime(iso: string) {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+    if (diffMins < 60) return `${diffMins} min ago`
+    if (diffHours < 24) return `${diffHours} hours ago`
+    return `${diffDays} days ago`
+  } catch {
+    return ''
+  }
+}
+
 export function CompanyDashboard() {
-  const companyName = useAuth().user?.companyName ?? DEFAULT_COMPANY_NAME
-  const accountStatus = 'Active' as const
-  const profileComplete = 85
+  const { user } = useAuth()
+  const [data, setData] = useState<CompanyDashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    companyService
+      .getDashboard()
+      .then(setData)
+      .catch(() => setError('Unable to load dashboard.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const companyName = data?.companyName ?? user?.companyName ?? DEFAULT_COMPANY_NAME
+  const accountStatus = data?.accountStatus ?? 'active'
+  const profileComplete = data?.profileComplete ?? 0
+  const stats = data?.stats
+  const recentActivity = data?.recentActivity ?? []
+
+  const statCards = stats
+    ? [
+        { value: stats.totalListings, label: 'Total Internships Posted', icon: ClipboardList, color: 'bg-blue-500 text-white' },
+        { value: stats.activeListings, label: 'Active Listings', icon: CheckCircle, color: 'bg-emerald-500 text-white' },
+        { value: stats.totalApplicants, label: 'Total Applicants', icon: Users, color: 'bg-violet-500 text-white' },
+        { value: stats.shortlisted, label: 'Shortlisted Candidates', icon: Star, color: 'bg-amber-500 text-white' },
+        { value: stats.selected, label: 'Selected Candidates', icon: UserCheck, color: 'bg-teal-500 text-white' },
+        { value: stats.closedListings, label: 'Internships Closed', icon: XCircle, color: 'bg-gray-600 text-white' },
+      ]
+    : []
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[200px]">
+        <p className="text-slate-gray">Loading dashboard...</p>
+      </div>
+    )
+  }
+
+  const statusLabel = accountStatus === 'active' ? 'Active' : accountStatus === 'pending' ? 'Pending Approval' : accountStatus === 'suspended' ? 'Suspended' : accountStatus
 
   return (
     <div className="space-y-6 w-full">
-      {/* Welcome banner — doc 3.1 */}
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {accountStatus === 'pending' && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+          Your account is under review by Xpertintern Admin. You can set up your profile but cannot post internships until approved.
+        </div>
+      )}
+      {accountStatus === 'suspended' && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
+          Your account has been suspended. Contact Xpertintern support for assistance.
+        </div>
+      )}
+      {/* Welcome banner — CD-WF-01 */}
       <div className="rounded-xl bg-gradient-to-r from-brand-accent to-primary-600 px-6 py-5 text-white shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -52,18 +105,18 @@ export function CompanyDashboard() {
               Account status:{' '}
               <span
                 className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                  accountStatus === 'Active'
+                  accountStatus === 'active'
                     ? 'bg-white/20 text-white'
-                    : accountStatus === 'Pending Approval'
+                    : accountStatus === 'pending'
                     ? 'bg-amber-400/30 text-white'
                     : 'bg-red-400/30 text-white'
                 }`}
               >
-                {accountStatus}
+                {statusLabel}
               </span>
             </p>
           </div>
-          {profileComplete < 80 && (
+          {profileComplete < 80 && accountStatus !== 'suspended' && (
             <div className="shrink-0 rounded-lg bg-amber-400/20 px-4 py-2 text-sm text-white">
               Complete your company profile to attract more applicants.
             </div>
@@ -71,9 +124,9 @@ export function CompanyDashboard() {
         </div>
       </div>
 
-      {/* Stats cards — doc 3.2: 6 cards */}
+      {/* Stats cards — CD-WF-01 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {STAT_CARDS.map(({ value, label, icon: Icon, color }) => (
+        {statCards.map(({ value, label, icon: Icon, color }) => (
           <div
             key={label}
             className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow flex items-start gap-3"
@@ -99,17 +152,21 @@ export function CompanyDashboard() {
             </Link>
           </div>
           <ul className="mt-4 space-y-3">
-            {RECENT_ACTIVITY.map(({ text, icon: Icon, time }) => (
-              <li key={text} className="flex items-start gap-3">
-                <div className="shrink-0 mt-0.5 text-brand-accent">
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-700">{text}</p>
-                  <p className="text-xs text-slate-gray">{time}</p>
-                </div>
-              </li>
-            ))}
+            {recentActivity.length === 0 ? (
+              <li className="text-sm text-slate-gray">No recent activity.</li>
+            ) : (
+              recentActivity.map((act, idx) => (
+                <li key={act.applicationId || act.internshipId || idx} className="flex items-start gap-3">
+                  <div className="shrink-0 mt-0.5 text-brand-accent">
+                    {act.type === 'application' ? <Users className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-700">{act.text}</p>
+                    <p className="text-xs text-slate-gray">{formatActivityTime(act.createdAt)}</p>
+                  </div>
+                </li>
+              ))
+            )}
           </ul>
         </div>
 

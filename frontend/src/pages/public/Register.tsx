@@ -3,13 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { User, Building2, Info, CheckCircle, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 
-const UNIVERSITIES = [
-  'BEU — Bihar Engineering University', 'SBTE — State Board of Technical Education', 'JUT — Jharkhand University of Technology',
-  'AKTU — Dr. A.P.J. Abdul Kalam Technical Univ.', 'Patna University', 'Patliputra University', 'Munger University',
-  'Lalit Narayan Mithila University', 'Veer Kunwar Singh University', 'Tilka Majhi Bhagalpur University',
-  'Bhupendra Narayan Mandal University', 'Jai Prakash University', 'Magadh University', 'Purnea University',
-  'Nalanda Open University', 'Babasaheb Bhimrao Ambedkar Bihar University',
-]
+import { UNIVERSITIES_LIST } from '@/constants/universities'
 const SEMESTERS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th']
 const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
 const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
@@ -167,7 +161,7 @@ export function Register() {
                     <label className="block text-sm font-medium text-gray-700">University *</label>
                     <select required value={studentForm.university} onChange={(e) => setStudentForm((f) => ({ ...f, university: e.target.value }))} className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
                       <option value="">Select University</option>
-                      {UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
+                      {UNIVERSITIES_LIST.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
                     </select>
                   </div>
                   <div>

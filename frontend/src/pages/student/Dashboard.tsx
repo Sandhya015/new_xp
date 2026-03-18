@@ -14,6 +14,8 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { enrollmentService } from '@/services/enrollmentService'
 import { internshipService } from '@/services/internshipService'
+import { certificateService } from '@/services/certificateService'
+import { paymentService } from '@/services/paymentService'
 
 const QUICK_ACTIONS = [
   { to: '/dashboard/training', label: 'Explore Training', icon: BookOpen, primary: true },
@@ -34,6 +36,8 @@ export function Dashboard() {
   const navigate = useNavigate()
   const [enrollments, setEnrollments] = useState<{ id: string; courseId: string; courseTitle: string; createdAt: string }[]>([])
   const [applications, setApplications] = useState<{ id: string; internshipTitle?: string; createdAt?: string }[]>([])
+  const [certificatesCount, setCertificatesCount] = useState(0)
+  const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   const displayName = user?.name ?? 'Student'
@@ -48,11 +52,19 @@ export function Dashboard() {
       setLoading(false)
       return
     }
-    Promise.all([enrollmentService.list(), internshipService.myApplications()])
-      .then(([enrollRes, appRes]) => {
+    Promise.all([
+      enrollmentService.list(),
+      internshipService.myApplications(),
+      certificateService.listMy().catch(() => ({ items: [] })),
+      paymentService.listMy().catch(() => ({ items: [] })),
+    ])
+      .then(([enrollRes, appRes, certRes, payRes]) => {
         if (cancelled) return
         setEnrollments((enrollRes.items || []) as { id: string; courseId: string; courseTitle: string; createdAt: string }[])
         setApplications((appRes.items || []) as { id: string; internshipTitle?: string; createdAt?: string }[])
+        setCertificatesCount((certRes.items || []).length)
+        const pending = (payRes.items || []).filter((p: { status?: string }) => p.status !== 'success' && p.status !== 'completed')
+        setPendingPaymentsCount(pending.length)
       })
       .catch((err) => {
         if (cancelled) return
@@ -72,8 +84,6 @@ export function Dashboard() {
 
   const enrolledCount = enrollments.length
   const appliedCount = applications.length
-  const certificatesCount = 0
-  const pendingPaymentsCount = 0
 
   const subtitle = [university, course, semester].filter(Boolean).join(' · ') || 'Complete your profile'
 

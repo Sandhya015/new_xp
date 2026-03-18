@@ -42,6 +42,8 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
   let acc = '/admin'
   const names: Record<string, string> = {
     courses: 'Training',
+    new: 'Add Training',
+    manage: 'Manage',
     certificates: 'Certificates',
     payments: 'Payments',
     leads: 'Leads',
@@ -55,7 +57,7 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
   }
   for (const seg of segments) {
     acc += `/${seg}`
-    const label = names[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' ')
+    const label = names[seg] ?? (seg.length <= 24 && !seg.includes('-') ? seg : seg.charAt(0).toUpperCase() + seg.slice(1).replace(/-/g, ' '))
     crumbs.push({ label, path: acc })
   }
   return crumbs

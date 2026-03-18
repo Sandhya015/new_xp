@@ -22,10 +22,27 @@ export function Login() {
     setSubmitting(true)
     try {
       const res = await authService.login(data.email, data.password)
-      setToken(res.token)
-      setUser(res.user)
-      if (res.user?.role === 'company') navigate('/company', { replace: true })
-      else navigate('/dashboard', { replace: true })
+      const role = res.user?.role
+      // Only allow login in the matching form: student tab → student role, company tab → company role
+      if (tab === 'student') {
+        if (role !== 'student') {
+          setError('This is a student login. Please use the "Login as Company" tab for company accounts.')
+          setSubmitting(false)
+          return
+        }
+        setToken(res.token)
+        setUser(res.user)
+        navigate('/dashboard', { replace: true })
+      } else {
+        if (role !== 'company') {
+          setError('This is a company login. Please use the "Login as Student" tab for student accounts.')
+          setSubmitting(false)
+          return
+        }
+        setToken(res.token)
+        setUser(res.user)
+        navigate('/company', { replace: true })
+      }
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error

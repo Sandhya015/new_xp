@@ -51,6 +51,8 @@ def create_app(config_class=None):
     from app.routes.contact import contact_bp
     from app.routes.visitor import visitor_bp
     from app.routes.internship import internship_bp
+    from app.routes.company import company_bp
+    from app.routes.student_routes import student_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -62,6 +64,8 @@ def create_app(config_class=None):
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
     app.register_blueprint(visitor_bp, url_prefix="/api")
     app.register_blueprint(internship_bp, url_prefix="/api/internship")
+    app.register_blueprint(company_bp, url_prefix="/api/company")
+    app.register_blueprint(student_bp, url_prefix="/api")
 
     @app.route("/")
     def index():

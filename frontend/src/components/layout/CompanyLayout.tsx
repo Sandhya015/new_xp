@@ -12,11 +12,8 @@ import {
   HelpCircle,
   Globe,
   LogOut,
-  ChevronDown,
   Menu,
   X,
-  Settings,
-  User,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -62,20 +59,11 @@ export function CompanyLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
-  const [notifOpen, setNotifOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
   const path = location.pathname
   const breadcrumbs = getBreadcrumbs(path)
   const companyName = user?.companyName ?? DEFAULT_COMPANY_NAME
   const hrName = user?.hrName ?? DEFAULT_HR_NAME
-  const initials = companyName
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-  const unreadNotifCount = 2
 
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
@@ -189,8 +177,9 @@ export function CompanyLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 bg-gray-50">
-        <header className="shrink-0 border-b border-gray-200 bg-white">
-          <div className="flex items-center justify-between gap-4 px-4 sm:px-6 py-3">
+        {/* Top bar: only current page name (like student dashboard) */}
+        <header className="shrink-0 border-b border-gray-200 bg-white px-4 sm:px-6 py-3">
+          <div className="flex items-center justify-between gap-3 min-w-0">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <button
                 type="button"
@@ -200,101 +189,18 @@ export function CompanyLayout() {
               >
                 <Menu className="h-6 w-6" />
               </button>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-gray truncate">Company</p>
-                <p className="text-sm font-bold text-brand-navy truncate">{companyName}</p>
-              </div>
+              <h1 className="text-lg font-semibold text-brand-navy truncate">
+                {breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].label : 'Dashboard'}
+              </h1>
             </div>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setNotifOpen((o) => !o)}
-                  className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
-                  aria-label="Notifications"
-                >
-                  <Bell className="h-5 w-5" />
-                  {unreadNotifCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                      {unreadNotifCount}
-                    </span>
-                  )}
-                </button>
-                {notifOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setNotifOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-gray-200 bg-white py-2 shadow-lg">
-                      <p className="px-4 py-2 text-xs font-semibold uppercase text-slate-gray">Recent</p>
-                      <p className="px-4 py-4 text-sm text-slate-gray text-center">No new notifications</p>
-                      <Link
-                        to="/company/notifications"
-                        onClick={() => setNotifOpen(false)}
-                        className="block px-4 py-2 text-sm font-medium text-brand-accent hover:bg-gray-50"
-                      >
-                        View All Notifications
-                      </Link>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setProfileOpen((o) => !o)}
-                  className="flex items-center gap-2 sm:gap-3 rounded-lg border border-gray-200 bg-gray-50 pl-2 pr-2 sm:pr-3 py-1.5 hover:bg-gray-100 transition"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-accent text-xs font-semibold text-white">
-                    {initials}
-                  </div>
-                  <div className="text-left min-w-0 hidden md:block">
-                    <p className="text-sm font-semibold text-brand-navy truncate">{companyName}</p>
-                    <p className="text-xs text-slate-gray">HR: {hrName}</p>
-                  </div>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
-                </button>
-                {profileOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
-                      <Link
-                        to="/company/profile"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        <User className="h-4 w-4" /> My Profile
-                      </Link>
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-                      >
-                        <Settings className="h-4 w-4" /> Settings
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setProfileOpen(false); setLogoutConfirmOpen(true); }}
-                        className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
-                      >
-                        <LogOut className="h-4 w-4" /> Logout
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+            <div className="hidden sm:flex flex-col items-end min-w-0 shrink-0">
+              <p className="text-sm font-medium text-brand-navy truncate max-w-[180px]" title={companyName}>
+                {companyName}
+              </p>
+              <p className="text-xs text-slate-gray truncate max-w-[180px]" title={hrName}>
+                HR: {hrName}
+              </p>
             </div>
-          </div>
-          <div className="px-4 sm:px-6 pb-2 flex items-center gap-1.5 text-xs text-slate-gray flex-wrap">
-            {breadcrumbs.map((crumb, i) => (
-              <span key={crumb.path} className="flex items-center gap-1.5">
-                {i > 0 && <span aria-hidden>/</span>}
-                {i === breadcrumbs.length - 1 ? (
-                  <span className="font-medium text-brand-navy">{crumb.label}</span>
-                ) : (
-                  <Link to={crumb.path} className="hover:text-brand-accent transition">
-                    {crumb.label}
-                  </Link>
-                )}
-              </span>
-            ))}
           </div>
         </header>
 

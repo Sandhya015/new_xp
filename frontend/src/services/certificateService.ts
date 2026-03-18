@@ -1,7 +1,13 @@
 import axios from 'axios'
 import { getApiBase } from '@/config/api'
+import { useAuthStore } from '@/store/authStore'
 
-const api = axios.create({ baseURL: getApiBase() })
+const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().token
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
 export type VerifyResult =
   | { valid: true; studentName: string; programName: string; university: string; completionDate: string; certificateId: string }
@@ -19,5 +25,9 @@ export const certificateService = {
       const msg = res?.data?.message ?? 'Certificate not found or invalid.'
       return { valid: false, message: msg }
     }
+  },
+  async listMy(): Promise<{ items: Array<{ id: string; certNo: string; programName: string; university: string; issueDate: string; status: string }> }> {
+    const { data } = await api.get('/api/certificates/my')
+    return data
   },
 }

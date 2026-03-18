@@ -1,20 +1,31 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { CreditCard, Download, AlertCircle } from 'lucide-react'
+import { paymentService, type OrderItem } from '@/services/paymentService'
 
 /**
- * Student Dashboard — Payments & Invoices (Part 3A §9). Pending + history layout.
+ * Student Dashboard — Payments & Invoices (SD-WF-15). API wired.
  */
 export function Invoices() {
-  const pendingCount = 0
-  const payments = [
-    { id: 'TXN001', program: 'Web Development', date: '2025-02-01', amount: '₹1,499', method: 'UPI', status: 'Success' },
-  ]
+  const [items, setItems] = useState<OrderItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    paymentService
+      .listMy()
+      .then((res) => setItems(res.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const pending = items.filter((p) => p.status !== 'success' && p.status !== 'completed')
+  const payments = items
 
   return (
     <div className="space-y-6 w-full">
       <h2 className="text-lg font-semibold text-brand-navy">Payments & Invoices</h2>
 
-      {pendingCount > 0 && (
+      {pending.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
@@ -48,7 +59,11 @@ export function Invoices() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {payments.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-gray">Loading...</td>
+                </tr>
+              ) : payments.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center">
                     <CreditCard className="mx-auto h-12 w-12 text-gray-300" />
@@ -61,13 +76,15 @@ export function Invoices() {
               ) : (
                 payments.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-mono text-gray-700">{p.id}</td>
-                    <td className="px-4 py-3 text-sm text-brand-navy">{p.program}</td>
-                    <td className="px-4 py-3 text-sm text-slate-gray">{p.date}</td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{p.amount}</td>
-                    <td className="px-4 py-3 text-sm text-slate-gray">{p.method}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-gray-700">{p.transactionId}</td>
+                    <td className="px-4 py-3 text-sm text-brand-navy">{p.courseTitle || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-gray">{p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">₹{p.amount}</td>
+                    <td className="px-4 py-3 text-sm text-slate-gray">{p.method || '—'}</td>
                     <td className="px-4 py-3">
-                      <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">{p.status}</span>
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        p.status === 'success' || p.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                      }`}>{p.status}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-brand-accent hover:underline">

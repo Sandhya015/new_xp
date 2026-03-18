@@ -1,13 +1,28 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Bell, CheckCheck } from 'lucide-react'
+import { notificationService, type NotificationItem } from '@/services/notificationService'
 
 /**
- * Student Dashboard — Notifications (Part 3A §10). Filters + list. API later.
+ * Student Dashboard — Notifications (SD-WF-16). API wired.
  */
-const FILTERS = ['All', 'Unread', 'Training', 'Internship', 'Certificates', 'Payments', 'System']
+const FILTERS = ['All', 'Unread']
 
 export function Notifications() {
   const [activeFilter, setActiveFilter] = useState('All')
+  const [items, setItems] = useState<NotificationItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = () => {
+    const unread = activeFilter === 'Unread'
+    setLoading(true)
+    notificationService
+      .list(unread ? { unread: true } : undefined)
+      .then((res) => setItems(res.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [activeFilter])
 
   return (
     <div className="space-y-6 w-full">
@@ -37,11 +52,23 @@ export function Notifications() {
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
-        <div className="p-6 text-center text-slate-gray">
-          <Bell className="mx-auto h-10 w-10 text-gray-300" />
-          <p className="mt-2 font-medium text-gray-600">No notifications yet</p>
-          <p className="mt-1 text-sm">Activity and updates will appear here when connected to the backend.</p>
-        </div>
+        {loading ? (
+          <div className="p-6 text-center text-slate-gray">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="p-6 text-center text-slate-gray">
+            <Bell className="mx-auto h-10 w-10 text-gray-300" />
+            <p className="mt-2 font-medium text-gray-600">No notifications yet</p>
+            <p className="mt-1 text-sm">Activity and updates will appear here.</p>
+          </div>
+        ) : (
+          items.map((n) => (
+            <div key={n.id} className={`p-4 ${!n.read ? 'bg-blue-50/50' : ''}`}>
+              <p className="font-medium text-gray-900">{n.title}</p>
+              <p className="mt-0.5 text-sm text-gray-600">{n.message}</p>
+              <p className="mt-1 text-xs text-slate-gray">{n.createdAt}</p>
+            </div>
+          ))
+        )}
       </div>
     </div>
   )

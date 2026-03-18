@@ -1,5 +1,5 @@
 """
-Enrollments: list for current user, create (after payment or direct). JWT for student.
+Enrollments: list for current user, create (after payment or direct), get by course. JWT for student.
 """
 from bson import ObjectId
 from datetime import datetime
@@ -11,6 +11,21 @@ from app.db import get_db, get_enrollments_collection, get_courses_collection
 enrollments_bp = Blueprint("enrollments", __name__)
 
 
+def _enrollment_to_item(e, course=None):
+    out = {
+        "id": str(e["_id"]),
+        "courseId": e.get("courseId", ""),
+        "courseTitle": course.get("title", "") if course else "",
+        "orderId": e.get("orderId"),
+        "status": e.get("status", "active"),
+        "batch": e.get("batch", ""),
+        "mode": e.get("mode", ""),
+        "createdAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else "",
+        "completedAt": e.get("completedAt").strftime("%Y-%m-%d") if e.get("completedAt") else None,
+    }
+    return out
+
+
 @enrollments_bp.route("", methods=["GET"])
 @jwt_required()
 def list_enrollments():
@@ -20,18 +35,35 @@ def list_enrollments():
     user_id = get_jwt_identity()
     coll = get_enrollments_collection()
     courses_coll = get_courses_collection()
-    cursor = coll.find({"userId": user_id}).sort("createdAt", -1)
+    status_filter = request.args.get("status", "").strip().lower()
+    q = {"userId": user_id}
+    if status_filter in ("active", "completed"):
+        q["status"] = status_filter
+    cursor = coll.find(q).sort("createdAt", -1)
     items = []
     for e in cursor:
         c = courses_coll.find_one({"_id": ObjectId(e["courseId"])}) if e.get("courseId") else None
-        items.append({
-            "id": str(e["_id"]),
-            "courseId": e.get("courseId", ""),
-            "courseTitle": c.get("title", "") if c else "",
-            "orderId": e.get("orderId"),
-            "createdAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else "",
-        })
+        items.append(_enrollment_to_item(e, c))
     return jsonify({"items": items})
+
+
+@enrollments_bp.route("/by-course/<course_id>", methods=["GET"])
+@jwt_required()
+def get_enrollment_by_course(course_id):
+    """Get current user's enrollment for a course (for Course Content page)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = get_jwt_identity()
+    coll = get_enrollments_collection()
+    courses_coll = get_courses_collection()
+    e = coll.find_one({"userId": user_id, "courseId": course_id})
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    c = courses_coll.find_one({"_id": ObjectId(course_id)})
+    return jsonify(_enrollment_to_item(e, c))
 
 
 @enrollments_bp.route("", methods=["POST"])

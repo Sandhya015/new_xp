@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { CourseCard } from '@/components/CourseCard'
 import { useCountUp } from '@/hooks/useCountUp'
+import { UNIVERSITIES_LIST } from '@/constants/universities'
 
 function useInView(once = true) {
   const ref = useRef<HTMLElement>(null)
@@ -86,24 +87,7 @@ const whyUsCards = [
   { title: 'Affordable Fees', desc: 'High-quality training at student-friendly pricing with flexible options.', Icon: IndianRupee, color: 'text-error-red' },
 ]
 
-const universities: { name: string; logo?: string }[] = [
-  { name: 'BEU — Bihar Engineering University', logo: '/images/universities/bihar-engineering-university.png' },
-  { name: 'SBTE — State Board of Technical Education', logo: '/images/universities/sbte-bihar.png' },
-  { name: 'JUT — Jharkhand University of Technology', logo: '/images/universities/jharkhand-university-of-technology.png' },
-  { name: 'AKTU — Dr. A.P.J. Abdul Kalam Technical Univ.', logo: '/images/universities/aktu.png' },
-  { name: 'Patna University', logo: '/images/universities/patna-university.png' },
-  { name: 'Patliputra University', logo: '/images/universities/patliputra-university.png' },
-  { name: 'Munger University', logo: '/images/universities/munger-university.png' },
-  { name: 'Lalit Narayan Mithila University', logo: '/images/universities/lalit-narayan-mithila-university.png' },
-  { name: 'Veer Kunwar Singh University', logo: '/images/universities/veer-kunwar-singh-university.png' },
-  { name: 'Tilka Manjhi Bhagalpur University', logo: '/images/universities/tilka-manjhi-bhagalpur-university.png' },
-  { name: 'Bhupendra Narayan Mandal University', logo: '/images/universities/bhupendra-narayan-mandal-university.png' },
-  { name: 'Jai Prakash University', logo: '/images/universities/jai-prakash-university.png' },
-  { name: 'Magadh University', logo: '/images/universities/magadh-university.png' },
-  { name: 'Purnea University', logo: '/images/universities/purnea-university.png' },
-  { name: 'Nalanda Open University', logo: '/images/universities/nalanda-open-university.png' },
-  { name: 'Babasaheb Bhimrao Ambedkar Bihar University', logo: '/images/universities/babasaheb-ambedkar-bihar-university.png' },
-]
+const universities = UNIVERSITIES_LIST
 
 const whyInternshipCards = [
   { title: 'Practical Knowledge', desc: 'Apply theoretical concepts in real-world scenarios. Industry projects make learning stick and skills market-ready.', Icon: Lightbulb, iconBg: 'bg-amber-400/20 text-amber-500' },
@@ -315,11 +299,7 @@ export function Home() {
               {[...universities, ...universities].map((uni, i) => (
                 <div key={`${uni.name}-${i}`} className="flex-shrink-0 w-28 sm:w-36 lg:w-40 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm flex flex-col items-center justify-center text-center min-w-0">
                   <div className="flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-brand-light-bg overflow-hidden shrink-0">
-                    {uni.logo ? (
-                      <img src={uni.logo} alt="" className="h-full w-full object-contain" />
-                    ) : (
-                      <Building2 className="h-5 w-5 sm:h-7 sm:w-7 text-brand-navy" />
-                    )}
+                    <img src={uni.logo} alt="" className="h-full w-full object-contain" />
                   </div>
                   <p className="mt-2 sm:mt-3 text-xs sm:text-sm font-medium text-brand-navy break-words">{uni.name}</p>
                 </div>
@@ -513,7 +493,7 @@ export function Home() {
                   <input type="tel" required placeholder="Contact Number (10-digit) *" maxLength={10} value={inlineContact.contactNumber} onChange={(e) => setInlineContact((c) => ({ ...c, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 10) }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
                   <select required value={inlineContact.university} onChange={(e) => setInlineContact((c) => ({ ...c, university: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
                     <option value="">University *</option>
-                    {universities.map((u) => <option key={u.name} value={u.name}>{u.name}</option>)}
+                    {universities.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
                   </select>
                   <input type="text" required placeholder="College Name *" value={inlineContact.collegeName} onChange={(e) => setInlineContact((c) => ({ ...c, collegeName: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
                   <select required value={inlineContact.semester} onChange={(e) => setInlineContact((c) => ({ ...c, semester: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">

@@ -4,7 +4,7 @@ service: xpertintern-api
 
 provider:
   name: aws
-  runtime: python3.12
+  runtime: python3.11
   region: ap-south-1
   stage: ${opt:stage, 'dev'}
   environment:
@@ -23,9 +23,12 @@ plugins:
 custom:
   wsgi:
     app: app_wsgi.app
+    packRequirements: false
   pythonRequirements:
     slim: true
-    # Use dockerizePip: true if you hit platform issues (e.g. building on Mac for Lambda Linux)
+    strip: true
+    layer: true
+    dockerizePip: true
     noDeploy:
       - pytest
       - pytest-cov
@@ -35,6 +38,28 @@ functions:
     handler: wsgi_handler.handler
     timeout: 30
     memorySize: 256
+    package:
+      individually: true
+      # Include only app code and WSGI handler; deps come from the requirements layer
+      patterns:
+        - '!venv/**'
+        - '!.venv/**'
+        - '!.venv_bak/**'
+        - '!venv_bak/**'
+        - '!.git/**'
+        - '!node_modules/**'
+        - '!__pycache__/**'
+        - '!*.pyc'
+        - '!.env'
+        - '!.env.*'
+        - '!**/__pycache__/**'
+        - '!*.md'
+        - '!package-lock.json'
+        - 'app/**'
+        - 'app_wsgi.py'
+        - 'wsgi_handler.py'
+        - 'serverless_wsgi.py'
+        - '.serverless-wsgi'
     events:
       - http:
           path: /

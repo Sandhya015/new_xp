@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Eye, Download } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 
@@ -78,7 +79,7 @@ export function StudentList() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button type="button" className="rounded p-1.5 text-gray-500 hover:bg-gray-100" title="View profile"><Eye className="h-4 w-4" /></button>
+                    <Link to={`/admin/students/${row.id}`} className="rounded p-1.5 text-gray-500 hover:bg-gray-100" title="View profile"><Eye className="h-4 w-4" /></Link>
                   </td>
                 </tr>
               ))}

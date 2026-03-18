@@ -1,13 +1,104 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Save, Eye, Send, ArrowLeft } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
+import { Save, Send, ArrowLeft } from 'lucide-react'
+import { internshipService } from '@/services/internshipService'
 
 /**
- * Company Dashboard — Post Internship (Part 4A §5). Form structure with all field groups. API later.
+ * Company Dashboard — Post Internship (CD-WF-04, CD-WF-05, CD-WF-07). Create / Edit. API wired.
  */
 export function PostInternship() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const editId = searchParams.get('edit') || ''
+
   const [mode, setMode] = useState<'onsite' | 'remote' | 'hybrid'>('remote')
   const [stipendType, setStipendType] = useState<'paid' | 'unpaid'>('paid')
+  const [title, setTitle] = useState('')
+  const [domain, setDomain] = useState('')
+  const [openings, setOpenings] = useState(1)
+  const [description, setDescription] = useState('')
+  const [requirements, setRequirements] = useState('')
+  const [skills, setSkills] = useState('')
+  const [location, setLocation] = useState('')
+  const [duration, setDuration] = useState('')
+  const [stipendAmount, setStipendAmount] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [loading, setLoading] = useState(!!editId)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!editId) return
+    setLoading(true)
+    internshipService
+      .getById(editId)
+      .then((d) => {
+        setTitle(d.title || '')
+        setDomain(d.domain || '')
+        setOpenings(Number(d.openings) || 1)
+        setDescription(d.description || '')
+        setRequirements(d.requirements || '')
+        setSkills(d.skills || '')
+        setLocation(d.location || '')
+        setDuration(d.duration || '')
+        setStipendAmount(typeof d.stipend === 'string' ? d.stipend : '')
+        setDeadline(d.deadline || '')
+        const t = (d.type || 'remote').toString().toLowerCase()
+        setMode(t === 'onsite' || t === 'hybrid' ? t : 'remote')
+        setStipendType(d.stipend && String(d.stipend) !== 'Unpaid' ? 'paid' : 'unpaid')
+      })
+      .catch(() => setError('Failed to load internship.'))
+      .finally(() => setLoading(false))
+  }, [editId])
+
+  const buildPayload = (status: 'draft' | 'active') => ({
+    title: title.trim() || 'Untitled',
+    domain: domain.trim() || 'Other',
+    openings: Math.max(1, openings),
+    description: description.trim(),
+    requirements: requirements.trim(),
+    skills: skills.trim(),
+    type: mode,
+    location: location.trim(),
+    duration: duration || '1 Month',
+    stipend: stipendType === 'paid' ? String(stipendAmount || '0') : 'Unpaid',
+    deadline: deadline || '',
+    status,
+  })
+
+  const handleSaveDraft = () => {
+    setError(null)
+    setSaving(true)
+    const payload = buildPayload('draft')
+    const promise = editId ? internshipService.update(editId, payload) : internshipService.create(payload)
+    promise
+      .then(() => navigate('/company/internships'))
+      .catch(() => setError('Failed to save draft.'))
+      .finally(() => setSaving(false))
+  }
+
+  const handlePublish = () => {
+    if (!title.trim()) {
+      setError('Title is required.')
+      return
+    }
+    setError(null)
+    setSaving(true)
+    const payload = buildPayload('active')
+    const promise = editId ? internshipService.update(editId, payload) : internshipService.create(payload)
+    promise
+      .then(() => navigate('/company/internships'))
+      .catch(() => setError('Failed to publish listing.'))
+      .finally(() => setSaving(false))
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[200px]">
+        <p className="text-slate-gray">Loading...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 w-full max-w-4xl">
@@ -17,7 +108,11 @@ export function PostInternship() {
         </Link>
       </div>
 
-      <h2 className="text-lg font-semibold text-brand-navy">Post New Internship</h2>
+      <h2 className="text-lg font-semibold text-brand-navy">{editId ? 'Edit Internship' : 'Post New Internship'}</h2>
+
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">{error}</div>
+      )}
 
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-gray-200 bg-gray-50 px-5 py-3">
@@ -27,12 +122,12 @@ export function PostInternship() {
         <div className="p-5 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Internship Title *</label>
-            <input type="text" placeholder="e.g. Web Development Intern" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Web Development Intern" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Category *</label>
-              <select className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
+              <select value={domain} onChange={(e) => setDomain(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
                 <option value="">Select</option>
                 <option>Web Dev</option>
                 <option>App Dev</option>
@@ -43,20 +138,20 @@ export function PostInternship() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Number of Openings *</label>
-              <input type="number" min={1} placeholder="1" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="number" min={1} value={openings} onChange={(e) => setOpenings(Number(e.target.value) || 1)} placeholder="1" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Internship Description *</label>
-            <textarea rows={4} placeholder="Min 150 characters..." className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Min 150 characters..." className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Roles & Responsibilities *</label>
-            <textarea rows={3} placeholder="Bullet points or paragraph..." className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <textarea rows={3} value={requirements} onChange={(e) => setRequirements(e.target.value)} placeholder="Bullet points or paragraph..." className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Required Skills (tags)</label>
-            <input type="text" placeholder="e.g. HTML, CSS, Python — add as tags" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input type="text" value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="e.g. HTML, CSS, Python — add as tags" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           </div>
         </div>
       </div>
@@ -118,12 +213,12 @@ export function PostInternship() {
           {(mode === 'onsite' || mode === 'hybrid') && (
             <div>
               <label className="block text-sm font-medium text-gray-700">Location *</label>
-              <input type="text" placeholder="City, State" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="text" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City, State" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             </div>
           )}
           <div>
             <label className="block text-sm font-medium text-gray-700">Duration *</label>
-            <select className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
+            <select value={duration} onChange={(e) => setDuration(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
               <option value="">Select</option>
               <option>1 Month</option>
               <option>2 Months</option>
@@ -154,43 +249,23 @@ export function PostInternship() {
           {stipendType === 'paid' && (
             <div>
               <label className="block text-sm font-medium text-gray-700">Stipend Amount (₹/month) *</label>
-              <input type="number" min={0} placeholder="e.g. 5000" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="number" min={0} value={stipendAmount} onChange={(e) => setStipendAmount(e.target.value)} placeholder="e.g. 5000" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Application Start Date *</label>
-              <input type="date" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700">Application Deadline *</label>
-              <input type="date" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Status</label>
-            <div className="mt-2 flex gap-4">
-              <label className="flex items-center gap-2">
-                <input type="radio" name="status" defaultChecked className="text-brand-accent" />
-                <span className="text-sm">Draft</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" name="status" className="text-brand-accent" />
-                <span className="text-sm">Active (Publish)</span>
-              </label>
+              <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             </div>
           </div>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <button type="button" disabled={saving} onClick={handleSaveDraft} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           <Save className="h-4 w-4" /> Save as Draft
         </button>
-        <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
-          <Eye className="h-4 w-4" /> Preview Listing
-        </button>
-        <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600">
+        <button type="button" disabled={saving} onClick={handlePublish} className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50">
           <Send className="h-4 w-4" /> Publish Now
         </button>
         <Link to="/company/internships" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">

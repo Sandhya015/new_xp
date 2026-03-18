@@ -19,7 +19,7 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 
 const SIDEBAR_LINKS = [
-  { to: '/dashboard', label: 'Home / Dashboard', icon: Home },
+  { to: '/dashboard', label: 'Dashboard', icon: Home },
   { to: '/dashboard/training', label: 'Training', icon: BookOpen },
   { to: '/dashboard/internships', label: 'Internships', icon: Briefcase },
   { to: '/dashboard/my-courses', label: 'My Enrolled Courses', icon: Play },

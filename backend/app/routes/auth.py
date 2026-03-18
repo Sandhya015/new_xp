@@ -106,6 +106,7 @@ def register():
     }
     if role == "company":
         doc["companyName"] = name
+        doc["status"] = "pending"
         doc["hrName"] = (data.get("hrName") or "").strip() or name
         doc["hrMobile"] = (data.get("hrMobile") or "").strip() or None
         doc["industryType"] = (data.get("industryType") or "").strip() or None
@@ -190,6 +191,62 @@ def me():
     if not user:
         return jsonify({"error": "User not found"}), 404
     return jsonify(_user_to_response(user))
+
+
+@auth_bp.route("/me", methods=["PATCH"])
+@jwt_required()
+def update_me():
+    """Update current user profile (SD-WF-17)."""
+    from bson import ObjectId
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    users = get_users_collection()
+    allowed = {
+        "name", "fullName", "mobile", "university", "collegeName", "semester",
+        "course", "stream", "collegeRegNo", "linkedin", "dateOfBirth", "gender",
+        "alternateContact", "cgpa", "percentage",
+    }
+    updates = {k: (data.get(k) if data.get(k) is not None else None) for k in allowed if k in data}
+    if not updates:
+        return jsonify({"error": "No valid fields to update"}), 400
+    if "name" in updates and updates["name"]:
+        updates["fullName"] = updates["name"]
+    users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
+    user = users.find_one({"_id": ObjectId(user_id)})
+    return jsonify(_user_to_response(user))
+
+
+@auth_bp.route("/change-password", methods=["POST"])
+@jwt_required()
+def change_password():
+    """Change password (SD-WF-18). Requires current password."""
+    from bson import ObjectId
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    current = (data.get("currentPassword") or data.get("current_password") or "").strip()
+    new_pw = (data.get("newPassword") or data.get("new_password") or "").strip()
+    if not current:
+        return jsonify({"error": "Current password is required"}), 400
+    if not new_pw:
+        return jsonify({"error": "New password is required"}), 400
+    ok, msg = _validate_password(new_pw)
+    if not ok:
+        return jsonify({"error": msg}), 400
+    users = get_users_collection()
+    user = users.find_one({"_id": ObjectId(user_id)})
+    if not user or not _check_password(current, user.get("password", "")):
+        return jsonify({"error": "Current password is incorrect"}), 401
+    users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"password": _hash_password(new_pw)}},
+    )
+    return jsonify({"message": "Password updated successfully"})
 
 
 @auth_bp.route("/refresh", methods=["POST"])

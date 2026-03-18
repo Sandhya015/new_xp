@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { CreditCard, Download, CheckCircle, XCircle, Clock } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 
@@ -91,7 +92,7 @@ export function PaymentList() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button type="button" className="text-sm font-medium text-brand-accent hover:underline">View</button>
+                    <Link to={`/admin/payments/${row.id}`} className="text-sm font-medium text-brand-accent hover:underline">View</Link>
                   </td>
                 </tr>
               ))}

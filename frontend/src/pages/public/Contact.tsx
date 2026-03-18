@@ -3,14 +3,7 @@ import { Link } from 'react-router-dom'
 import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube, X } from 'lucide-react'
 import { Notification } from '@/components/Notification'
 import { contactService } from '@/services/contactService'
-
-const UNIVERSITIES = [
-  'BEU — Bihar Engineering University', 'SBTE — State Board of Technical Education', 'JUT — Jharkhand University of Technology',
-  'AKTU — Dr. A.P.J. Abdul Kalam Technical Univ.', 'Patna University', 'Patliputra University', 'Munger University',
-  'Lalit Narayan Mithila University', 'Veer Kunwar Singh University', 'Tilka Majhi Bhagalpur University',
-  'Bhupendra Narayan Mandal University', 'Jai Prakash University', 'Magadh University', 'Purnea University',
-  'Nalanda Open University', 'Babasaheb Bhimrao Ambedkar Bihar University',
-]
+import { UNIVERSITIES_LIST } from '@/constants/universities'
 const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
 const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -264,7 +257,7 @@ export function Contact() {
                       className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
                     >
                       <option value="">Select University</option>
-                      {UNIVERSITIES.map((u) => <option key={u} value={u}>{u}</option>)}
+                      {UNIVERSITIES_LIST.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
                     </select>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

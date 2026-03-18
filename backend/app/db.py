@@ -67,6 +67,21 @@ def get_visitors_collection() -> Collection:
     return get_db()["visitors"]
 
 
+def get_followups_collection() -> Collection:
+    """Lead follow-up activities (leadId, type, date, notes, addedBy)."""
+    return get_db()["followups"]
+
+
+def get_notifications_collection() -> Collection:
+    """User notifications (userId, type, title, message, read, createdAt)."""
+    return get_db()["notifications"]
+
+
+def get_support_tickets_collection() -> Collection:
+    """Support tickets (userId, subject, category, description, status, priority, createdAt)."""
+    return get_db()["support_tickets"]
+
+
 def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:
     """Initialize connection. Call from create_app after config is loaded. Returns db or None if URI empty."""
     if not uri or not uri.strip():

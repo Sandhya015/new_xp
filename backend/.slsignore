@@ -1,0 +1,15 @@
+# Ignore local envs and caches so they are not deployed to Lambda
+venv
+.venv
+.venv_bak
+venv_bak
+.env
+.git
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+node_modules
+*.md
+.serverless

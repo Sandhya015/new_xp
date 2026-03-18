@@ -1,10 +1,11 @@
 """
-Courses: list (paginated), get by id. Public + admin CRUD.
+Courses: list (paginated), get by id, get content for enrolled student. Public + admin CRUD.
 """
 from bson import ObjectId
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from app.db import get_db, get_courses_collection
+from app.db import get_db, get_courses_collection, get_enrollments_collection
 
 courses_bp = Blueprint("courses", __name__)
 
@@ -63,3 +64,51 @@ def get_course(course_id):
     if not c:
         return jsonify({"error": "Course not found"}), 404
     return jsonify(_course_to_item(c))
+
+
+def _course_to_content(c):
+    """Full course for enrolled student: curriculum, classLinks, materials, assignments, quizzes, announcements."""
+    if not c:
+        return None
+    return {
+        "id": str(c["_id"]),
+        "title": c.get("title", ""),
+        "description": c.get("description", ""),
+        "shortDescription": c.get("shortDescription", ""),
+        "fullDescription": c.get("fullDescription", ""),
+        "category": c.get("category", ""),
+        "duration": c.get("duration", ""),
+        "durationValue": c.get("durationValue", ""),
+        "durationUnit": c.get("durationUnit", ""),
+        "mode": c.get("mode", "Online"),
+        "universities": c.get("universities", ""),
+        "price": c.get("price", 0),
+        "tag": c.get("tag", ""),
+        "trainerName": c.get("trainerName", ""),
+        "curriculum": c.get("curriculum", []),
+        "classLinks": c.get("classLinks", []),
+        "studyMaterials": c.get("studyMaterials", []),
+        "assignments": c.get("assignments", []),
+        "quizzes": c.get("quizzes", []),
+        "announcements": c.get("announcements", []),
+    }
+
+
+@courses_bp.route("/<course_id>/content", methods=["GET"])
+@jwt_required()
+def get_course_content(course_id):
+    """Full course content for enrolled students only (SD-WF-10)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = get_jwt_identity()
+    enroll_coll = get_enrollments_collection()
+    if not enroll_coll.find_one({"userId": user_id, "courseId": course_id}):
+        return jsonify({"error": "Not enrolled in this course"}), 403
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    return jsonify(_course_to_content(c))

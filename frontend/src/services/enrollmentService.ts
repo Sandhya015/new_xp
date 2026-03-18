@@ -14,12 +14,20 @@ export type EnrollmentItem = {
   courseId: string
   courseTitle: string
   orderId?: string
+  status?: string
+  batch?: string
+  mode?: string
   createdAt: string
+  completedAt?: string | null
 }
 
 export const enrollmentService = {
-  async list(): Promise<{ items: EnrollmentItem[] }> {
-    const { data } = await api.get<{ items: EnrollmentItem[] }>('/api/enrollments')
+  async list(params?: { status?: string }): Promise<{ items: EnrollmentItem[] }> {
+    const { data } = await api.get<{ items: EnrollmentItem[] }>('/api/enrollments', { params })
+    return data
+  },
+  async getByCourseId(courseId: string): Promise<EnrollmentItem> {
+    const { data } = await api.get<EnrollmentItem>(`/api/enrollments/by-course/${courseId}`)
     return data
   },
 }
