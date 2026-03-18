@@ -1,13 +1,16 @@
 """
 One-time seed: ensure default admin user and sample courses exist. Called at app startup when DB is configured.
+Uses werkzeug hashing to match auth (no bcrypt on Lambda).
+Set RESET_ADMIN_PASSWORD=1 in env to force-update existing admin password to ADMIN_PASSWORD (one-time).
 """
+import os
 from datetime import datetime
-import bcrypt
+from werkzeug.security import generate_password_hash
 
 from app.db import get_users_collection, get_courses_collection
 
 ADMIN_EMAIL = "admin@xpertintern.com"
-ADMIN_PASSWORD = "Admin@xpertintern"
+ADMIN_PASSWORD = "Admin@xpertintern#@"
 ADMIN_NAME = "XpertIntern Admin"
 
 DEFAULT_COURSES = [
@@ -21,17 +24,24 @@ DEFAULT_COURSES = [
 
 
 def _hash(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return generate_password_hash(password, method="pbkdf2:sha256")
 
 
 def seed_admin_if_missing() -> None:
     try:
         users = get_users_collection()
-        if users.find_one({"email": ADMIN_EMAIL}):
+        admin = users.find_one({"email": ADMIN_EMAIL})
+        hashed = _hash(ADMIN_PASSWORD)
+        if admin:
+            if os.environ.get("RESET_ADMIN_PASSWORD", "").strip().lower() in ("1", "true", "yes"):
+                users.update_one(
+                    {"email": ADMIN_EMAIL},
+                    {"$set": {"password": hashed, "name": ADMIN_NAME}},
+                )
             return
         users.insert_one({
             "email": ADMIN_EMAIL,
-            "password": _hash(ADMIN_PASSWORD),
+            "password": hashed,
             "name": ADMIN_NAME,
             "role": "admin",
             "createdAt": datetime.utcnow(),

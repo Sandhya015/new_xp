@@ -63,7 +63,26 @@ endpoints:
 
 That base URL is your **API base URL** (e.g. `https://xxxxxxxxxx.execute-api.ap-south-1.amazonaws.com/dev`).
 
-## 4. Point the frontend to the deployed API
+## 4. Set Lambda environment variables (required for login/API to work)
+
+After the first deploy, the API may return **503** until these are set. In AWS Console:
+
+1. Go to **Lambda** → **Functions** → **xpertintern-api-dev-api** (or your stage name).
+2. **Configuration** → **Environment variables** → **Edit**.
+3. Add (or update):
+
+| Key | Value (example — use your real values) |
+|-----|----------------------------------------|
+| `MONGODB_URI` | `mongodb+srv://xpertintern_app:<db_password>@cluster0.yhkeqow.mongodb.net/xpertintern?retryWrites=true&w=majority&appName=Cluster0` — replace `<db_password>` with your Atlas DB user password. |
+| `JWT_SECRET_KEY` | A long random string (e.g. run `openssl rand -hex 32` and paste). |
+| `SECRET_KEY` | Same as JWT or another secret. |
+
+4. **Save**. No redeploy needed; Lambda uses the new values on the next request.
+
+- **MongoDB Atlas**: In **Network Access**, allow `0.0.0.0/0` (or your Lambda/NAT IPs) so Lambda can reach Atlas.
+- **Never** put AWS access keys or DB passwords in code or in git. Use Console or SSM/Secrets Manager.
+
+## 5. Point the frontend to the deployed API
 
 In your **frontend** (e.g. Vercel):
 
@@ -71,7 +90,7 @@ In your **frontend** (e.g. Vercel):
   `VITE_API_URL=https://xxxxxxxxxx.execute-api.ap-south-1.amazonaws.com/dev`
 - Redeploy the frontend so it uses the new API.
 
-## 5. Other stages (staging / production)
+## 6. Other stages (staging / production)
 
 Use a different stage so you can have separate APIs (e.g. staging vs production):
 
@@ -82,13 +101,13 @@ npx serverless deploy --stage production
 
 Set `MONGODB_URI`, `SECRET_KEY`, and `CORS_ORIGINS` per stage (e.g. different CORS for staging vs production frontend URLs). You can use AWS Systems Manager Parameter Store or Secrets Manager and reference them in `serverless.yml` instead of exporting in the shell.
 
-## 6. No loops / no scheduled jobs
+## 7. No loops / no scheduled jobs
 
 - There are **no** cron or scheduled Lambda triggers in this setup.
 - Lambda runs only when API Gateway receives an HTTP request.
 - Your Flask code (including `seed_admin_if_missing`) runs only on **cold start** or when a request is handled; there is no polling or infinite loop.
 
-## 7. Optional: keep secrets in AWS
+## 8. Optional: keep secrets in AWS
 
 To avoid passing secrets via the shell:
 
@@ -103,14 +122,15 @@ To avoid passing secrets via the shell:
 
 3. Create the parameters in AWS (Console or CLI) and deploy again.
 
-## 8. Summary
+## 9. Summary
 
 | Step | Action |
 |------|--------|
 | 1 | Install Serverless: `npm install -g serverless` |
 | 2 | Set `MONGODB_URI`, `SECRET_KEY`, `CORS_ORIGINS` (and optionally `JWT_SECRET_KEY`) |
 | 3 | From `backend/`: `npx serverless deploy --stage dev` |
-| 4 | Copy the API base URL and set `VITE_API_URL` in the frontend (e.g. Vercel env) |
-| 5 | Redeploy frontend; test login/register against the new API |
+| 4 | In Lambda Console, set `MONGODB_URI` and `JWT_SECRET_KEY` (see step 4 above). |
+| 5 | Copy the API base URL and set `VITE_API_URL` in the frontend (e.g. Vercel env). |
+| 6 | Redeploy frontend; test login/register against the new API. |
 
 Your API is then hosted on AWS with **no always-on process and no background loops** — only pay per request.

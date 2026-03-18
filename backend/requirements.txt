@@ -4,7 +4,7 @@ flask-cors>=4.0.0
 flask-jwt-extended>=4.6.0
 python-dotenv>=1.0.0
 pymongo[srv]>=4.6.0
-bcrypt>=4.1.0
+# bcrypt removed to avoid GLIBC native-extension issues on Lambda; we use werkzeug.security
 # Lambda deployment (serverless-wsgi)
 serverless-wsgi>=3.0.0
 # Payment: razorpay

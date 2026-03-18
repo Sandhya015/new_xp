@@ -9,6 +9,7 @@ __pycache__/
 *.so
 .env
 .env.local
+backend/lambda-env.json
 .env.*.local
 *.log
 .DS_Store

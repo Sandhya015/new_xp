@@ -12,6 +12,9 @@ provider:
     MONGODB_URI: ${env:MONGODB_URI, ''}
     SECRET_KEY: ${env:SECRET_KEY, ''}
     JWT_SECRET_KEY: ${env:JWT_SECRET_KEY, ''}
+    # Strip /dev (stage) from path so Flask sees /api/... not /dev/api/...
+    API_GATEWAY_BASE_PATH: ${self:provider.stage}
+    # Comma-separated origins; include your frontend URL for CORS
     CORS_ORIGINS: ${env:CORS_ORIGINS, 'http://localhost:5173,http://127.0.0.1:5173,https://www.xpertintern.com,https://xpertintern.com'}
   # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
   # vpc: ...
@@ -28,19 +31,21 @@ custom:
     slim: true
     strip: true
     layer: true
-    dockerizePip: true
+    dockerizePip: false
+    pythonBin: python3
     noDeploy:
       - pytest
       - pytest-cov
 
 functions:
   api:
-    handler: wsgi_handler.handler
+    handler: safe_handler.handler
     timeout: 30
     memorySize: 256
+    layers:
+      - Ref: PythonRequirementsLambdaLayer
     package:
       individually: true
-      # Include only app code and WSGI handler; deps come from the requirements layer
       patterns:
         - '!venv/**'
         - '!.venv/**'
@@ -57,6 +62,7 @@ functions:
         - '!package-lock.json'
         - 'app/**'
         - 'app_wsgi.py'
+        - 'safe_handler.py'
         - 'wsgi_handler.py'
         - 'serverless_wsgi.py'
         - '.serverless-wsgi'
@@ -64,8 +70,42 @@ functions:
       - http:
           path: /
           method: ANY
+          cors:
+            origin: 'https://www.xpertintern.com,https://xpertintern.com,http://localhost:5173,http://127.0.0.1:5173'
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
       - http:
           path: /{proxy+}
           method: ANY
+          cors:
+            origin: 'https://www.xpertintern.com,https://xpertintern.com,http://localhost:5173,http://127.0.0.1:5173'
+            headers:
+              - Content-Type
+              - Authorization
+            allowCredentials: true
 
-# No scheduled events / cron — nothing runs in a loop; Lambda only on request
+# Add CORS headers to error responses (4XX/5XX) so browser doesn't block on error
+resources:
+  Resources:
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'https://www.xpertintern.com'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+          gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+    GatewayResponseDefault5XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'https://www.xpertintern.com'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+          gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: ApiGatewayRestApi

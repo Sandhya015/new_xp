@@ -1,26 +1,40 @@
 """
 Auth: register (student/company), login, me, refresh. JWT + MongoDB.
+Uses werkzeug for password hashing (pure Python, no bcrypt native lib on Lambda).
 """
 import re
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, get_jwt
-import bcrypt
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.db import get_db, get_users_collection
 
 auth_bp = Blueprint("auth", __name__)
 
-# ----- helpers -----
+# Werkzeug method (pbkdf2:sha256) — no native deps, works on Lambda
+_PASSWORD_METHOD = "pbkdf2:sha256"
+
+
 def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return generate_password_hash(password, method=_PASSWORD_METHOD)
 
 
 def _check_password(password: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
-    except Exception:
+    if not hashed:
         return False
+    # Werkzeug (pbkdf2:sha256) — used for all new passwords
+    if hashed.startswith("pbkdf2:") or hashed.startswith("scrypt:"):
+        return check_password_hash(hashed, password)
+    # Legacy bcrypt ($2b$/$2a$) — only if bcrypt is installed (e.g. local dev)
+    if hashed.startswith("$2b$") or hashed.startswith("$2a$"):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+        except Exception:
+            return False
+    # Fallback: treat as werkzeug
+    return check_password_hash(hashed, password)
 
 
 def _user_to_response(user: dict) -> dict:

@@ -24,7 +24,10 @@ def get_db() -> Database | None:
 
 def get_users_collection() -> Collection:
     """Users collection for auth (students, companies, admins)."""
-    return get_db()["users"]
+    db = get_db()
+    if db is None:
+        raise RuntimeError("Database not configured")
+    return db["users"]
 
 
 def get_courses_collection() -> Collection:

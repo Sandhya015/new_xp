@@ -1,0 +1,8 @@
+{
+  "httpMethod": "GET",
+  "path": "/dev/",
+  "headers": {"Origin": "https://www.xpertintern.com"},
+  "body": null,
+  "requestContext": {"stage": "dev"},
+  "isBase64Encoded": false
+}

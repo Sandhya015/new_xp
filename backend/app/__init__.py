@@ -17,28 +17,72 @@ def create_app(config_class=None):
 
     uri = app.config.get("MONGODB_URI", "").strip()
     if uri:
-        init_db(uri)
-        from app.seed import seed_admin_if_missing
-        seed_admin_if_missing()
+        try:
+            init_db(uri)
+            from app.seed import seed_admin_if_missing
+            seed_admin_if_missing()
+        except Exception:
+            # Don't fail app startup if DB is unreachable (e.g. Lambda cold start, network).
+            # CORS preflight and health checks can still run; DB routes will return 503.
+            pass
 
     JWTManager(app)
 
-    origins = app.config.get("CORS_ORIGINS") or ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Parse CORS_ORIGINS: support list or comma-separated string (e.g. from Lambda env)
+    _raw = app.config.get("CORS_ORIGINS")
+    if isinstance(_raw, str):
+        origins = [o.strip() for o in _raw.split(",") if o.strip()]
+    elif isinstance(_raw, list):
+        origins = _raw
+    else:
+        origins = []
+    if not origins:
+        origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Ensure production frontend origins are allowed when not in strict dev
+    _extra = ["https://www.xpertintern.com", "https://xpertintern.com", "http://localhost:5173", "http://127.0.0.1:5173"]
+    for o in _extra:
+        if o not in origins:
+            origins.append(o)
+
+    app.config["CORS_ORIGINS_LIST"] = origins
+
     CORS(
         app,
         origins=origins,
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["Content-Type"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
+
+    @app.before_request
+    def _cors_preflight():
+        """Respond to OPTIONS preflight with CORS headers so API Gateway/Lambda always return them."""
+        if request.method != "OPTIONS":
+            return None
+        origin = request.headers.get("Origin")
+        allow_origin = origin if origin and origin in app.config["CORS_ORIGINS_LIST"] else ""
+        from flask import make_response
+        r = make_response("", 204)
+        if allow_origin:
+            r.headers["Access-Control-Allow-Origin"] = allow_origin
+        r.headers["Access-Control-Allow-Credentials"] = "true"
+        r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        r.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        r.headers["Access-Control-Max-Age"] = "86400"
+        return r
 
     @app.after_request
     def _add_cors_headers(response):
         origin = request.headers.get("Origin")
-        if origin and origin in origins and "Access-Control-Allow-Origin" not in response.headers:
+        if not origin:
+            return response
+        if origin in app.config["CORS_ORIGINS_LIST"]:
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Max-Age"] = "86400"
         return response
 
     from app.routes.health import health_bp
@@ -70,5 +114,28 @@ def create_app(config_class=None):
     @app.route("/")
     def index():
         return {"service": "xpertintern-api", "version": "0.1.0", "docs": "/api/health"}
+
+    @app.errorhandler(Exception)
+    def _handle_error(e):
+        """Catch all unhandled exceptions so Lambda returns 500 + JSON (and CORS) instead of 502."""
+        from flask import make_response
+        import traceback
+        if hasattr(app, "logger"):
+            app.logger.exception("Unhandled error: %s", e)
+        else:
+            traceback.print_exc()
+        origin = request.headers.get("Origin", "")
+        allow_origin = origin if origin in app.config.get("CORS_ORIGINS_LIST", []) else ""
+        body = {"error": "An unexpected error occurred. Please try again."}
+        if app.config.get("DEBUG"):
+            body["detail"] = str(e)
+        r = make_response(body, 500)
+        r.headers["Content-Type"] = "application/json"
+        if allow_origin:
+            r.headers["Access-Control-Allow-Origin"] = allow_origin
+        r.headers["Access-Control-Allow-Credentials"] = "true"
+        r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        r.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        return r
 
     return app
