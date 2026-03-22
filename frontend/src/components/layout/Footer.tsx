@@ -31,26 +31,37 @@ function WhatsAppIcon({ className }: { className?: string }) {
   )
 }
 
-const quickLinks = [
+/** Platform column — order per spec */
+const platformLinks = [
   { to: '/', label: 'Home' },
   { to: '/training', label: 'Training' },
   { to: '/internship', label: 'Internship' },
   { to: '/verify', label: 'Certificate Verification' },
-  { to: '/about', label: 'About Us' },
-  { to: '/contact', label: 'Contact Us' },
-  { to: '/login', label: 'Register / Login' },
+  { to: '/register', label: 'Register / Login' },
+  { to: '/blog', label: 'Blog' },
 ]
-const legalLinks = [
-  { to: '/privacy', label: 'Privacy Policy' },
-  { to: '/terms', label: 'Terms and Conditions' },
-  { to: '/refund', label: 'Refund & Cancellation Policy' },
-  { to: '/certificate-policy', label: 'Certificate Authenticity Policy' },
-  { to: '/disclaimer', label: 'Disclaimer' },
-]
+
 const supportLinks = [
   { to: '/contact', label: 'Contact Us' },
   { to: '/faq', label: 'Help & FAQ' },
-  { to: '/about', label: 'About Us' },
+  { to: '/report-issue', label: 'Report an Issue' },
+]
+
+const companyLinks = [
+  { to: '/about' as const, label: 'About Us' },
+  { to: '/' as const, label: 'Our Partner Universities', hashLink: true as const },
+  { to: '/partners/colleges' as const, label: 'Our Partner Colleges/Institutes' },
+  { to: '/partners/companies' as const, label: 'Our Partner Companies' },
+  { to: '/careers' as const, label: 'Careers' },
+  { to: '/success-stories' as const, label: 'Success Stories' },
+]
+
+const legalLinks = [
+  { to: '/privacy', label: 'Privacy Policy' },
+  { to: '/terms', label: 'Terms and Conditions' },
+  { to: '/refund', label: 'Refund and Cancellation Policy' },
+  { to: '/cookies', label: 'Cookie Policy' },
+  { to: '/disclaimer', label: 'Disclaimer' },
 ]
 
 const paymentMethods = [
@@ -80,22 +91,23 @@ export function Footer() {
             <p className="mt-2 text-sm leading-relaxed text-gray-400">University-based programs, verified certificates, and industry partnerships as per AICTE and UGC guidelines.</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-gray-300">
-                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> AICTE Approved
+                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> Follow AICTE Guidelines
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-gray-300">
-                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> UGC Approved
+                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> UGC Guidelines
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-gray-300">
                 <Lock className="h-3.5 w-3.5 text-green-400" /> Secure Platform
               </span>
             </div>
+            {/* Social order: Facebook, Instagram, LinkedIn, Twitter, WhatsApp, YouTube */}
             <div className="mt-5 flex flex-wrap gap-2">
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Instagram"><Instagram className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="YouTube"><Youtube className="h-4 w-4" /></a>
               <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Facebook"><Facebook className="h-4 w-4" /></a>
+              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Instagram"><Instagram className="h-4 w-4" /></a>
+              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a>
               <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="X (Twitter)"><X className="h-4 w-4" /></a>
-              <a href="https://wa.me/919876543210" target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="WhatsApp"><WhatsAppIcon className="h-4 w-4" /></a>
+              <a href="https://wa.me/917858967071" target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="WhatsApp"><WhatsAppIcon className="h-4 w-4" /></a>
+              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="YouTube"><Youtube className="h-4 w-4" /></a>
             </div>
           </div>
           <div className="min-w-0">
@@ -110,28 +122,29 @@ export function Footer() {
                   <p className="text-sm font-semibold text-white group-hover:text-primary-300 transition break-all">contact@xpertintern.com</p>
                 </div>
               </a>
-              <a href="tel:+919876543210" className="flex items-start gap-3 group">
+              <div className="flex items-start gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/20 text-green-400">
                   <Phone className="h-5 w-5" />
                 </span>
                 <div>
-                  <p className="text-xs text-gray-500">Call us at</p>
-                  <p className="text-sm font-semibold text-white group-hover:text-primary-300 transition">+91 9876543210</p>
+                  <p className="text-xs text-gray-500">Contact number</p>
+                  <div className="flex flex-col gap-0.5">
+                    <a href="tel:+917858967071" className="text-sm font-semibold text-white hover:text-primary-300 transition">7858967071</a>
+                    <a href="tel:+919341143791" className="text-sm font-semibold text-white hover:text-primary-300 transition">9341143791</a>
+                  </div>
                 </div>
-              </a>
+              </div>
               <div className="flex items-start gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-700/30 text-emerald-400">
                   <MapPin className="h-5 w-5" />
                 </span>
                 <div>
-                  <p className="text-xs text-gray-500">Visit us at</p>
-                  <p className="text-sm font-semibold text-white">Patna, Bihar, India</p>
+                  <p className="text-xs text-gray-500">Address</p>
+                  <p className="text-sm font-semibold text-white leading-relaxed">
+                    Arfabad Colony, East Nahar Road, Bajrangpuri, Patna - 800007
+                  </p>
                 </div>
               </div>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="inline-flex items-center gap-1 text-xs text-green-400"><ShieldCheck className="h-4 w-4" /> 100% Secure</span>
-              <span className="inline-flex items-center gap-1 text-xs text-amber-400"><Star className="h-4 w-4 fill-amber-400" /> UGC Approved</span>
             </div>
           </div>
         </div>
@@ -143,14 +156,11 @@ export function Footer() {
               <Rocket className="h-4 w-4 text-primary-400" /> Platform
             </h3>
             <ul className="mt-3 space-y-2">
-              {quickLinks.map(({ to, label }) => (
-                <li key={to}>
+              {platformLinks.map(({ to, label }) => (
+                <li key={`${to}-${label}`}>
                   <Link to={to} className="text-sm text-gray-400 hover:text-white transition">{label}</Link>
                 </li>
               ))}
-              <li>
-                <Link to="/admin/login" className="text-sm text-gray-400 hover:text-white transition">Admin Login</Link>
-              </li>
             </ul>
           </div>
           <div>
@@ -170,9 +180,15 @@ export function Footer() {
               <Building2 className="h-4 w-4 text-primary-400" /> Company
             </h3>
             <ul className="mt-3 space-y-2">
-              <li><Link to="/about" className="text-sm text-gray-400 hover:text-white transition">About Us</Link></li>
-              <li><Link to="/contact" className="text-sm text-gray-400 hover:text-white transition">Contact Us</Link></li>
-              <li><Link to="/sitemap" className="text-sm text-gray-400 hover:text-white transition">Sitemap</Link></li>
+              {companyLinks.map(({ to, label, hashLink }) => (
+                <li key={`${to}-${label}`}>
+                  {hashLink ? (
+                    <Link to={{ pathname: to, hash: 'partner-universities' }} className="text-sm text-gray-400 hover:text-white transition">{label}</Link>
+                  ) : (
+                    <Link to={to} className="text-sm text-gray-400 hover:text-white transition">{label}</Link>
+                  )}
+                </li>
+              ))}
             </ul>
           </div>
           <div>
@@ -193,11 +209,14 @@ export function Footer() {
         <div className="my-10 rounded-2xl border border-white/10 bg-white/5 px-4 py-6 sm:px-6 sm:py-8">
           <h3 className="text-center text-lg font-bold text-white">We Support All Payment Methods</h3>
           <p className="mt-1 text-center text-sm text-gray-400">Secure payments powered by Razorpay — India&apos;s leading payment gateway</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3 sm:gap-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6 sm:gap-4">
             {paymentMethods.map(({ label, Icon }) => (
-              <div key={label} className="flex flex-col items-center gap-1 rounded-xl bg-white/5 px-4 py-3 min-w-[80px]">
-                <Icon className="h-6 w-6 text-gray-400" />
-                <span className="text-xs text-gray-400">{label}</span>
+              <div
+                key={label}
+                className="flex min-h-[104px] flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-center"
+              >
+                <Icon className="h-7 w-7 shrink-0 text-gray-300" aria-hidden />
+                <span className="text-[11px] font-medium leading-tight text-gray-400 sm:text-xs">{label}</span>
               </div>
             ))}
           </div>
@@ -210,7 +229,9 @@ export function Footer() {
         <div className="pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
           <div className="text-center sm:text-left">
             <p>© {new Date().getFullYear()} XpertIntern. All Rights Reserved.</p>
-            <p className="mt-0.5 text-xs text-gray-500">Compliant with UGC Internship Guidelines & NEP 2020</p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Compliant with AICTE and UGC Internship Guidelines &amp; NEP 2020
+            </p>
           </div>
           <Link to="/sitemap" className="hover:text-white transition">Sitemap</Link>
         </div>

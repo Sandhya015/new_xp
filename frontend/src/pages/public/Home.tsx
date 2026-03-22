@@ -23,6 +23,7 @@ import {
   HeartHandshake,
   Code2,
   Star,
+  Sparkles,
 } from 'lucide-react'
 import { CourseCard } from '@/components/CourseCard'
 import { useCountUp } from '@/hooks/useCountUp'
@@ -58,24 +59,35 @@ function StatCounter({ end, suffix, label }: { end: number; suffix: string; labe
   const { value } = useCountUp(end, 2000, { startOnMount: true })
   const display = end >= 1000 ? value.toLocaleString() + suffix : value + suffix
   return (
-    <div>
-      <p className="text-xl font-bold text-white sm:text-2xl md:text-3xl">{display}</p>
-      <p className="mt-1 text-xs sm:text-sm text-gray-400">{label}</p>
+    <div className="flex min-h-[4.5rem] sm:min-h-[5rem] flex-col items-center justify-start text-center">
+      <p className="text-lg font-bold tabular-nums text-white sm:text-xl md:text-2xl leading-tight">{display}</p>
+      <p className="mt-2 text-xs text-gray-400 sm:text-sm leading-snug">{label}</p>
     </div>
   )
 }
 
+/** Top 20 trending domains (Ezyintern-style shortlist) — marquee below hero */
 const stripMarqueeItems = [
-  'UI/UX Design',
-  'Cloud Computing',
-  'Cybersecurity',
-  'Python Programming',
+  'Artificial Intelligence & Machine Learning',
+  'Data Analytics & Data Science',
+  'Cloud Computing & DevOps',
+  'Cyber Security & Ethical Hacking',
+  'Python Programming & Automation',
   'Full Stack Development',
-  'Digital Marketing',
-  'DevOps & CI/CD',
-  'Artificial Intelligence',
-  'Web Development',
-  'Data Science & ML',
+  'Data Science with Python',
+  'Internet of Things (IoT)',
+  'Embedded Systems',
+  'Electric Vehicle Systems & Design',
+  'Battery Management System (BMS)',
+  'Industrial Automation (PLC + SCADA)',
+  'AutoCAD',
+  'Revit Architecture',
+  'Ansys (Simulation & Analysis)',
+  'Renewable Energy & Green Technology',
+  'Digital Marketing & Social Media Management',
+  'Financial Analysis & MIS Reporting',
+  'Customer Relationship Management (CRM)',
+  'Human Resource (HR) & Talent Acquisition',
 ]
 
 const whyUsCards = [
@@ -119,8 +131,9 @@ const complianceCards = [
   { title: 'NEP 2020', desc: 'Structured as per National Education Policy 2020 framework', Icon: Building2 },
 ]
 
-const technicalBranches = ['Computer Science Engineering (CSE)', 'Civil Engineering', 'Electrical Engineering', 'Electronics & Communication Engineering (ECE)', 'Mechanical Engineering', 'Information Technology (IT)']
+const technicalBranches = ['Computer Science Engineering (CSE)', 'Civil Engineering', 'Electrical Engineering', 'Electronics & Communication Engineering (ECE)', 'Mechanical Engineering']
 const nonTechnicalCourses = ['BA — Bachelor of Arts', 'BSc — Bachelor of Science', 'BCom — Bachelor of Commerce', 'BBA — Bachelor of Business Administration', 'BCA — Bachelor of Computer Applications']
+const branchesMoreLabel = 'And Many More'
 
 const programsPreview = [
   { id: '1', title: 'Full Stack Web Development', duration: '4 Weeks', tag: 'MERN Stack' },
@@ -130,13 +143,93 @@ const programsPreview = [
 
 const INLINE_CONTACT_COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
 const INLINE_CONTACT_STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
-type TestimonialCategory = 'student' | 'college'
-const testimonials: { name: string; role: string; institution?: string; quote: string; category: TestimonialCategory }[] = [
-  { name: 'Rahul Kumar', role: 'B.Tech CSE', institution: 'Patna University', quote: 'This training helped me gain real project experience and I got an internship after completing it. XpertIntern changed my career path!', category: 'student' },
-  { name: 'Priya Sharma', role: 'BCA Student', institution: 'Patna University', quote: 'The certificate I received was accepted by my university for internship credit. The training was structured and industry-focused.', category: 'student' },
-  { name: 'Anjali Singh', role: 'BCom, Magadh University', institution: 'Magadh University', quote: 'As a non-technical student I was worried. XpertIntern had courses tailored for me and I secured a digital marketing internship!', category: 'student' },
-  { name: 'Dr. Rajesh Verma', role: 'Placement Coordinator', institution: 'S.N. Sinha College, Aurangabad', quote: 'We have been partnering with XpertIntern for industry-ready training. Our students get verified certificates and better placement outcomes.', category: 'college' },
-  { name: 'Sunita Devi', role: 'T&P Officer', institution: 'Government Engineering College, Bhagalpur', quote: 'The AICTE-aligned programs and internship tie-ups have added real value to our curriculum. Highly recommend for technical colleges.', category: 'college' },
+type TestimonialCategory = 'student' | 'educator'
+
+type HomeTestimonial = {
+  name: string
+  initials: string
+  roleType: 'STUDENT' | 'EDUCATOR'
+  roleDetail: string
+  institution: string
+  quote: string
+  highlight: string
+  category: TestimonialCategory
+  avatarClass: string
+}
+
+const testimonials: HomeTestimonial[] = [
+  {
+    name: 'Amit Patel',
+    initials: 'AP',
+    roleType: 'STUDENT',
+    roleDetail: 'B.Tech Student',
+    institution: 'Government Engineering College Sheikhpura, Katihar',
+    quote:
+      'XpertIntern gave me the skills and confidence I needed to kickstart my career. The Web Development training was practical and taught by real industry experts. I got an AICTE compliant certificate and secured my first internship through the platform within weeks. Highly recommended for every engineering student!',
+    highlight: 'Secured first internship within weeks of completing the training!',
+    category: 'student',
+    avatarClass: 'bg-gradient-to-br from-blue-600 to-indigo-700',
+  },
+  {
+    name: 'Zafar Sadique',
+    initials: 'ZS',
+    roleType: 'STUDENT',
+    roleDetail: 'B.Tech Student',
+    institution: 'Katihar Engineering College, Katihar',
+    quote:
+      'XpertIntern connected me with real companies and real internship opportunities. The application process is simple and I could track my status at every step. The Python and Data Science training gave me skills I could confidently talk about in interviews. A must-have platform for every college student!',
+    highlight: 'Got real industry exposure and cracked interviews with confidence!',
+    category: 'student',
+    avatarClass: 'bg-gradient-to-br from-emerald-600 to-teal-700',
+  },
+  {
+    name: 'Rahul Kumar',
+    initials: 'RK',
+    roleType: 'STUDENT',
+    roleDetail: 'Diploma Student',
+    institution: 'Government Polytechnic Supaul, Raghoupur Supaul',
+    quote:
+      'XpertIntern is the first platform I found that truly supports Diploma students with training programs designed for our level. The certificate I received is AICTE compliant and helped me stand out in campus placement drives. Thank you XpertIntern for believing in Diploma students!',
+    highlight: 'First platform that truly supports and empowers Diploma students!',
+    category: 'student',
+    avatarClass: 'bg-gradient-to-br from-violet-600 to-purple-700',
+  },
+  {
+    name: 'Manish Kumar',
+    initials: 'MK',
+    roleType: 'STUDENT',
+    roleDetail: 'B.Com Student',
+    institution: 'Kisan College, Bihar Sharif',
+    quote:
+      'I thought XpertIntern was only for engineering students, but I was wrong! The Digital Marketing training covered everything from social media to SEO and was taught by real professionals. I got an internship with a marketing firm through the platform — XpertIntern is for every ambitious student!',
+    highlight: 'Commerce students can thrive here too — landed a marketing internship!',
+    category: 'student',
+    avatarClass: 'bg-gradient-to-br from-amber-600 to-orange-700',
+  },
+  {
+    name: 'Prof. Rajnish Kumar',
+    initials: 'RJ',
+    roleType: 'EDUCATOR',
+    roleDetail: 'HOD — Civil Engineering',
+    institution: 'Aryabhatta Polytechnic, Gaya',
+    quote:
+      "XpertIntern's training programs are AICTE and UGC compliant, which aligns perfectly with our curriculum objectives. The QR code certificate verification is impressive and builds real credibility for students. I have seen a clear improvement in the confidence and employability of students who have enrolled here.",
+    highlight: 'Verified certificates and industry-aligned programs — highly recommended!',
+    category: 'educator',
+    avatarClass: 'bg-gradient-to-br from-slate-600 to-slate-800',
+  },
+  {
+    name: 'Prof. Sandeep Kumar',
+    initials: 'SK',
+    roleType: 'EDUCATOR',
+    roleDetail: 'Training & Placement Officer (TPO)',
+    institution: 'Government Engineering College Sheikhpura',
+    quote:
+      'XpertIntern has become one of our most trusted partners for student placement. The programs follow AICTE and UGC guidelines, making it easy to integrate with our TPO activities. The quality of internships and the professional certificates make it a complete career-readiness solution for our students.',
+    highlight: 'A complete career-readiness solution — a trusted TPO partner platform!',
+    category: 'educator',
+    avatarClass: 'bg-gradient-to-br from-cyan-600 to-blue-800',
+  },
 ]
 
 export function Home() {
@@ -152,7 +245,7 @@ export function Home() {
     message: '',
   })
   const [inlineContactSubmitted, setInlineContactSubmitted] = useState(false)
-  const [testimonialFilter, setTestimonialFilter] = useState<'all' | 'students' | 'colleges'>('all')
+  const [testimonialFilter, setTestimonialFilter] = useState<'all' | 'students' | 'educators'>('all')
   const whoRef = useInView()
   const whyRef = useInView()
   const reachRef = useInView()
@@ -196,7 +289,7 @@ export function Home() {
                 <Link to="/training" className="inline-flex items-center justify-center rounded-lg bg-brand-accent px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white shadow-lg hover:bg-primary-600 hover:scale-105 transition min-h-[44px]">Explore Training</Link>
                 <Link to="/internship" className="inline-flex items-center justify-center rounded-lg border-2 border-white/40 bg-white/5 px-5 py-2.5 sm:px-6 sm:py-3 text-sm sm:text-base font-semibold text-white backdrop-blur hover:bg-white/10 hover:scale-105 transition min-h-[44px]">Explore Internship</Link>
               </div>
-              <div className="mt-10 sm:mt-16 grid grid-cols-2 gap-4 sm:gap-8 sm:grid-cols-4">
+              <div className="mt-10 sm:mt-16 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-4 sm:gap-x-4 sm:gap-y-6 lg:gap-x-6">
                 {stats.map(({ end, suffix, label }) => (
                   <StatCounter key={label} end={end} suffix={suffix} label={label} />
                 ))}
@@ -205,8 +298,8 @@ export function Home() {
             {/* Right: hero image */}
             <div className="order-2 flex justify-center lg:justify-end">
               <img
-                src="/images/hero-internship.png"
-                alt="Kickstart your career with an internship — XpertIntern"
+                src="/images/hero-xpertintern.png"
+                alt="XpertIntern — students with training and internship platform highlights"
                 className="w-full max-w-md lg:max-w-lg xl:max-w-xl rounded-xl shadow-2xl object-contain"
               />
             </div>
@@ -288,8 +381,8 @@ export function Home() {
         </div>
       </section>
 
-      {/* Our Reach — Universities (marquee) */}
-      <section ref={reachRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-20 overflow-hidden about-reveal ${reachRef.inView ? 'in-view' : ''}`}>
+      {/* Our Reach — Universities (marquee) — anchor for footer "Our Partner Universities" */}
+      <section id="partner-universities" ref={reachRef.ref as React.RefObject<HTMLElement>} className={`bg-white py-12 sm:py-16 lg:py-20 overflow-hidden about-reveal ${reachRef.inView ? 'in-view' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
           <span className="inline-block rounded-full bg-brand-light-bg border border-primary-200 px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium text-brand-navy shadow-sm">Our Reach</span>
           <h2 className="mt-3 sm:mt-4 text-2xl font-bold text-brand-navy sm:text-3xl">Top Universities & Boards We Serve</h2>
@@ -412,6 +505,7 @@ export function Home() {
                     <Check className="h-4 w-4 text-success-green flex-shrink-0" /> {b}
                   </li>
                 ))}
+                <li className="pt-2 text-sm font-semibold text-brand-navy">{branchesMoreLabel}</li>
               </ul>
             </div>
             <div className="home-stagger-card rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm">
@@ -422,6 +516,7 @@ export function Home() {
                     <Check className="h-4 w-4 text-success-green flex-shrink-0" /> {c}
                   </li>
                 ))}
+                <li className="pt-2 text-sm font-semibold text-brand-navy">{branchesMoreLabel}</li>
               </ul>
             </div>
           </div>
@@ -521,41 +616,108 @@ export function Home() {
         </div>
       </section>
 
-      {/* What Our Students Say — filter + card grid (screenshot style) */}
+      {/* What Our Students & Educators Say — professional cards + avatars */}
       <section ref={testimonialsRef.ref as React.RefObject<HTMLElement>} className={`bg-sky-100/95 py-12 sm:py-16 lg:py-20 ${testimonialsRef.inView ? 'home-stagger-inview' : ''}`}>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 min-w-0">
-          <h2 className="text-2xl font-bold text-brand-navy sm:text-3xl text-center">What Our Students Say</h2>
-          <p className="mt-2 text-sm sm:text-base text-slate-gray text-center">Real stories from the community</p>
+          <p className="text-center text-xs font-bold uppercase tracking-[0.2em] text-brand-accent">XpertIntern</p>
+          <h2 className="mt-2 text-2xl font-bold text-brand-navy sm:text-3xl lg:text-4xl text-center">
+            What Our Students &amp; Educators Say
+          </h2>
+          <p className="mt-2 text-center text-base font-semibold text-brand-navy sm:text-lg">India&apos;s Trusted Training &amp; Internship Platform</p>
+          <p className="mt-1 text-center text-sm text-slate-gray">
+            AICTE | UGC | NEP 2020 Compliant — <span className="font-medium text-brand-navy">Real Stories. Real Results. Real Careers.</span>
+          </p>
 
           <div className="mt-8 sm:mt-10 flex justify-center">
-            <div className="inline-flex rounded-full bg-white p-1 shadow-md border border-gray-100" role="tablist" aria-label="Filter testimonials">
-              {(['all', 'students', 'colleges'] as const).map((tab) => (
+            <div className="inline-flex flex-wrap justify-center rounded-full bg-white p-1 shadow-md border border-gray-100" role="tablist" aria-label="Filter testimonials">
+              {(['all', 'students', 'educators'] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setTestimonialFilter(tab)}
-                  className={`px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition capitalize ${testimonialFilter === tab ? 'bg-brand-accent text-white shadow-sm' : 'text-gray-600 hover:text-brand-navy'}`}
+                  className={`px-4 sm:px-5 py-2 rounded-full text-sm font-medium transition ${testimonialFilter === tab ? 'bg-brand-accent text-white shadow-sm' : 'text-gray-600 hover:text-brand-navy'}`}
                 >
-                  {tab === 'all' ? 'All' : tab === 'students' ? 'Students' : 'Colleges'}
+                  {tab === 'all' ? 'All' : tab === 'students' ? 'Students' : 'Educators & Faculty'}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="mt-8 sm:mt-10 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-            {testimonials
-              .filter((t) => testimonialFilter === 'all' || (testimonialFilter === 'students' && t.category === 'student') || (testimonialFilter === 'colleges' && t.category === 'college'))
-              .map((t) => (
-                <article key={`${t.name}-${t.role}`} className="home-stagger-card rounded-2xl bg-white p-5 sm:p-6 shadow-sm border border-gray-100 min-w-0 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5">
-                  <div className="flex gap-0.5 mb-3">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <Star key={i} className="h-4 w-4 sm:h-5 sm:w-5 fill-amber-400 text-amber-400 shrink-0" strokeWidth={1.5} />
-                    ))}
+          {(() => {
+            const studentT = testimonials.filter((t) => t.category === 'student')
+            const educatorT = testimonials.filter((t) => t.category === 'educator')
+            const showStudents = testimonialFilter === 'all' || testimonialFilter === 'students'
+            const showEducators = testimonialFilter === 'all' || testimonialFilter === 'educators'
+
+            const card = (t: HomeTestimonial) => (
+              <article
+                key={t.name}
+                className="home-stagger-card flex h-full flex-col rounded-2xl border border-gray-100 bg-white p-5 sm:p-6 shadow-sm transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5"
+              >
+                <div className="flex gap-4">
+                  <div
+                    className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-bold text-white shadow-inner ring-2 ring-white ${t.avatarClass}`}
+                    aria-hidden
+                  >
+                    {t.initials}
                   </div>
-                  <p className="text-gray-600 text-sm sm:text-base leading-relaxed">&ldquo;{t.quote}&rdquo;</p>
-                </article>
-              ))}
-          </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold text-brand-navy">{t.name}</h3>
+                      <span className="rounded-md bg-primary-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-800">
+                        {t.roleType}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-slate-gray">{t.roleDetail}</p>
+                    <div className="mt-2 flex gap-0.5" aria-label="5 out of 5 stars">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <Star key={i} className="h-4 w-4 fill-amber-400 text-amber-400 shrink-0" strokeWidth={1.5} />
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs leading-snug text-slate-gray sm:text-sm">{t.institution}</p>
+                  </div>
+                </div>
+                <blockquote className="mt-4 flex-1 border-l-2 border-brand-accent/40 pl-4 text-sm leading-relaxed text-gray-700 sm:text-base">
+                  &ldquo;{t.quote}&rdquo;
+                </blockquote>
+                <p className="mt-4 flex items-start gap-2 rounded-lg bg-brand-light-bg/80 px-3 py-2.5 text-sm font-medium text-brand-navy">
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand-accent" aria-hidden />
+                  {t.highlight}
+                </p>
+              </article>
+            )
+
+            return (
+              <div className="mt-10 space-y-12 sm:space-y-14">
+                {showStudents && (
+                  <div>
+                    {testimonialFilter === 'all' && (
+                      <h3 className="mb-6 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-brand-navy">
+                        <span className="h-2 w-2 rounded-sm bg-brand-accent" aria-hidden />
+                        Student testimonials
+                      </h3>
+                    )}
+                    <div className="grid gap-4 sm:gap-6 sm:grid-cols-2">
+                      {(testimonialFilter === 'all' ? studentT : testimonials.filter((x) => x.category === 'student')).map(card)}
+                    </div>
+                  </div>
+                )}
+                {showEducators && (
+                  <div>
+                    {testimonialFilter === 'all' && (
+                      <h3 className="mb-6 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-brand-navy">
+                        <span className="h-2 w-2 rounded-sm bg-brand-accent" aria-hidden />
+                        Educator &amp; faculty testimonials
+                      </h3>
+                    )}
+                    <div className="grid gap-4 sm:gap-6 sm:grid-cols-2">
+                      {(testimonialFilter === 'all' ? educatorT : testimonials.filter((x) => x.category === 'educator')).map(card)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       </section>
 

@@ -55,6 +55,8 @@ import { AdminNotifications } from './pages/admin/AdminNotifications'
 import { AdminManagement } from './pages/admin/AdminManagement'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
+import { Blog } from './pages/public/Blog'
+import { BlogArticle } from './pages/public/BlogArticle'
 
 function App() {
   return (
@@ -119,6 +121,8 @@ function App() {
             <Route path="/training/:id" element={<CourseDetail />} />
             <Route path="/internship" element={<Internship />} />
             <Route path="/verify" element={<CertVerify />} />
+            <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/:slug" element={<BlogArticle />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -127,6 +131,13 @@ function App() {
             <Route path="/refund" element={<LegalPlaceholder title="Refund & Cancellation Policy" />} />
             <Route path="/certificate-policy" element={<LegalPlaceholder title="Certificate Authenticity Policy" />} />
             <Route path="/disclaimer" element={<LegalPlaceholder title="Disclaimer" />} />
+            <Route path="/cookies" element={<LegalPlaceholder title="Cookie Policy" />} />
+            <Route path="/faq" element={<LegalPlaceholder title="Help & FAQ" />} />
+            <Route path="/report-issue" element={<LegalPlaceholder title="Report an Issue" />} />
+            <Route path="/partners/colleges" element={<LegalPlaceholder title="Our Partner Colleges/Institutes" />} />
+            <Route path="/partners/companies" element={<LegalPlaceholder title="Our Partner Companies" />} />
+            <Route path="/careers" element={<LegalPlaceholder title="Careers" />} />
+            <Route path="/success-stories" element={<LegalPlaceholder title="Success Stories" />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Layout>

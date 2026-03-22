@@ -7,6 +7,7 @@ const navLinks = [
   { to: '/training', label: 'Training' },
   { to: '/internship', label: 'Internship' },
   { to: '/verify', label: 'Certificate Verification' },
+  { to: '/blog', label: 'Blog' },
   { to: '/about', label: 'About Us' },
   { to: '/contact', label: 'Contact Us' },
 ]
