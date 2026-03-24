@@ -2,7 +2,7 @@ import { useEffect, ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Navbar } from './Navbar'
 import { Footer } from './Footer'
-
+//this helps to scroll
 function ScrollToTop() {
   const { pathname, hash } = useLocation()
   useEffect(() => {
