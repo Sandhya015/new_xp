@@ -8,6 +8,7 @@ pymongo[srv]>=4.6.0
 # Lambda deployment (serverless-wsgi)
 serverless-wsgi>=3.0.0
 razorpay>=1.4.2
-reportlab>=4.0.0
-# Email: SMTP (Zoho) via stdlib + reportlab for PDF certificates
+fpdf2>=2.7.0
+# PDF certificates: fpdf2 (pure Python; ReportLab/Pillow breaks on Lambda slim layer)
+# Email: SMTP (Zoho)
 # Excel: openpyxl

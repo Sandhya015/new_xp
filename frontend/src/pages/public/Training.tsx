@@ -51,6 +51,16 @@ const DURATION_WEEKS = [2, 4, 6, 8, 12, 24] as const
 const DURATION_HOURS = [60, 80, 100, 120] as const
 const MODES: Mode[] = ['Online', 'Offline', 'Hybrid']
 
+const INITIAL_ENROLL_FORM = {
+  fullName: '',
+  email: '',
+  mobile: '',
+  university: '',
+  branch: '',
+  semester: '1st',
+  address: '',
+}
+
 interface Course {
   id: string
   title: string
@@ -103,25 +113,21 @@ export function Training() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [enrollCourse, setEnrollCourse] = useState<Course | null>(null)
-  const [enrollForm, setEnrollForm] = useState({
-    fullName: '',
-    email: '',
-    mobile: '',
-    university: '',
-    branch: '',
-    semester: '1st',
-    address: '',
-  })
+  const [enrollForm, setEnrollForm] = useState(INITIAL_ENROLL_FORM)
   const { user } = useAuth()
   const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
 
+  /** Fresh form each time the modal opens; clear when it closes (avoids stale admin / previous user data). */
   useEffect(() => {
-    if (!enrollCourse || !user) return
-    setEnrollForm((f) => ({
-      ...f,
-      fullName: f.fullName || user.name || '',
-      email: f.email || user.email || '',
-    }))
+    if (!enrollCourse) {
+      setEnrollForm(INITIAL_ENROLL_FORM)
+      return
+    }
+    setEnrollForm({
+      ...INITIAL_ENROLL_FORM,
+      fullName: user?.name || '',
+      email: user?.email || '',
+    })
   }, [enrollCourse, user])
 
   const toggleBranch = (b: string) => {
