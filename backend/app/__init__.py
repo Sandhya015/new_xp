@@ -2,6 +2,9 @@
 Flask application factory. Enterprise-grade: config-driven, CORS, blueprints.
 Structure per XpertIntern Tech Stack Guide.
 """
+import re
+from urllib.parse import urlparse
+
 from flask import Flask, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
@@ -46,9 +49,28 @@ def create_app(config_class=None):
 
     app.config["CORS_ORIGINS_LIST"] = origins
 
+    _vercel_origin_re = re.compile(r"^https://[\w.-]+\.vercel\.app$", re.IGNORECASE)
+
+    def _cors_origin_allowed(origin: str) -> bool:
+        if not origin:
+            return False
+        if origin in app.config["CORS_ORIGINS_LIST"]:
+            return True
+        if _vercel_origin_re.match(origin.strip()):
+            return True
+        try:
+            if (urlparse(origin).hostname or "").endswith(".vercel.app"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    cors_origins_for_flask = list(origins)
+    cors_origins_for_flask.append(_vercel_origin_re)
+
     CORS(
         app,
-        origins=origins,
+        origins=cors_origins_for_flask,
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
         expose_headers=["Content-Type"],
@@ -61,7 +83,7 @@ def create_app(config_class=None):
         if request.method != "OPTIONS":
             return None
         origin = request.headers.get("Origin")
-        allow_origin = origin if origin and origin in app.config["CORS_ORIGINS_LIST"] else ""
+        allow_origin = origin if origin and _cors_origin_allowed(origin) else ""
         from flask import make_response
         r = make_response("", 204)
         if allow_origin:
@@ -77,7 +99,7 @@ def create_app(config_class=None):
         origin = request.headers.get("Origin")
         if not origin:
             return response
-        if origin in app.config["CORS_ORIGINS_LIST"]:
+        if _cors_origin_allowed(origin):
             response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
