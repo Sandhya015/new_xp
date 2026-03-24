@@ -22,6 +22,7 @@ import {
   Star,
   Lock,
 } from 'lucide-react'
+import { SOCIAL_LINKS } from '@/config/socialLinks'
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -100,14 +101,14 @@ export function Footer() {
                 <Lock className="h-3.5 w-3.5 text-green-400" /> Secure Platform
               </span>
             </div>
-            {/* Social order: Facebook, Instagram, LinkedIn, Twitter, WhatsApp, YouTube */}
+            {/* Social: Facebook, Instagram, LinkedIn, X, WhatsApp, YouTube */}
             <div className="mt-5 flex flex-wrap gap-2">
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Facebook"><Facebook className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Instagram"><Instagram className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="X (Twitter)"><X className="h-4 w-4" /></a>
+              <a href={SOCIAL_LINKS.facebook} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Facebook"><Facebook className="h-4 w-4" /></a>
+              <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Instagram"><Instagram className="h-4 w-4" /></a>
+              <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a>
+              <a href={SOCIAL_LINKS.x} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="X (Twitter)"><X className="h-4 w-4" /></a>
               <a href="https://wa.me/917858967071" target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="WhatsApp"><WhatsAppIcon className="h-4 w-4" /></a>
-              <a href="#" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="YouTube"><Youtube className="h-4 w-4" /></a>
+              <a href={SOCIAL_LINKS.youtube} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="YouTube"><Youtube className="h-4 w-4" /></a>
             </div>
           </div>
           <div className="min-w-0">

@@ -5,7 +5,9 @@ from bson import ObjectId
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from app.course_features import course_has_python_quiz
 from app.db import get_db, get_courses_collection, get_enrollments_collection
+from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
 courses_bp = Blueprint("courses", __name__)
 
@@ -92,6 +94,29 @@ def _course_to_content(c):
         "quizzes": c.get("quizzes", []),
         "announcements": c.get("announcements", []),
     }
+
+
+@courses_bp.route("/<course_id>/python-quiz", methods=["GET"])
+@jwt_required()
+def get_python_quiz(course_id):
+    """Quiz questions for Python-flagged courses (enrolled students only)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = get_jwt_identity()
+    enroll_coll = get_enrollments_collection()
+    if not enroll_coll.find_one({"userId": user_id, "courseId": course_id}):
+        return jsonify({"error": "Not enrolled in this course"}), 403
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c or not course_has_python_quiz(c):
+        return jsonify({"error": "Python quiz is not available for this course"}), 404
+    return jsonify({
+        "passPercent": PASS_PERCENT,
+        "questions": quiz_questions_for_client(),
+    }), 200
 
 
 @courses_bp.route("/<course_id>/content", methods=["GET"])

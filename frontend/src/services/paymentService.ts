@@ -25,12 +25,24 @@ export const paymentService = {
     const { data } = await api.get<{ items: OrderItem[] }>('/api/payments/my')
     return data
   },
-  async createOrder(courseId: string, amount: number, currency = 'INR') {
-    const { data } = await api.post('/api/payments/create-order', { courseId, amount, currency })
+  /** Amount is determined on the server from the course price — only pass courseId. */
+  async createOrder(courseId: string, currency = 'INR'): Promise<{
+    keyId: string
+    orderId: string
+    amount: number
+    currency: string
+    courseTitle?: string
+    internalOrderId?: string
+  }> {
+    const { data } = await api.post('/api/payments/create-order', { courseId, currency })
     return data
   },
   async verify(paymentId: string, orderId: string, signature: string) {
-    const { data } = await api.post('/api/payments/verify', { paymentId, orderId, signature })
+    const { data } = await api.post('/api/payments/verify', {
+      razorpay_payment_id: paymentId,
+      razorpay_order_id: orderId,
+      razorpay_signature: signature,
+    })
     return data
   },
   async getInvoice(invoiceId: string) {

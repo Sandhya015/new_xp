@@ -138,4 +138,17 @@ def create_app(config_class=None):
         r.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         return r
 
+    import logging as _logging
+    _elog = _logging.getLogger("xpertintern.email")
+    if app.config.get("SMTP_HOST") and app.config.get("SMTP_USER") and app.config.get("SMTP_PASSWORD"):
+        from app.notifications import email_send_synchronous
+        _elog.info(
+            "SMTP enabled host=%s port=%s mode=%s",
+            app.config.get("SMTP_HOST"),
+            app.config.get("SMTP_PORT"),
+            "synchronous (Lambda-safe)" if email_send_synchronous() else "background_thread",
+        )
+    else:
+        _elog.warning("SMTP not fully configured — welcome / payment / certificate emails are disabled")
+
     return app

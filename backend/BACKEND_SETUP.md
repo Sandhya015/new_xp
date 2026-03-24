@@ -61,10 +61,39 @@ API base URL: **http://localhost:5000**
 - Run frontend: `cd frontend && npm run dev`.
 - Use **Login** and **Register**; they call the Flask API and store the JWT and user.
 
-## 7. Deploying the API to AWS (no always-on server, no loops)
+## 7. Razorpay (training payments)
+
+1. Create a [Razorpay](https://razorpay.com/) account and open **Settings → API Keys**.
+2. Use **Test mode** keys for local development (`rzp_test_...`).
+3. Add to `backend/.env` (never commit real secrets):
+
+   ```bash
+   RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+   RAZORPAY_KEY_SECRET=your_key_secret
+   ```
+
+4. Install the SDK (included in `requirements.txt`):
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+5. **Flow:** Student must be logged in (JWT). **POST `/api/payments/create-order`** with `{ "courseId": "<mongo id>" }` — amount is read from the course document in INR (converted to paise for Razorpay). Client opens Razorpay Checkout, then **POST `/api/payments/verify`** with `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`. On success the order is marked paid and an **enrollment** is created if one does not exist.
+6. **Free courses** (`price` 0 or missing): do not call Razorpay; use **POST `/api/enrollments`** with `{ "courseId" }` (same as the Training page “Enroll free” flow).
+7. For Lambda/production, set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in the function environment (prefer **Secrets Manager** for the secret).
+
+**Local test checklist**
+
+- [ ] Course in MongoDB has `price` ≥ 1 and `active: true`.
+- [ ] Student registered and JWT present in the frontend.
+- [ ] Training page → Enroll → Razorpay test UPI/card from [Razorpay test data](https://razorpay.com/docs/payments/payments/test-card-details/).
+
+---
+
+## 8. Deploying the API to AWS (no always-on server, no loops)
 
 The API can be deployed to **AWS Lambda + API Gateway** so it runs only when a request is made (pay-per-request, no idle cost).
 
-- See **[DEPLOY_AWS.md](./DEPLOY_AWS.md)** for step-by-step: install Serverless, set env vars, deploy, and point the frontend to the new API URL.
+- See **[DEPLOY_AWS.md](./DEPLOY_AWS.md)** for step-by-step: install Serverless, set env vars, deploy, and point the frontend to the new API URL (include Razorpay keys in Lambda env or SSM).
 - Set **MONGODB_URI**, **SECRET_KEY**, and **CORS_ORIGINS** (your live frontend URL) when deploying.
 - In MongoDB Atlas → Network Access, allow `0.0.0.0/0` (or your Lambda egress IPs) so the API can reach the database.

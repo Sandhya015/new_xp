@@ -2,7 +2,7 @@
  * Student Dashboard — View Enrolled Course Content (SD-WF-10).
  * Tabs: Overview, Curriculum, Class Links, Study Materials, Assignments, Quizzes, Announcements, Certificate.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   BookOpen,
@@ -16,8 +16,11 @@ import {
   ArrowLeft,
   ExternalLink,
   Download,
+  Loader2,
 } from 'lucide-react'
-import { courseService, type CourseContent } from '@/services/courseService'
+import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
+import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
+import { certificateService } from '@/services/certificateService'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
@@ -30,12 +33,182 @@ const TABS = [
   { id: 'certificate', label: 'Certificate', icon: Award },
 ] as const
 
+function PythonCourseQuizBlock({
+  courseId,
+  passed,
+  score,
+  onUpdate,
+  certificateIssued,
+  certificateNumber,
+  certBusy,
+  certMessage,
+  onGenerateCertificate,
+}: {
+  courseId: string
+  passed: boolean
+  score?: number
+  onUpdate: () => void | Promise<void>
+  certificateIssued?: boolean
+  certificateNumber?: string | null
+  certBusy?: boolean
+  certMessage?: string | null
+  onGenerateCertificate?: () => void
+}) {
+  const [loading, setLoading] = useState(!passed)
+  const [questions, setQuestions] = useState<PythonQuizQuestion[]>([])
+  const [passPercent, setPassPercent] = useState(60)
+  const [selections, setSelections] = useState<number[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [banner, setBanner] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (passed) {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setBanner(null)
+    courseService
+      .getPythonQuiz(courseId)
+      .then((d) => {
+        setQuestions(d.questions)
+        setPassPercent(d.passPercent)
+        setSelections(Array(d.questions.length).fill(-1))
+      })
+      .catch(() => setBanner('Could not load the quiz. Try again later.'))
+      .finally(() => setLoading(false))
+  }, [courseId, passed])
+
+  const submit = async () => {
+    if (selections.some((i) => i < 0)) {
+      setBanner('Please answer every question.')
+      return
+    }
+    setSubmitting(true)
+    setBanner(null)
+    try {
+      const res = await enrollmentService.submitPythonQuiz(courseId, selections)
+      if (res.alreadyCompleted || res.passed) {
+        await onUpdate()
+        setBanner(null)
+      } else {
+        setBanner(res.message || `You scored ${res.scorePercent}%. You need ${res.passPercent}% to pass.`)
+      }
+    } catch {
+      setBanner('Submission failed. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (passed) {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 space-y-4">
+        <div>
+          <p className="font-semibold">You have passed the Python fundamentals quiz.</p>
+          {score != null && <p className="mt-1 text-sm">Your score: {score}%</p>}
+        </div>
+        {certificateNumber && (
+          <p className="text-sm text-emerald-800">
+            Certificate ID:{' '}
+            <span className="font-mono font-semibold text-brand-navy">{certificateNumber}</span>
+          </p>
+        )}
+        {certMessage && (
+          <p className="text-sm text-emerald-800 bg-white/60 border border-emerald-200/80 rounded-lg px-3 py-2">{certMessage}</p>
+        )}
+        {onGenerateCertificate && (
+          <button
+            type="button"
+            disabled={certBusy}
+            onClick={onGenerateCertificate}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+          >
+            {certBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {certificateIssued ? 'Download certificate again' : 'Generate certificate (PDF)'}
+          </button>
+        )}
+        <p className="text-xs text-emerald-800/90">
+          First time you generate, we email a copy to your registered address (if mail is configured on the server).
+        </p>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-slate-gray">
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading quiz…
+      </div>
+    )
+  }
+
+  if (banner && questions.length === 0) {
+    return <p className="text-red-600">{banner}</p>
+  }
+
+  return (
+    <div className="space-y-4 rounded-xl border border-brand-navy/15 bg-[#f8fafc] p-4">
+      <div>
+        <h3 className="text-lg font-semibold text-brand-navy">Python fundamentals quiz</h3>
+        <p className="mt-1 text-sm text-slate-gray">
+          Pass with at least {passPercent}% to unlock your certificate of completion.
+        </p>
+      </div>
+      {banner && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{banner}</p>}
+      <ol className="space-y-6">
+        {questions.map((q, qi) => (
+          <li key={q.id} className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="font-medium text-gray-900">
+              {qi + 1}. {q.question}
+            </p>
+            <div className="mt-3 space-y-2">
+              {q.options.map((opt, oi) => (
+                <label key={oi} className="flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                  <input
+                    type="radio"
+                    name={q.id}
+                    className="mt-1"
+                    checked={selections[qi] === oi}
+                    onChange={() => {
+                      const next = [...selections]
+                      next[qi] = oi
+                      setSelections(next)
+                    }}
+                  />
+                  <span>{opt}</span>
+                </label>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <button
+        type="button"
+        disabled={submitting || questions.length === 0}
+        onClick={() => void submit()}
+        className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+      >
+        {submitting ? 'Submitting…' : 'Submit quiz'}
+      </button>
+    </div>
+  )
+}
+
 export function CourseContent() {
   const { id: courseId } = useParams<{ id: string }>()
   const [course, setCourse] = useState<CourseContent | null>(null)
+  const [enrollment, setEnrollment] = useState<EnrollmentItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<string>('overview')
+  const [certBusy, setCertBusy] = useState(false)
+  const [certMessage, setCertMessage] = useState<string | null>(null)
+
+  const refreshEnrollment = useCallback(() => {
+    if (!courseId) return Promise.resolve()
+    return enrollmentService.getByCourseId(courseId).then(setEnrollment).catch(() => setEnrollment(null))
+  }, [courseId])
 
   useEffect(() => {
     if (!courseId) return
@@ -50,6 +223,32 @@ export function CourseContent() {
       })
       .finally(() => setLoading(false))
   }, [courseId])
+
+  useEffect(() => {
+    refreshEnrollment()
+  }, [refreshEnrollment])
+
+  const handleGenerateCertificate = useCallback(() => {
+    if (!courseId) return
+    setCertBusy(true)
+    setCertMessage(null)
+    certificateService
+      .generateFromQuiz(courseId)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `XpertIntern-certificate-${courseId.slice(-8)}.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+        setCertMessage('Download started. If this was your first issue, check your inbox for the certificate email.')
+        void refreshEnrollment()
+      })
+      .catch((err: unknown) => {
+        setCertMessage(err instanceof Error ? err.message : 'Could not generate certificate.')
+      })
+      .finally(() => setCertBusy(false))
+  }, [courseId, refreshEnrollment])
 
   if (loading) {
     return (
@@ -204,21 +403,41 @@ export function CourseContent() {
           </div>
         )}
         {activeTab === 'quizzes' && (
-          <div className="space-y-3">
+          <div className="space-y-6">
+            {enrollment?.pythonQuizAvailable && courseId && (
+              <PythonCourseQuizBlock
+                courseId={courseId}
+                passed={!!enrollment.pythonQuizPassed}
+                score={enrollment.pythonQuizScore}
+                onUpdate={refreshEnrollment}
+                certificateIssued={!!enrollment.certificateIssued}
+                certificateNumber={enrollment.certificateNumber}
+                certBusy={certBusy}
+                certMessage={certMessage}
+                onGenerateCertificate={
+                  enrollment.pythonQuizPassed ? handleGenerateCertificate : undefined
+                }
+              />
+            )}
             {(!course.quizzes || course.quizzes.length === 0) ? (
-              <p className="text-slate-gray">No quizzes yet.</p>
+              !enrollment?.pythonQuizAvailable && <p className="text-slate-gray">No quizzes yet.</p>
             ) : (
-              course.quizzes.map((q, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
-                  <div>
-                    <p className="font-medium text-gray-800">{q.title}</p>
-                    {q.dueDate && <p className="text-xs text-slate-gray">Due: {q.dueDate}</p>}
+              <div className="space-y-3">
+                {enrollment?.pythonQuizAvailable && (
+                  <p className="text-sm font-medium text-brand-navy">Other course quizzes</p>
+                )}
+                {course.quizzes.map((q, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
+                    <div>
+                      <p className="font-medium text-gray-800">{q.title}</p>
+                      {q.dueDate && <p className="text-xs text-slate-gray">Due: {q.dueDate}</p>}
+                    </div>
+                    <button type="button" className="rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600">
+                      Start Quiz
+                    </button>
                   </div>
-                  <button type="button" className="rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600">
-                    Start Quiz
-                  </button>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -238,10 +457,27 @@ export function CourseContent() {
           </div>
         )}
         {activeTab === 'certificate' && (
-          <div className="rounded-lg border border-gray-100 p-6 text-center">
+          <div className="rounded-lg border border-gray-100 p-6 text-center space-y-4">
             <Award className="mx-auto h-12 w-12 text-gray-400" />
-            <p className="mt-2 font-medium text-gray-700">Certificate will be issued on course completion.</p>
-            <Link to="/dashboard/certificates" className="mt-3 inline-block text-brand-accent font-semibold hover:underline">
+            {enrollment?.pythonQuizAvailable ? (
+              <>
+                {!enrollment.pythonQuizPassed && (
+                  <p className="font-medium text-gray-700">
+                    Pass the <strong>Python fundamentals quiz</strong> in the <strong>Quizzes</strong> tab, then use{' '}
+                    <strong>Generate certificate</strong> there to download your PDF.
+                  </p>
+                )}
+                {enrollment.pythonQuizPassed && (
+                  <p className="font-medium text-gray-700">
+                    You have passed the quiz. Open the <strong>Quizzes</strong> tab and use <strong>Generate certificate (PDF)</strong>{' '}
+                    below your pass message to download (and trigger the certificate email on first issue).
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="font-medium text-gray-700">Certificate will be issued on course completion.</p>
+            )}
+            <Link to="/dashboard/certificates" className="mt-2 inline-block text-brand-accent font-semibold hover:underline">
               View My Certificates
             </Link>
           </div>

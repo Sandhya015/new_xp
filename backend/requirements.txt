@@ -7,6 +7,7 @@ pymongo[srv]>=4.6.0
 # bcrypt removed to avoid GLIBC native-extension issues on Lambda; we use werkzeug.security
 # Lambda deployment (serverless-wsgi)
 serverless-wsgi>=3.0.0
-# Payment: razorpay
-# Email: sendgrid
+razorpay>=1.4.2
+reportlab>=4.0.0
+# Email: SMTP (Zoho) via stdlib + reportlab for PDF certificates
 # Excel: openpyxl

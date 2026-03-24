@@ -14,6 +14,18 @@ ADMIN_PASSWORD = "Admin@xpertintern#@"
 ADMIN_NAME = "XpertIntern Admin"
 
 DEFAULT_COURSES = [
+    {
+        "title": "Python Programming",
+        "slug": "python-programming",
+        "description": "Core Python syntax, data structures, virtual environments, and practical scripting.",
+        "category": "technical",
+        "duration": "4 Weeks",
+        "mode": "Online",
+        "universities": "BEU, AKTU, SBTE",
+        "price": 1999,
+        "tag": "Python",
+        "active": True,
+    },
     {"title": "Full Stack Web Development", "description": "Build dynamic, responsive, and scalable web applications.", "category": "technical", "duration": "4 Weeks", "mode": "Online", "universities": "BEU, SBTE, AKTU", "price": 2499, "tag": "MERN Stack", "active": True},
     {"title": "Artificial Intelligence & Machine Learning", "description": "Comprehensive training in AI & ML covering algorithms and practical applications.", "category": "technical", "duration": "4 Weeks", "mode": "Online", "universities": "AKTU, JUT", "price": 4999, "tag": "AI/ML", "active": True},
     {"title": "Data Science", "description": "Master data analysis, visualization, and machine learning with Python.", "category": "technical", "duration": "4 Weeks", "mode": "Hybrid", "universities": "BEU, AKTU", "price": 3999, "tag": "Python & Analytics", "active": True},

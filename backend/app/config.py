@@ -12,6 +12,18 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 86400))  # 24h default
     CORS_ORIGINS: List[str] = []
     MONGODB_URI = os.environ.get("MONGODB_URI", "") or os.environ.get("MONGO_URI", "")
+    # Razorpay (test/live keys from https://dashboard.razorpay.com/app/keys)
+    RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
+    RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
+    # Zoho / SMTP (transactional: welcome, enrollment, certificate)
+    SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
+    SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
+    SMTP_USER = os.environ.get("SMTP_USER", "").strip()
+    SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "").strip()
+    MAIL_FROM = os.environ.get("MAIL_FROM", "admin@xpertintern.com").strip()
+    MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "XpertIntern").strip()
+    # Use implicit SSL (e.g. Zoho port 465). Set SMTP_USE_SSL=1 or use port 465.
+    SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "").strip().lower() in ("1", "true", "yes")
 
 
 class DevelopmentConfig(Config):

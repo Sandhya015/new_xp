@@ -9,6 +9,7 @@ from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_requir
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from app.db import get_db, get_users_collection
+from app.notifications import schedule_welcome_email
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -138,6 +139,11 @@ def register():
     result = users.insert_one(doc)
     user = {**doc, "_id": result.inserted_id}
     user.pop("password", None)
+
+    if role == "student":
+        from flask import current_app
+
+        schedule_welcome_email(current_app._get_current_object(), name, email)
 
     token = create_access_token(
         identity=str(result.inserted_id),

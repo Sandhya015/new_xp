@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '@/hooks/useAuth'
+import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
 import {
   Search,
@@ -109,8 +111,18 @@ export function Training() {
     branch: '',
     semester: '1st',
     address: '',
-    paymentMethod: 'UPI',
   })
+  const { user } = useAuth()
+  const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
+
+  useEffect(() => {
+    if (!enrollCourse || !user) return
+    setEnrollForm((f) => ({
+      ...f,
+      fullName: f.fullName || user.name || '',
+      email: f.email || user.email || '',
+    }))
+  }, [enrollCourse, user])
 
   const toggleBranch = (b: string) => {
     setBranches((prev) => {
@@ -491,7 +503,19 @@ export function Training() {
                 className="p-5 space-y-4"
                 onSubmit={(e) => {
                   e.preventDefault()
-                  // TODO: proceed to payment / API
+                  if (!enrollCourse) return
+                  clearPayError()
+                  void startCheckout({
+                    courseId: enrollCourse.id,
+                    courseTitle: enrollCourse.title,
+                    price: enrollCourse.price,
+                    prefill: {
+                      name: enrollForm.fullName,
+                      email: enrollForm.email,
+                      contact: enrollForm.mobile.replace(/\D/g, '').slice(-10),
+                    },
+                    onSuccess: () => setEnrollCourse(null),
+                  })
                 }}
               >
                 {/* Two-column row: Full Name, Email */}
@@ -586,25 +610,26 @@ export function Training() {
                     className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent resize-none"
                   />
                 </div>
-                {/* Full width: Payment Method */}
-                <div>
-                  <label htmlFor="enroll-payment" className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-                  <select
-                    id="enroll-payment"
-                    value={enrollForm.paymentMethod}
-                    onChange={(e) => setEnrollForm((f) => ({ ...f, paymentMethod: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                  >
-                    <option value="UPI">UPI</option>
-                    <option value="Card">Card</option>
-                    <option value="Net Banking">Net Banking</option>
-                  </select>
-                </div>
+                <p className="rounded-lg bg-primary-50 px-3 py-2 text-xs text-brand-navy">
+                  {enrollCourse.price > 0
+                    ? 'You will pay securely via Razorpay (UPI, card, netbanking). Price is taken from the course — not editable here.'
+                    : 'This course is free — we will enroll you without payment.'}
+                </p>
+                {payError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+                    {payError}
+                  </p>
+                )}
                 <button
                   type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+                  disabled={payBusy}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-60"
                 >
-                  Proceed to Payment <ArrowRight className="h-4 w-4" />
+                  {payBusy ? 'Please wait…' : enrollCourse.price > 0 ? (
+                    <>Proceed to payment <ArrowRight className="h-4 w-4" /></>
+                  ) : (
+                    <>Enroll free <ArrowRight className="h-4 w-4" /></>
+                  )}
                 </button>
               </form>
             </div>

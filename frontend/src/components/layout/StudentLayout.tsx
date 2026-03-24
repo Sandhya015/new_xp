@@ -31,6 +31,11 @@ const SIDEBAR_LINKS = [
   { to: '/dashboard/support', label: 'Help & Support', icon: HelpCircle },
 ]
 
+/** MongoDB ObjectId — avoid showing raw id in the top bar */
+function isLikelyObjectId(s: string): boolean {
+  return /^[a-f\d]{24}$/i.test(s)
+}
+
 function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
   const segments = pathname.replace(/^\/dashboard\/?/, '').split('/').filter(Boolean)
   const crumbs = [{ label: 'Dashboard', path: '/dashboard' }]
@@ -46,10 +51,21 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     profile: 'My Profile',
     support: 'Help & Support',
   }
-  for (const seg of segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    const prev = i > 0 ? segments[i - 1] : ''
     acc += `/${seg}`
-    const label = names[seg] ?? seg
-    crumbs.push({ label: label.charAt(0).toUpperCase() + label.slice(1), path: acc })
+    let label: string
+    if (names[seg]) {
+      label = names[seg]
+    } else if (isLikelyObjectId(seg)) {
+      if (prev === 'my-courses') label = 'Course content'
+      else if (prev === 'training') label = 'Program detail'
+      else label = 'Details'
+    } else {
+      label = seg.charAt(0).toUpperCase() + seg.slice(1)
+    }
+    crumbs.push({ label, path: acc })
   }
   return crumbs
 }

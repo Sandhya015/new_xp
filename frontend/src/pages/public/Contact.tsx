@@ -4,6 +4,7 @@ import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube, X } 
 import { Notification } from '@/components/Notification'
 import { contactService } from '@/services/contactService'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
+import { SOCIAL_LINKS } from '@/config/socialLinks'
 const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
 const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -133,37 +134,47 @@ export function Contact() {
                 {/* Follow Us */}
                 <div>
                   <p className="font-bold text-brand-navy">Follow Us</p>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <a
-                      href="#"
+                      href={SOCIAL_LINKS.linkedin}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0A66C2] text-white hover:opacity-90 transition"
                       aria-label="LinkedIn"
                     >
                       <Linkedin className="h-5 w-5" />
                     </a>
                     <a
-                      href="#"
+                      href={SOCIAL_LINKS.instagram}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-pink-500 text-white hover:opacity-90 transition"
                       aria-label="Instagram"
                     >
                       <Instagram className="h-5 w-5" />
                     </a>
                     <a
-                      href="#"
+                      href={SOCIAL_LINKS.facebook}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1877F2] text-white hover:opacity-90 transition"
                       aria-label="Facebook"
                     >
                       <Facebook className="h-5 w-5" />
                     </a>
                     <a
-                      href="#"
+                      href={SOCIAL_LINKS.youtube}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FF0000] text-white hover:opacity-90 transition"
                       aria-label="YouTube"
                     >
                       <Youtube className="h-5 w-5" />
                     </a>
                     <a
-                      href="#"
+                      href={SOCIAL_LINKS.x}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-900 text-white hover:opacity-90 transition"
                       aria-label="X (Twitter)"
                     >

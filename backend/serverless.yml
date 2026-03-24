@@ -16,6 +16,16 @@ provider:
     API_GATEWAY_BASE_PATH: ${self:provider.stage}
     # Comma-separated origins; include your frontend URL for CORS
     CORS_ORIGINS: ${env:CORS_ORIGINS, 'http://localhost:5173,http://127.0.0.1:5173,https://www.xpertintern.com,https://xpertintern.com'}
+    # Razorpay — export before deploy or set in Lambda Console (never commit secrets)
+    RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
+    RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}
+    # SMTP (Zoho) — set in Lambda env / SSM; never commit secrets
+    SMTP_HOST: ${env:SMTP_HOST, ''}
+    SMTP_PORT: ${env:SMTP_PORT, '587'}
+    SMTP_USER: ${env:SMTP_USER, ''}
+    SMTP_PASSWORD: ${env:SMTP_PASSWORD, ''}
+    MAIL_FROM: ${env:MAIL_FROM, 'admin@xpertintern.com'}
+    MAIL_FROM_NAME: ${env:MAIL_FROM_NAME, 'XpertIntern'}
   # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
   # vpc: ...
 

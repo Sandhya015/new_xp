@@ -32,6 +32,8 @@ export type CourseContent = {
   announcements?: Array<{ title?: string; message?: string; createdAt?: string }>
 }
 
+export type PythonQuizQuestion = { id: string; question: string; options: string[] }
+
 export const courseService = {
   async list(params?: { page?: number; limit?: number; category?: string; search?: string }) {
     const { data } = await api.get<{ items: unknown[]; total: number; page: number; limit: number }>('/api/courses', { params })
@@ -44,6 +46,12 @@ export const courseService = {
   /** Full content for enrolled student (SD-WF-10). */
   async getContent(courseId: string): Promise<CourseContent> {
     const { data } = await api.get<CourseContent>(`/api/courses/${courseId}/content`)
+    return data
+  },
+  async getPythonQuiz(courseId: string): Promise<{ passPercent: number; questions: PythonQuizQuestion[] }> {
+    const { data } = await api.get<{ passPercent: number; questions: PythonQuizQuestion[] }>(
+      `/api/courses/${courseId}/python-quiz`,
+    )
     return data
   },
 }
