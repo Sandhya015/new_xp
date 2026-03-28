@@ -1,6 +1,8 @@
 """
 MongoDB connection. Uses MONGODB_URI or MONGO_URI from config. DB name: xpertintern.
 """
+import os
+
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
@@ -9,11 +11,26 @@ _client: MongoClient | None = None
 _db: Database | None = None
 
 
+def _mongo_client_kwargs() -> dict:
+    """Shorter timeouts on Lambda so routes fail fast instead of hitting API Gateway 29s limit."""
+    on_lambda = bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    def _ms(name: str, default_lambda: str, default_other: str) -> int:
+        raw = os.environ.get(name, "").strip()
+        if raw.isdigit():
+            return int(raw)
+        return int(default_lambda if on_lambda else default_other)
+
+    return {
+        "serverSelectionTimeoutMS": _ms("MONGO_SERVER_SELECTION_TIMEOUT_MS", "8000", "20000"),
+        "connectTimeoutMS": _ms("MONGO_CONNECT_TIMEOUT_MS", "8000", "20000"),
+    }
+
+
 def get_client(uri: str) -> MongoClient:
     """Create or return shared MongoClient. Call init_db from create_app."""
     global _client
     if _client is None:
-        _client = MongoClient(uri)
+        _client = MongoClient(uri, **_mongo_client_kwargs())
     return _client
 
 

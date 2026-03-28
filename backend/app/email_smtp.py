@@ -1,5 +1,7 @@
 """
-Transactional email via SMTP (Zoho, etc.). Config from Flask app.config; no-op if SMTP not set.
+Transactional email: SMTP (Zoho) or Amazon SES via EMAIL_TRANSPORT.
+
+When EMAIL_TRANSPORT=ses, sends through SES (see app/email_ses.py); otherwise SMTP.
 """
 from __future__ import annotations
 
@@ -42,11 +44,17 @@ def send_email(
     Send one email. attachments: list of (filename, bytes, mime_type).
     Returns True if sent, False if skipped or failed (errors logged).
     """
-    if not smtp_configured(config):
-        logger.info("SMTP not configured; skipping email to %s", to_addr)
-        return False
     to_addr = (to_addr or "").strip()
     if not to_addr:
+        return False
+
+    if (config.get("EMAIL_TRANSPORT") or "smtp").strip().lower() == "ses":
+        from app.email_ses import send_email_via_ses
+
+        return send_email_via_ses(config, to_addr, subject, html_body, text_body, attachments)
+
+    if not smtp_configured(config):
+        logger.info("SMTP not configured; skipping email to %s", to_addr)
         return False
 
     host = (config.get("SMTP_HOST") or "").strip()
@@ -80,12 +88,13 @@ def send_email(
         context = ssl.create_default_context()
         envelope_from = (config.get("MAIL_FROM") or user).strip()
         use_ssl = bool(config.get("SMTP_USE_SSL")) or port == 465
+        timeout = float(config.get("SMTP_TIMEOUT") or 30)
         if use_ssl:
-            with smtplib.SMTP_SSL(host, port, timeout=30, context=context) as server:
+            with smtplib.SMTP_SSL(host, port, timeout=timeout, context=context) as server:
                 server.login(user, password)
                 server.sendmail(envelope_from, [to_addr], msg.as_string())
         else:
-            with smtplib.SMTP(host, port, timeout=30) as server:
+            with smtplib.SMTP(host, port, timeout=timeout) as server:
                 server.starttls(context=context)
                 server.login(user, password)
                 server.sendmail(envelope_from, [to_addr], msg.as_string())

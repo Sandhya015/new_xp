@@ -162,15 +162,26 @@ def create_app(config_class=None):
 
     import logging as _logging
     _elog = _logging.getLogger("xpertintern.email")
-    if app.config.get("SMTP_HOST") and app.config.get("SMTP_USER") and app.config.get("SMTP_PASSWORD"):
+    if (app.config.get("EMAIL_TRANSPORT") or "smtp").strip().lower() == "ses":
+        from app.email_ses import ses_configured
+
+        if ses_configured(app.config):
+            _elog.info(
+                "Email via SES region=%s from=%s",
+                app.config.get("SES_REGION") or "(AWS_REGION)",
+                app.config.get("SES_FROM_EMAIL") or app.config.get("MAIL_FROM"),
+            )
+        else:
+            _elog.warning("EMAIL_TRANSPORT=ses but SES_FROM_EMAIL / MAIL_FROM missing — mail disabled")
+    elif app.config.get("SMTP_HOST") and app.config.get("SMTP_USER") and app.config.get("SMTP_PASSWORD"):
         from app.notifications import email_send_synchronous
         _elog.info(
             "SMTP enabled host=%s port=%s mode=%s",
             app.config.get("SMTP_HOST"),
             app.config.get("SMTP_PORT"),
-            "synchronous (Lambda-safe)" if email_send_synchronous() else "background_thread",
+            "request_thread (EMAIL_SEND_SYNC=1)" if email_send_synchronous() else "background_thread (default)",
         )
     else:
-        _elog.warning("SMTP not fully configured — welcome / payment / certificate emails are disabled")
+        _elog.warning("No SES or SMTP configured — transactional emails are disabled")
 
     return app

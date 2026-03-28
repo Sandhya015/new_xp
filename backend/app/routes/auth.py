@@ -2,6 +2,7 @@
 Auth: register (student/company), login, me, refresh. JWT + MongoDB.
 Uses werkzeug for password hashing (pure Python, no bcrypt native lib on Lambda).
 """
+import os
 import re
 from datetime import datetime
 from flask import Blueprint, request, jsonify
@@ -143,7 +144,9 @@ def register():
     if role == "student":
         from flask import current_app
 
-        schedule_welcome_email(current_app._get_current_object(), name, email)
+        # Optional: skip welcome SMTP during register (e.g. while fixing Zoho); avoids slow/failed SMTP delaying the response.
+        if os.environ.get("REGISTER_SKIP_WELCOME_EMAIL", "").strip().lower() not in ("1", "true", "yes"):
+            schedule_welcome_email(current_app._get_current_object(), name, email)
 
     token = create_access_token(
         identity=str(result.inserted_id),

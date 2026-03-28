@@ -5,6 +5,14 @@ import os
 from typing import List
 
 
+def _smtp_timeout_seconds() -> int:
+    """SMTP socket timeout. On Lambda, keep well under API Gateway's 29s integration limit."""
+    raw = os.environ.get("SMTP_TIMEOUT", "").strip()
+    if raw.isdigit():
+        return max(3, min(int(raw), 60))
+    return 10 if os.environ.get("AWS_LAMBDA_FUNCTION_NAME") else 30
+
+
 class Config:
     """Base config."""
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
@@ -24,6 +32,12 @@ class Config:
     MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "XpertIntern").strip()
     # Use implicit SSL (e.g. Zoho port 465). Set SMTP_USE_SSL=1 or use port 465.
     SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "").strip().lower() in ("1", "true", "yes")
+    # Per-connection timeout (seconds); default 10 on Lambda to avoid 504 from API Gateway (29s max).
+    SMTP_TIMEOUT = _smtp_timeout_seconds()
+    # Email: "smtp" (default) or "ses" (Amazon SES in Lambda region — see .env.example)
+    EMAIL_TRANSPORT = os.environ.get("EMAIL_TRANSPORT", "smtp").strip().lower()
+    SES_FROM_EMAIL = os.environ.get("SES_FROM_EMAIL", "").strip()
+    SES_REGION = os.environ.get("SES_REGION", "").strip()
 
 
 class DevelopmentConfig(Config):

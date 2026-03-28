@@ -7,6 +7,14 @@ provider:
   runtime: python3.11
   region: ap-south-1
   stage: ${opt:stage, 'dev'}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource: "*"
   environment:
     FLASK_ENV: ${self:provider.stage}
     MONGODB_URI: ${env:MONGODB_URI, ''}
@@ -26,6 +34,10 @@ provider:
     SMTP_PASSWORD: ${env:SMTP_PASSWORD, ''}
     MAIL_FROM: ${env:MAIL_FROM, 'admin@xpertintern.com'}
     MAIL_FROM_NAME: ${env:MAIL_FROM_NAME, 'XpertIntern'}
+    # Set EMAIL_TRANSPORT=ses and SES_FROM_EMAIL to verified SES identity (same region as Lambda).
+    EMAIL_TRANSPORT: ${env:EMAIL_TRANSPORT, 'smtp'}
+    SES_FROM_EMAIL: ${env:SES_FROM_EMAIL, ''}
+    SES_REGION: ${env:SES_REGION, 'ap-south-1'}
   # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
   # vpc: ...
 
@@ -46,6 +58,9 @@ custom:
     noDeploy:
       - pytest
       - pytest-cov
+      - boto3
+      - botocore
+      - s3transfer
 
 functions:
   api:

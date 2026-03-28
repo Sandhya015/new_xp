@@ -1,8 +1,13 @@
-"""Transactional email: SMTP via app config.
+"""Transactional email: SMTP (Zoho) via app config.
 
-On AWS Lambda, mail must send before the handler returns — the runtime freezes
-right after the response, so background threads often never finish. We send
-synchronously when AWS_LAMBDA_FUNCTION_NAME is set (override with EMAIL_SEND_SYNC).
+All sends default to a background thread so signup, payment verify, enrollment,
+and certificate routes return immediately (no API Gateway 504 from slow SMTP).
+
+On Lambda, threads may be cut off after the response — delivery is best-effort.
+Set EMAIL_SEND_SYNC=1 to send in the request thread (slower, slightly more likely
+to finish on Lambda; not recommended for production latency).
+
+For guaranteed delivery use SES/SQS later; do not rely on sync SMTP in hot paths.
 """
 from __future__ import annotations
 
@@ -26,13 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 def email_send_synchronous() -> bool:
-    """True = run SMTP in the request thread (required on Lambda)."""
+    """True only when EMAIL_SEND_SYNC=1 — run SMTP in the request thread (blocks the API)."""
     explicit = os.environ.get("EMAIL_SEND_SYNC", "").strip().lower()
-    if explicit in ("0", "false", "no"):
-        return False
-    if explicit in ("1", "true", "yes"):
-        return True
-    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    return explicit in ("1", "true", "yes")
 
 
 def _run_in_app_context(app: Flask, fn: Callable[..., None], *args: Any, **kwargs: Any) -> None:
