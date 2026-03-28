@@ -34,6 +34,7 @@ provider:
     SMTP_PASSWORD: ${env:SMTP_PASSWORD, ''}
     MAIL_FROM: ${env:MAIL_FROM, 'admin@xpertintern.com'}
     MAIL_FROM_NAME: ${env:MAIL_FROM_NAME, 'XpertIntern'}
+    MAIL_REPLY_TO: ${env:MAIL_REPLY_TO, 'contact@xpertintern.com'}
     # Set EMAIL_TRANSPORT=ses and SES_FROM_EMAIL to verified SES identity (same region as Lambda).
     EMAIL_TRANSPORT: ${env:EMAIL_TRANSPORT, 'smtp'}
     SES_FROM_EMAIL: ${env:SES_FROM_EMAIL, ''}

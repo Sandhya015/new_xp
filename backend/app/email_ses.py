@@ -66,6 +66,9 @@ def send_email_via_ses(
     msg["Subject"] = subject
     msg["From"] = source
     msg["To"] = to_addr
+    reply_to = (config.get("MAIL_REPLY_TO") or "").strip()
+    if reply_to:
+        msg["Reply-To"] = reply_to
 
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(text_body, "plain", "utf-8"))

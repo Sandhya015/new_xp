@@ -93,10 +93,7 @@ export function Contact() {
                   </div>
                   <div>
                     <p className="font-bold text-brand-navy">Email</p>
-                    <a href="mailto:info@xpertintern.com" className="mt-1 block text-slate-gray hover:text-brand-accent transition">
-                      info@xpertintern.com
-                    </a>
-                    <a href="mailto:contact@xpertintern.com" className="mt-0.5 block text-slate-gray hover:text-brand-accent transition">
+                    <a href="mailto:contact@xpertintern.com" className="mt-1 block text-slate-gray hover:text-brand-accent transition">
                       contact@xpertintern.com
                     </a>
                   </div>

@@ -30,6 +30,8 @@ class Config:
     SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "").strip()
     MAIL_FROM = os.environ.get("MAIL_FROM", "admin@xpertintern.com").strip()
     MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "XpertIntern").strip()
+    # Replies to transactional mail (welcome, receipts, certificates) — public support mailbox
+    MAIL_REPLY_TO = os.environ.get("MAIL_REPLY_TO", "contact@xpertintern.com").strip()
     # Use implicit SSL (e.g. Zoho port 465). Set SMTP_USE_SSL=1 or use port 465.
     SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "").strip().lower() in ("1", "true", "yes")
     # Per-connection timeout (seconds); default 10 on Lambda to avoid 504 from API Gateway (29s max).
