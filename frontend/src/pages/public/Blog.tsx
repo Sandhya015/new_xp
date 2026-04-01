@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Calendar, Clock, ArrowRight, BookOpen, Briefcase, GraduationCap, Sparkles, Mail, Loader2 } from 'lucide-react'
+import {
+  BLOG_EMPTY_DESCRIPTION,
+  BLOG_EMPTY_HEADING,
+  BLOG_MAINTENANCE_DESCRIPTION,
+  BLOG_MAINTENANCE_HEADING,
+} from '@/constants/blogPublic'
 import { strapiService, type StrapiArticle } from '@/services/strapiService'
 
 function formatBlogDate(iso: string | null): string {
@@ -19,18 +25,18 @@ const featuredGradients = [
 export function Blog() {
   const [articles, setArticles] = useState<StrapiArticle[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [fetchFailed, setFetchFailed] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState('All')
 
   const load = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setFetchFailed(false)
     try {
       const data = await strapiService.getArticles()
       setArticles(data)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load blog posts.')
+    } catch {
       setArticles([])
+      setFetchFailed(true)
     } finally {
       setLoading(false)
     }
@@ -82,51 +88,48 @@ export function Blog() {
         </div>
       </section>
 
-      <section className="border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap gap-2">
-            {categories.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setSelectedCategory(c)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                  selectedCategory === c ? 'bg-brand-navy text-white' : 'bg-gray-100 text-brand-navy hover:bg-gray-200'
-                }`}
-              >
-                {c}
-              </button>
-            ))}
+      {!fetchFailed && articles.length > 0 && (
+        <section className="border-b border-gray-200 bg-white">
+          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+            <div className="flex flex-wrap gap-2">
+              {categories.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setSelectedCategory(c)}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    selectedCategory === c ? 'bg-brand-navy text-white' : 'bg-gray-100 text-brand-navy hover:bg-gray-200'
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
-        {error && (
+        {fetchFailed ? (
           <div
-            className="mb-8 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
-            role="alert"
+            className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm"
+            role="status"
           >
-            <p className="font-medium">Could not load articles from Strapi.</p>
-            <p className="mt-1 text-amber-900/90">{error}</p>
-            <p className="mt-2 text-amber-800/80">
-              Run <code className="rounded bg-amber-100/80 px-1">blog-cms</code> with{' '}
-              <code className="rounded bg-amber-100/80 px-1">npm run develop</code> and open{' '}
-              <code className="rounded bg-amber-100/80 px-1">http://localhost:1337/api/articles?populate=*</code>
-              . Set <code className="rounded bg-amber-100/80 px-1">VITE_STRAPI_URL</code> if Strapi is not on localhost:1337.
-            </p>
+            <BookOpen className="mx-auto h-12 w-12 text-brand-accent/80" aria-hidden />
+            <h2 className="mt-6 text-xl font-bold text-brand-navy sm:text-2xl">{BLOG_MAINTENANCE_HEADING}</h2>
+            <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
           </div>
-        )}
-
-        {loading ? (
+        ) : loading ? (
           <div className="flex flex-col items-center justify-center gap-3 py-24 text-slate-gray">
             <Loader2 className="h-10 w-10 animate-spin text-brand-accent" aria-hidden />
             <p className="text-sm font-medium">Loading articles…</p>
           </div>
         ) : !featured ? (
-          <p className="py-16 text-center text-slate-gray">
-            No published articles yet. Create and publish posts in Strapi (<strong>blog-cms</strong>) to see them here.
-          </p>
+          <div className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
+            <BookOpen className="mx-auto h-12 w-12 text-brand-accent/80" aria-hidden />
+            <h2 className="text-xl font-bold text-brand-navy sm:text-2xl">{BLOG_EMPTY_HEADING}</h2>
+            <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_EMPTY_DESCRIPTION}</p>
+          </div>
         ) : (
           <>
             <h2 className="text-lg font-bold text-brand-navy sm:text-xl">Featured</h2>

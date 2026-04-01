@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Calendar, Clock, Loader2 } from 'lucide-react'
+import { BLOG_MAINTENANCE_DESCRIPTION, BLOG_MAINTENANCE_HEADING } from '@/constants/blogPublic'
 import { strapiService, type StrapiArticle } from '@/services/strapiService'
 
 function formatBlogDate(iso: string | null): string {
@@ -14,25 +15,26 @@ export function BlogArticle() {
   const { slug } = useParams()
   const [article, setArticle] = useState<StrapiArticle | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [fetchFailed, setFetchFailed] = useState(false)
 
   useEffect(() => {
     if (!slug) {
       setLoading(false)
       setArticle(null)
+      setFetchFailed(false)
       return
     }
     let cancelled = false
     setLoading(true)
-    setError(null)
+    setFetchFailed(false)
     void strapiService
       .getArticleBySlug(slug)
       .then((a) => {
         if (!cancelled) setArticle(a)
       })
-      .catch((e) => {
+      .catch(() => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load article.')
+          setFetchFailed(true)
           setArticle(null)
         }
       })
@@ -50,7 +52,10 @@ export function BlogArticle() {
         <Link to="/blog" className="inline-flex items-center gap-2 text-sm font-medium text-brand-accent hover:underline">
           <ArrowLeft className="h-4 w-4" /> Back to Blog
         </Link>
-        <p className="mt-6 text-slate-gray">Invalid article link.</p>
+        <div className="mt-10 rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+          <h1 className="text-xl font-bold text-brand-navy sm:text-2xl">{BLOG_MAINTENANCE_HEADING}</h1>
+          <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
+        </div>
       </div>
     )
   }
@@ -64,35 +69,24 @@ export function BlogArticle() {
     )
   }
 
-  if (error) {
+  if (fetchFailed || !article) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-12 sm:py-16 sm:px-6 lg:px-8">
         <Link to="/blog" className="inline-flex items-center gap-2 text-sm font-medium text-brand-accent hover:underline">
           <ArrowLeft className="h-4 w-4" /> Back to Blog
         </Link>
-        <p className="mt-6 text-brand-navy font-semibold">Could not load this article.</p>
-        <p className="mt-2 text-sm text-slate-gray">{error}</p>
-      </div>
-    )
-  }
-
-  if (!article) {
-    return (
-      <div className="mx-auto max-w-2xl px-4 py-12 sm:py-16 sm:px-6 lg:px-8">
-        <Link to="/blog" className="inline-flex items-center gap-2 text-sm font-medium text-brand-accent hover:underline">
-          <ArrowLeft className="h-4 w-4" /> Back to Blog
-        </Link>
-        <h1 className="mt-6 text-2xl font-bold text-brand-navy sm:text-3xl">Article not found</h1>
-        <p className="mt-4 text-slate-gray leading-relaxed">
-          This post may have been removed or the link is incorrect. If you use Strapi, ensure the entry is{' '}
-          <strong>published</strong> and the slug matches.
-        </p>
-        <Link
-          to="/blog"
-          className="mt-8 inline-flex rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
-        >
-          View all posts
-        </Link>
+        <div className="mt-10 rounded-2xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm">
+          <h1 className="text-xl font-bold text-brand-navy sm:text-2xl">{BLOG_MAINTENANCE_HEADING}</h1>
+          <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
+        </div>
+        <div className="mt-8 text-center">
+          <Link
+            to="/blog"
+            className="inline-flex rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+          >
+            Back to blog
+          </Link>
+        </div>
       </div>
     )
   }
