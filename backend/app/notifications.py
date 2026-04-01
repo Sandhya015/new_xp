@@ -1,13 +1,13 @@
 """Transactional email: SMTP (Zoho) via app config.
 
-All sends default to a background thread so signup, payment verify, enrollment,
-and certificate routes return immediately (no API Gateway 504 from slow SMTP).
+Most sends use a background thread so routes return quickly (avoids API Gateway 504).
 
-On Lambda, threads may be cut off after the response — delivery is best-effort.
-Set EMAIL_SEND_SYNC=1 to send in the request thread (slower, slightly more likely
-to finish on Lambda; not recommended for production latency).
+**Welcome email on AWS Lambda:** background daemon threads are often frozen as soon as
+the HTTP response is sent, so SMTP never completes. We always run the **student welcome**
+send in the request thread when `AWS_LAMBDA_FUNCTION_NAME` is set (adds a little latency
+to `/register` only).
 
-For guaranteed delivery use SES/SQS later; do not rely on sync SMTP in hot paths.
+Other emails: still background unless `EMAIL_SEND_SYNC=1` (or use SES/SQS for hard guarantees).
 """
 from __future__ import annotations
 
@@ -52,6 +52,15 @@ def _dispatch_email_job(app: Flask, job: Callable[..., None]) -> None:
         t.start()
 
 
+def _running_on_aws_lambda() -> bool:
+    return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "").strip())
+
+
+def welcome_email_uses_request_thread() -> bool:
+    """True when student welcome is sent before the HTTP handler returns (Lambda or EMAIL_SEND_SYNC)."""
+    return email_send_synchronous() or _running_on_aws_lambda()
+
+
 def schedule_welcome_email(app: Flask, student_name: str, email: str) -> None:
     if not email:
         return
@@ -64,7 +73,11 @@ def schedule_welcome_email(app: Flask, student_name: str, email: str) -> None:
         else:
             logger.warning("Welcome email was not sent for %s (SMTP disabled or failed — see logs above)", email)
 
-    _dispatch_email_job(app, job)
+    # Lambda: must run before the invocation ends; background threads are unreliable.
+    if welcome_email_uses_request_thread():
+        _run_in_app_context(app, job)
+    else:
+        _dispatch_email_job(app, job)
 
 
 def schedule_enrollment_email(app: Flask, user_id: str, course_id: str) -> None:

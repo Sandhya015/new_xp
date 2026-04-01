@@ -174,12 +174,19 @@ def create_app(config_class=None):
         else:
             _elog.warning("EMAIL_TRANSPORT=ses but SES_FROM_EMAIL / MAIL_FROM missing — mail disabled")
     elif app.config.get("SMTP_HOST") and app.config.get("SMTP_USER") and app.config.get("SMTP_PASSWORD"):
-        from app.notifications import email_send_synchronous
+        from app.notifications import email_send_synchronous, welcome_email_uses_request_thread
+
+        if email_send_synchronous():
+            _smtp_mode = "request_thread (EMAIL_SEND_SYNC=1)"
+        elif welcome_email_uses_request_thread():
+            _smtp_mode = "welcome_in_request_on_Lambda_others_background"
+        else:
+            _smtp_mode = "background_thread (default)"
         _elog.info(
             "SMTP enabled host=%s port=%s mode=%s",
             app.config.get("SMTP_HOST"),
             app.config.get("SMTP_PORT"),
-            "request_thread (EMAIL_SEND_SYNC=1)" if email_send_synchronous() else "background_thread (default)",
+            _smtp_mode,
         )
     else:
         _elog.warning("No SES or SMTP configured — transactional emails are disabled")
