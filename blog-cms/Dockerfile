@@ -33,14 +33,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips42 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /opt/app ./
+# Own files as we copy — avoids `chown -R` over node_modules (very slow / looks stuck on many hosts).
+COPY --chown=node:node --from=build /opt/app ./
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
 EXPOSE 1337
 
-RUN chown -R node:node /opt/app
 USER node
 
 CMD ["npm", "run", "start"]
