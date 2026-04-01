@@ -1,11 +1,12 @@
 import type { Core } from '@strapi/strapi';
 
 /**
- * Browser CORS for the public REST API. Defaults include production + local dev;
- * merge with CORS_ORIGIN (comma-separated) for Vercel previews, etc.
+ * CORS for the public REST API (e.g. www.xpertintern.com → Strapi on Render).
  *
- * If CORS_ORIGIN is unset and we relied on default `strapi::cors`, some hosts
- * (e.g. Render) did not send Access-Control-Allow-Origin — browsers block fetch.
+ * Important: `strapi::cors` must run **outermost** (listed **first**) so on the
+ * response path it runs **after** `strapi::security` (Helmet). Otherwise Helmet
+ * can run after CORS and drop `Access-Control-Allow-Origin` — browser shows
+ * “blocked by CORS” even when the API returns 200.
  */
 export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewares => {
   const raw = env('CORS_ORIGIN', '');
@@ -19,21 +20,38 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
     'https://www.xpertintern.com',
     'https://xpertintern.com',
   ];
-  const origins = [...new Set([...defaults, ...fromEnv])];
+  const allowed = [...new Set([...defaults, ...fromEnv])];
 
   const cors: Core.Config.Middlewares[number] = {
     name: 'strapi::cors',
     config: {
-      enabled: true,
-      origin: origins,
+      origin: (ctx: { request: { header: { origin?: string } } }): string | false => {
+        const o = (ctx.request.header.origin || '').trim();
+        if (!o) return false;
+        if (allowed.includes(o)) return o;
+        const trimmed = o.replace(/\/$/, '');
+        if (allowed.includes(trimmed)) return o;
+        return false;
+      },
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+      headers: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
+      keepHeaderOnError: true,
+    },
+  };
+
+  const security: Core.Config.Middlewares[number] = {
+    name: 'strapi::security',
+    config: {
+      // Avoid CORP: same-origin blocking cross-origin fetch of API JSON in some browsers.
+      crossOriginResourcePolicy: false,
     },
   };
 
   return [
+    cors,
     'strapi::logger',
     'strapi::errors',
-    'strapi::security',
-    cors,
+    security,
     'strapi::poweredBy',
     'strapi::query',
     'strapi::body',
