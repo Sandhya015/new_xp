@@ -1,0 +1,12 @@
+# Strapi / Node
+node_modules/
+.tmp/
+.cache/
+build/
+dist/
+.strapi/
+.strapi-updater.json
+*.db*
+license.txt
+exports/
+*.log
