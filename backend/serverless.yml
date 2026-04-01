@@ -1,6 +1,8 @@
 # XpertIntern API — AWS Lambda + API Gateway (serverless, pay-per-request, no always-on)
 # Deploy: from backend/ run  npx serverless deploy --stage dev|staging|production
+# Loads backend/.env so RAZORPAY_* / MONGODB_URI / secrets are not wiped as empty on deploy.
 service: xpertintern-api
+useDotenv: true
 
 provider:
   name: aws
@@ -97,20 +99,35 @@ functions:
           path: /
           method: ANY
           cors:
-            origin: 'https://www.xpertintern.com,https://xpertintern.com,http://localhost:5173,http://127.0.0.1:5173'
+            # Comma-separated `origin:` is invalid for multiple sites — use `origins` (Serverless matches request Origin).
+            origins:
+              - http://localhost:5173
+              - http://127.0.0.1:5173
+              - https://www.xpertintern.com
+              - https://xpertintern.com
+              - https://*.vercel.app
+              - ${env:FRONTEND_ORIGIN, 'https://www.xpertintern.com'}
             headers:
               - Content-Type
               - Authorization
             allowCredentials: true
+            maxAge: 86400
       - http:
           path: /{proxy+}
           method: ANY
           cors:
-            origin: 'https://www.xpertintern.com,https://xpertintern.com,http://localhost:5173,http://127.0.0.1:5173'
+            origins:
+              - http://localhost:5173
+              - http://127.0.0.1:5173
+              - https://www.xpertintern.com
+              - https://xpertintern.com
+              - https://*.vercel.app
+              - ${env:FRONTEND_ORIGIN, 'https://www.xpertintern.com'}
             headers:
               - Content-Type
               - Authorization
             allowCredentials: true
+            maxAge: 86400
 
 # Add CORS headers to error responses (4XX/5XX) so browser doesn't block on error
 resources:

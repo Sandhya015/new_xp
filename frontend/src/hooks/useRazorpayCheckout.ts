@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -98,9 +99,26 @@ export function useRazorpayCheckout() {
         })
         rzp.open()
       } catch (e: unknown) {
-        const ax = e as { response?: { data?: { error?: string; detail?: string } } }
-        const d = ax.response?.data
-        setError(d?.detail || d?.error || 'Could not start payment. Is the gateway configured on the server?')
+        let message = 'Could not start payment. Is the gateway configured on the server?'
+        if (axios.isAxiosError(e)) {
+          const status = e.response?.status
+          const raw = e.response?.data
+          const d =
+            raw && typeof raw === 'object'
+              ? (raw as { error?: string; detail?: string; msg?: string; message?: string })
+              : null
+          if (status === 401) {
+            message = 'Please sign in again, then retry payment.'
+          } else if (d) {
+            const parts = [d.detail, d.error, d.msg, d.message].filter(
+              (x): x is string => typeof x === 'string' && x.trim().length > 0
+            )
+            if (parts.length) message = parts.join(' — ')
+          } else if (e.message) {
+            message = e.message
+          }
+        }
+        setError(message)
         setBusy(false)
       }
     },

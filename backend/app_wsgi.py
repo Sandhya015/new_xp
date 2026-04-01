@@ -17,6 +17,18 @@ ALLOWED_ORIGINS = {
 BODY_503 = b'{"error":"Service temporarily unavailable. Set MONGODB_URI and JWT_SECRET_KEY in Lambda env."}'
 
 
+def _origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    lo = origin.rstrip("/").lower()
+    host = lo.split("//", 1)[-1].split("/", 1)[0]
+    if host.endswith(".vercel.app") or host.endswith(".amplifyapp.com"):
+        return True
+    return False
+
+
 def _raw_wsgi_fallback(environ, start_response):
     """Minimal WSGI app: 503 + CORS, no Flask."""
     origin = (environ.get("HTTP_ORIGIN") or "").strip()
@@ -26,7 +38,7 @@ def _raw_wsgi_fallback(environ, start_response):
         ("Access-Control-Allow-Headers", "Content-Type, Authorization"),
         ("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"),
     ]
-    if origin and origin in ALLOWED_ORIGINS:
+    if origin and _origin_allowed(origin):
         headers.append(("Access-Control-Allow-Origin", origin))
     start_response("503 Service Unavailable", headers)
     return [BODY_503]
@@ -62,7 +74,7 @@ def _fallback_with_error(environ, start_response):
         ("Access-Control-Allow-Headers", "Content-Type, Authorization"),
         ("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"),
     ]
-    if origin and origin in ALLOWED_ORIGINS:
+    if origin and _origin_allowed(origin):
         headers.append(("Access-Control-Allow-Origin", origin))
     detail = str(_load_error) if _load_error else "App failed to load."
     body = json.dumps({"error": "Service temporarily unavailable", "detail": detail}).encode()
