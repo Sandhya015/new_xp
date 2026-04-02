@@ -1,5 +1,5 @@
 import type { Core } from '@strapi/strapi';
-import { extendMiddlewareConfiguration } from '@strapi/utils';
+import { CSP_DEFAULTS } from '@strapi/utils';
 
 /**
  * Origins to allow in CSP for Media Library when using S3 (admin img-src / media-src).
@@ -65,11 +65,34 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
     },
   };
 
-  const base: Core.Config.Middlewares = [
+  const s3Origins = s3CspOrigins(env);
+
+  // When S3 is configured, pass a full CSP directives object. Strapi's security middleware uses
+  // lodash defaultsDeep on config — partial { img-src: [...] } never merges arrays with defaults,
+  // so S3 hosts were dropped. We must repeat CSP_DEFAULTS and append S3 origins explicitly.
+  const securityEntry: Core.Config.Middlewares[number] =
+    s3Origins.length > 0
+      ? {
+          name: 'strapi::security',
+          config: {
+            contentSecurityPolicy: {
+              useDefaults: true,
+              directives: {
+                ...CSP_DEFAULTS,
+                'img-src': [...CSP_DEFAULTS['img-src'], ...s3Origins],
+                'media-src': [...CSP_DEFAULTS['media-src'], ...s3Origins],
+                upgradeInsecureRequests: null,
+              },
+            },
+          },
+        }
+      : 'strapi::security';
+
+  return [
     cors,
     'strapi::logger',
     'strapi::errors',
-    'strapi::security',
+    securityEntry,
     'strapi::poweredBy',
     'strapi::query',
     {
@@ -88,26 +111,4 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
     'strapi::favicon',
     'strapi::public',
   ];
-
-  const s3Origins = s3CspOrigins(env);
-  if (s3Origins.length === 0) {
-    return base;
-  }
-
-  // Merge S3 hosts into CSP img-src / media-src so admin can show S3 thumbnails (default CSP is only 'self' + market-assets).
-  return extendMiddlewareConfiguration(
-    base as (string | { name?: string; config?: unknown })[],
-    {
-      name: 'strapi::security',
-      config: {
-        contentSecurityPolicy: {
-          useDefaults: true,
-          directives: {
-            'img-src': s3Origins,
-            'media-src': s3Origins,
-          },
-        },
-      },
-    }
-  );
 };
