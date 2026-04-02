@@ -36,6 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Own files as we copy — avoids `chown -R` over node_modules (very slow / looks stuck on many hosts).
 COPY --chown=node:node --from=build /opt/app ./
 
+COPY --chown=node:node scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+RUN mkdir -p public/uploads && chown node:node public/uploads
+
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
@@ -43,4 +48,5 @@ EXPOSE 1337
 
 USER node
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["npm", "run", "start"]

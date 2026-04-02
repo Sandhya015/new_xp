@@ -1,11 +1,14 @@
 """
 MongoDB connection. Uses MONGODB_URI or MONGO_URI from config. DB name: xpertintern.
 """
+import logging
 import os
 
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
+
+logger = logging.getLogger(__name__)
 
 _client: MongoClient | None = None
 _db: Database | None = None
@@ -102,6 +105,63 @@ def get_support_tickets_collection() -> Collection:
     return get_db()["support_tickets"]
 
 
+def _ix(collection: Collection, keys, **kwargs) -> None:
+    """Create one index; log and continue if it fails (e.g. duplicate keys on unique)."""
+    try:
+        collection.create_index(keys, **kwargs)
+    except Exception as e:
+        logger.warning("Mongo index %s on %s skipped: %s", kwargs.get("name"), collection.name, e)
+
+
+def ensure_indexes(db: Database) -> None:
+    """
+    Create indexes for hot query paths (equality + sort), avoiding full collection scans.
+    Idempotent; safe to call on every startup. (MongoDB uses indexes, not DynamoDB GSIs.)
+    """
+    _ix(db["users"], "email", unique=True, name="idx_users_email")
+    _ix(db["users"], [("role", 1), ("createdAt", -1)], name="idx_users_role_created")
+
+    _ix(db["courses"], [("active", 1), ("createdAt", -1)], name="idx_courses_active_created")
+    _ix(
+        db["courses"],
+        [("active", 1), ("category", 1), ("createdAt", -1)],
+        name="idx_courses_active_category_created",
+    )
+
+    _ix(db["enrollments"], [("userId", 1), ("courseId", 1)], name="idx_enrollments_user_course")
+    _ix(db["enrollments"], [("userId", 1), ("createdAt", -1)], name="idx_enrollments_user_created")
+    _ix(db["enrollments"], "courseId", name="idx_enrollments_course")
+
+    _ix(db["orders"], [("userId", 1), ("createdAt", -1)], name="idx_orders_user_created")
+    _ix(db["orders"], "orderId", unique=True, sparse=True, name="idx_orders_orderId")
+
+    _ix(db["contacts"], [("createdAt", -1)], name="idx_contacts_created")
+
+    _ix(
+        db["applications"],
+        [("studentId", 1), ("internshipId", 1)],
+        name="idx_applications_student_internship",
+    )
+    _ix(
+        db["applications"],
+        [("internshipId", 1), ("createdAt", -1)],
+        name="idx_applications_internship_created",
+    )
+
+    _ix(
+        db["internships"],
+        [("companyId", 1), ("createdAt", -1)],
+        name="idx_internships_company_created",
+    )
+
+    _ix(db["certificates"], "certNo", unique=True, name="idx_certificates_certNo")
+    _ix(
+        db["certificates"],
+        [("studentId", 1), ("issueDate", -1)],
+        name="idx_certificates_student_issue",
+    )
+
+
 def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:
     """Initialize connection. Call from create_app after config is loaded. Returns db or None if URI empty."""
     if not uri or not uri.strip():
@@ -109,4 +169,5 @@ def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:
     global _db
     client = get_client(uri)
     _db = client[database_name]
+    ensure_indexes(_db)
     return _db

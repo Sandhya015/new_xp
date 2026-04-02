@@ -37,6 +37,28 @@ export function getStrapiOrigin(): string {
   return DEFAULT_STRAPI_ORIGIN
 }
 
+/**
+ * Strapi may return `/uploads/...` or absolute URLs saved when `server.url` differed (e.g. old deploy URL).
+ * Always resolve through the configured API origin so the blog keeps working after refresh / domain changes.
+ */
+function resolveStrapiAssetUrl(raw: string | null | undefined, origin: string): string | null {
+  if (raw == null || typeof raw !== 'string') return null
+  const u = raw.trim()
+  if (!u) return null
+  const base = origin.replace(/\/$/, '')
+  if (u.startsWith('/')) return `${base}${u}`
+  try {
+    const parsed = new URL(u)
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}`
+    if (path.startsWith('/uploads/') || path.startsWith('/upload/')) {
+      return `${base}${path}`
+    }
+    return u
+  } catch {
+    return `${base}/${u.replace(/^\//, '')}`
+  }
+}
+
 export type StrapiArticle = {
   id: number
   slug: string
@@ -299,10 +321,10 @@ function richTextToHtml(value: unknown, origin: string): string {
       const img = node.image
       if (isRecord(img)) {
         const u = str(img.url)
-        if (!u) return ''
-        const full = u.startsWith('http') ? u : `${origin}${u}`
+        const full = resolveStrapiAssetUrl(u, origin)
+        if (!full) return ''
         const alt = escapeHtml(str(img.alternativeText))
-        return `<figure><img src="${full}" alt="${alt}" loading="lazy" /></figure>`
+        return `<figure><img src="${escapeHtml(full)}" alt="${alt}" loading="lazy" /></figure>`
       }
     }
     return children.map((c) => block(c)).join('')
@@ -324,14 +346,15 @@ function richTextToExcerpt(value: unknown, htmlFallback: string): string {
 
 function pickMediaUrl(media: UnknownRecord, origin: string): string | null {
   const direct = str(media.url)
-  if (direct) return direct.startsWith('http') ? direct : `${origin}${direct}`
+  if (direct) return resolveStrapiAssetUrl(direct, origin)
   const formats = media.formats
   if (isRecord(formats)) {
     for (const k of ['large', 'medium', 'small', 'thumbnail'] as const) {
       const f = formats[k]
       if (isRecord(f)) {
         const u = str(f.url)
-        if (u) return u.startsWith('http') ? u : `${origin}${u}`
+        const resolved = resolveStrapiAssetUrl(u, origin)
+        if (resolved) return resolved
       }
     }
   }
@@ -381,22 +404,53 @@ async function parseList(res: Response): Promise<StrapiArticle[]> {
   return rows.map((row) => normalizeArticle(row, origin)).filter((a): a is StrapiArticle => a != null)
 }
 
+/** Lean list: only coverImage (not populate=*); caps page size. Public role should still hide drafts. */
+function articlesListUrl(origin: string): string {
+  const url = new URL('/api/articles', origin)
+  url.searchParams.set('populate[coverImage]', 'true')
+  url.searchParams.set('sort', 'publishedDate:desc')
+  url.searchParams.set('pagination[pageSize]', '30')
+  return url.toString()
+}
+
+/** Single article: full populate for richtext / nested media in body (one document — acceptable cost). */
+function articleBySlugUrl(origin: string, slug: string): string {
+  const url = new URL('/api/articles', origin)
+  url.searchParams.set('populate', '*')
+  url.searchParams.set('filters[slug][$eq]', slug)
+  return url.toString()
+}
+
+const ARTICLES_CACHE_TTL_MS = 45_000
+type ArticlesCache = { origin: string; exp: number; data: StrapiArticle[] }
+let articlesCache: ArticlesCache | null = null
+
+export function invalidateStrapiArticlesCache(): void {
+  articlesCache = null
+}
+
 export const strapiService = {
   async getArticles(): Promise<StrapiArticle[]> {
     const origin = getStrapiOrigin()
-    const url = new URL('/api/articles', origin)
-    url.searchParams.set('populate', '*')
-    url.searchParams.set('sort', 'publishedDate:desc')
-    const res = await fetch(url.toString(), { method: 'GET' })
-    return parseList(res)
+    const now = Date.now()
+    if (articlesCache && articlesCache.origin === origin && now < articlesCache.exp) {
+      return articlesCache.data
+    }
+    const res = await fetch(articlesListUrl(origin), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
+    const data = await parseList(res)
+    articlesCache = { origin, exp: now + ARTICLES_CACHE_TTL_MS, data }
+    return data
   },
 
   async getArticleBySlug(slug: string): Promise<StrapiArticle | null> {
     const origin = getStrapiOrigin()
-    const url = new URL('/api/articles', origin)
-    url.searchParams.set('populate', '*')
-    url.searchParams.set('filters[slug][$eq]', slug)
-    const res = await fetch(url.toString(), { method: 'GET' })
+    const res = await fetch(articleBySlugUrl(origin, slug), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
     const list = await parseList(res)
     return list[0] ?? null
   },
