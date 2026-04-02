@@ -4,17 +4,41 @@ import type { Core } from '@strapi/strapi';
 const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 /**
- * Local disk uploads (no S3). File bytes live under `public/uploads/` — on PaaS without a
- * persistent disk, that folder is wiped on redeploy; use UPLOADS_PERSIST_PATH + Docker entrypoint
- * or mount a volume on `public/uploads` (see .env.example).
+ * Media storage:
+ * - If AWS_S3_BUCKET + credentials are set → S3 (durable; best for Render free tier without a disk).
+ * - Else → local public/uploads/ (wiped on deploy unless you mount a persistent disk).
  */
-export default (): Core.Config.Plugin => ({
-  upload: {
-    config: {
-      provider: 'local',
-      providerOptions: {
+export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin => {
+  const bucket = env('AWS_S3_BUCKET', '').trim();
+  const accessKeyId = env('AWS_ACCESS_KEY_ID', '').trim();
+  const secretAccessKey = env('AWS_SECRET_ACCESS_KEY', '').trim();
+
+  if (bucket && accessKeyId && secretAccessKey) {
+    return {
+      upload: {
+        config: {
+          sizeLimit: UPLOAD_MAX_BYTES,
+          provider: 'aws-s3',
+          providerOptions: {
+            baseUrl: env('AWS_S3_PUBLIC_URL', '').trim() || undefined,
+            s3Options: {
+              credentials: { accessKeyId, secretAccessKey },
+              region: env('AWS_REGION', 'ap-south-1').trim(),
+              params: { Bucket: bucket },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  return {
+    upload: {
+      config: {
         sizeLimit: UPLOAD_MAX_BYTES,
+        provider: 'local',
+        providerOptions: {},
       },
     },
-  },
-});
+  };
+};

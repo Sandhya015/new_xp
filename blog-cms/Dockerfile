@@ -25,6 +25,7 @@ ENV NODE_ENV=production
 RUN npm run build && npm prune --omit=dev
 
 # --- runtime
+# Render: attach a persistent disk at /opt/app/public/uploads so uploads survive deploys (see .env.example).
 FROM node:20-bookworm-slim AS runtime
 
 WORKDIR /opt/app
