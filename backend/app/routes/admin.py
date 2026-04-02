@@ -22,6 +22,18 @@ from app.db import (
 admin_bp = Blueprint("admin", __name__)
 
 
+def _sum_order_amounts(orders_coll, match: dict) -> float:
+    """Aggregate sum(amount) without loading every document (avoids large full scans in Python)."""
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$amount", 0]}}}},
+    ]
+    rows = list(orders_coll.aggregate(pipeline))
+    if not rows or rows[0].get("total") is None:
+        return 0.0
+    return float(rows[0]["total"])
+
+
 def _admin_required():
     """After @jwt_required(), check role is admin. Returns (error_response, status) or None."""
     claims = get_jwt()
@@ -270,15 +282,13 @@ def dashboard():
     total_courses = courses.count_documents({})
     total_internships = internships.count_documents({})
     total_orders = orders.count_documents({})
-    total_revenue = sum(o.get("amount", 0) for o in orders.find({"status": "success"})) or 0
     now = datetime.utcnow()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    revenue_this_month = sum(
-        o.get("amount", 0) for o in orders.find({
-            "status": "success",
-            "createdAt": {"$gte": month_start},
-        })
-    ) or 0
+    total_revenue = _sum_order_amounts(orders, {"status": "success"})
+    revenue_this_month = _sum_order_amounts(
+        orders,
+        {"status": "success", "createdAt": {"$gte": month_start}},
+    )
     certs_count = get_certificates_collection().count_documents({})
     leads_7d = contacts.count_documents({"createdAt": {"$gte": now - timedelta(days=7)}})
     pending_companies = users.count_documents({"role": "company", "status": "pending"})

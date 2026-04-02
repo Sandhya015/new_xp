@@ -49,10 +49,20 @@ def list_enrollments():
     q = {"userId": user_id}
     if status_filter in ("active", "completed"):
         q["status"] = status_filter
-    cursor = coll.find(q).sort("createdAt", -1)
+    rows = list(coll.find(q).sort("createdAt", -1))
+    oids = []
+    for e in rows:
+        cid = e.get("courseId")
+        if cid and ObjectId.is_valid(str(cid)):
+            oids.append(ObjectId(str(cid)))
+    course_by_id = {}
+    if oids:
+        for c in courses_coll.find({"_id": {"$in": oids}}):
+            course_by_id[str(c["_id"])] = c
     items = []
-    for e in cursor:
-        c = courses_coll.find_one({"_id": ObjectId(e["courseId"])}) if e.get("courseId") else None
+    for e in rows:
+        cid = e.get("courseId")
+        c = course_by_id.get(str(cid)) if cid else None
         items.append(_enrollment_to_item(e, c))
     return jsonify({"items": items})
 

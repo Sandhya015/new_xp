@@ -120,6 +120,7 @@ def ensure_indexes(db: Database) -> None:
     """
     _ix(db["users"], "email", unique=True, name="idx_users_email")
     _ix(db["users"], [("role", 1), ("createdAt", -1)], name="idx_users_role_created")
+    _ix(db["users"], [("role", 1), ("status", 1)], name="idx_users_role_status")
 
     _ix(db["courses"], [("active", 1), ("createdAt", -1)], name="idx_courses_active_created")
     _ix(
@@ -133,6 +134,11 @@ def ensure_indexes(db: Database) -> None:
     _ix(db["enrollments"], "courseId", name="idx_enrollments_course")
 
     _ix(db["orders"], [("userId", 1), ("createdAt", -1)], name="idx_orders_user_created")
+    _ix(
+        db["orders"],
+        [("status", 1), ("createdAt", -1)],
+        name="idx_orders_status_created",
+    )
     _ix(db["orders"], "orderId", unique=True, sparse=True, name="idx_orders_orderId")
 
     _ix(db["contacts"], [("createdAt", -1)], name="idx_contacts_created")
@@ -152,6 +158,16 @@ def ensure_indexes(db: Database) -> None:
         db["internships"],
         [("companyId", 1), ("createdAt", -1)],
         name="idx_internships_company_created",
+    )
+    _ix(
+        db["internships"],
+        [("active", 1), ("createdAt", -1)],
+        name="idx_internships_active_created",
+    )
+    _ix(
+        db["internships"],
+        [("status", 1), ("createdAt", -1)],
+        name="idx_internships_status_created",
     )
 
     _ix(db["certificates"], "certNo", unique=True, name="idx_certificates_certNo")

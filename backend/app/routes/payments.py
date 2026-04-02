@@ -37,18 +37,23 @@ def list_my_orders():
     user_id = get_jwt_identity()
     coll = get_orders_collection()
     courses_coll = get_courses_collection()
-    cursor = coll.find({"userId": user_id}).sort("createdAt", -1)
-    items = []
-    for o in cursor:
+    orders_rows = list(coll.find({"userId": user_id}).sort("createdAt", -1))
+    oids = []
+    for o in orders_rows:
         course_id = o.get("courseId")
-        course_title = ""
         if course_id and ObjectId.is_valid(str(course_id)):
             try:
-                c = courses_coll.find_one({"_id": ObjectId(str(course_id))})
-                if c:
-                    course_title = c.get("title", "")
+                oids.append(ObjectId(str(course_id)))
             except (InvalidId, TypeError):
                 pass
+    titles = {}
+    if oids:
+        for c in courses_coll.find({"_id": {"$in": oids}}):
+            titles[str(c["_id"])] = c.get("title", "")
+    items = []
+    for o in orders_rows:
+        course_id = o.get("courseId")
+        course_title = titles.get(str(course_id), "") if course_id else ""
         items.append({
             "id": str(o["_id"]),
             "transactionId": o.get("transactionId", o.get("razorpayPaymentId", o.get("orderId", str(o["_id"])))),
