@@ -23,20 +23,18 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
     .trim()
     .replace(/\/$/, '');
   const allowedSet = new Set([...defaults, ...fromEnv]);
-  if (publicUrl) allowedSet.add(publicUrl);
+  if (publicUrl) {
+    allowedSet.add(publicUrl);
+    allowedSet.add(`${publicUrl}/`);
+  }
   const allowed = [...allowedSet];
 
   const cors: Core.Config.Middlewares[number] = {
     name: 'strapi::cors',
     config: {
-      origin: (ctx: { request: { header: { origin?: string } } }): string | false => {
-        const o = (ctx.request.header.origin || '').trim();
-        if (!o) return false;
-        if (allowed.includes(o)) return o;
-        const trimmed = o.replace(/\/$/, '');
-        if (allowed.includes(trimmed)) return o;
-        return false;
-      },
+      // Use a string[] — not a function returning `false`. Strapi's matchOrigin() only
+      // treats function results as strings to .split(); `false` caused TypeError → 500 on /admin/login.
+      origin: allowed,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
       headers: ['Content-Type', 'Authorization', 'Origin', 'Accept'],
       keepHeaderOnError: true,
