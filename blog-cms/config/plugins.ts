@@ -3,6 +3,18 @@ import type { Core } from '@strapi/strapi';
 /** Local uploads: max body size (must match strapi::body formidable.maxFileSize). */
 const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
+/** Trim + strip accidental quotes from Render/env UI (wrong secret → SignatureDoesNotMatch). */
+function envAwsSecret(raw: string): string {
+  let s = raw.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
 /**
  * Media storage:
  * - If AWS_S3_BUCKET + credentials are set → S3 (durable; best for Render free tier without a disk).
@@ -10,8 +22,8 @@ const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
  */
 export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin => {
   const bucket = env('AWS_S3_BUCKET', '').trim();
-  const accessKeyId = env('AWS_ACCESS_KEY_ID', '').trim();
-  const secretAccessKey = env('AWS_SECRET_ACCESS_KEY', '').trim();
+  const accessKeyId = envAwsSecret(env('AWS_ACCESS_KEY_ID', ''));
+  const secretAccessKey = envAwsSecret(env('AWS_SECRET_ACCESS_KEY', ''));
 
   if (bucket && accessKeyId && secretAccessKey) {
     const region = env('AWS_REGION', 'ap-south-1').trim();
@@ -30,6 +42,8 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
             s3Options: {
               credentials: { accessKeyId, secretAccessKey },
               region,
+              // Reduces SignatureDoesNotMatch with some AWS SDK + multipart/checksum combinations.
+              requestChecksumCalculation: 'WHEN_REQUIRED',
               params: {
                 Bucket: bucket,
                 // "Bucket owner enforced" — omit ACL on PutObject (null skips header). Use bucket policy for GetObject.
