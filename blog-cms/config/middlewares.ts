@@ -20,7 +20,13 @@ function s3CspOrigins(env: Core.Config.Shared.ConfigParams['env']): string[] {
       /* invalid URL — ignore */
     }
   }
+  // Virtual-hosted–style (most common)
   origins.add(`https://${bucket}.s3.${region}.amazonaws.com`);
+  // Path-style / SDK Location variants
+  origins.add(`https://s3.${region}.amazonaws.com`);
+  origins.add(`https://s3.dualstack.${region}.amazonaws.com`);
+  // Global endpoint used for some signed/redirect flows
+  origins.add('https://s3.amazonaws.com');
   return [...origins];
 }
 
@@ -66,6 +72,9 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
   };
 
   const s3Origins = s3CspOrigins(env);
+  const allowAnyHttpsImg =
+    env('STRAPI_CSP_IMG_ALLOW_HTTPS', '').trim() === '1' ||
+    env('STRAPI_CSP_IMG_ALLOW_HTTPS', '').trim().toLowerCase() === 'true';
 
   // When S3 is configured, pass a full CSP directives object. Strapi's security middleware uses
   // lodash defaultsDeep on config — partial { img-src: [...] } never merges arrays with defaults,
@@ -79,8 +88,16 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Middlewar
               useDefaults: true,
               directives: {
                 ...CSP_DEFAULTS,
-                'img-src': [...CSP_DEFAULTS['img-src'], ...s3Origins],
-                'media-src': [...CSP_DEFAULTS['media-src'], ...s3Origins],
+                'img-src': [
+                  ...CSP_DEFAULTS['img-src'],
+                  ...s3Origins,
+                  ...(allowAnyHttpsImg ? (['https:'] as const) : []),
+                ],
+                'media-src': [
+                  ...CSP_DEFAULTS['media-src'],
+                  ...s3Origins,
+                  ...(allowAnyHttpsImg ? (['https:'] as const) : []),
+                ],
                 upgradeInsecureRequests: null,
               },
             },
