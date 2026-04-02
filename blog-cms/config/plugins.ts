@@ -14,22 +14,34 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
   const secretAccessKey = env('AWS_SECRET_ACCESS_KEY', '').trim();
 
   if (bucket && accessKeyId && secretAccessKey) {
+    const region = env('AWS_REGION', 'ap-south-1').trim();
+    const publicBase = env('AWS_S3_PUBLIC_URL', '').trim();
+    // Full HTTPS base so DB stores S3 URLs, not /uploads/... on the Render host (which 404 after redeploy).
+    const baseUrl =
+      publicBase || `https://${bucket}.s3.${region}.amazonaws.com`;
+
     return {
       upload: {
         config: {
           sizeLimit: UPLOAD_MAX_BYTES,
           provider: 'aws-s3',
           providerOptions: {
-            baseUrl: env('AWS_S3_PUBLIC_URL', '').trim() || undefined,
+            baseUrl,
             s3Options: {
               credentials: { accessKeyId, secretAccessKey },
-              region: env('AWS_REGION', 'ap-south-1').trim(),
+              region,
               params: {
                 Bucket: bucket,
-                // New buckets use "Bucket owner enforced" — default public-read ACL causes AccessControlListNotSupported.
-                // `ACL` key present but null → no ACL header on PutObject; use bucket policy for public reads.
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider accepts null to skip ACL
+                // "Bucket owner enforced" — omit ACL on PutObject (null skips header). Use bucket policy for GetObject.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider: null disables ACL
                 ACL: null as any,
+              },
+            },
+            // Smaller multipart defaults help low-memory Render instances during large uploads.
+            providerConfig: {
+              multipart: {
+                partSize: 5 * 1024 * 1024,
+                queueSize: 2,
               },
             },
           },
