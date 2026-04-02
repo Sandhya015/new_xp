@@ -8,6 +8,32 @@ export default {
    * Idempotent: only creates missing permission rows.
    */
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    // Strapi defaults upload.settings.responsiveDimensions=true → many Sharp resizes + parallel S3 puts.
+    // That often OOMs small Render instances → POST /upload 502 + empty JSON body in admin.
+    // Opt back in: set UPLOAD_RESPONSIVE=true on the host.
+    const allowResponsive =
+      process.env.UPLOAD_RESPONSIVE === 'true' || process.env.UPLOAD_RESPONSIVE === '1'
+    if (!allowResponsive) {
+      try {
+        const uploadSvc = strapi.plugin('upload').service('upload') as {
+          getSettings: () => Promise<Record<string, unknown> | undefined>
+          setSettings: (v: Record<string, unknown>) => Promise<unknown>
+        }
+        const cur = (await uploadSvc.getSettings()) ?? {}
+        await uploadSvc.setSettings({
+          sizeOptimization: typeof cur.sizeOptimization === 'boolean' ? cur.sizeOptimization : true,
+          responsiveDimensions: false,
+          autoOrientation: typeof cur.autoOrientation === 'boolean' ? cur.autoOrientation : false,
+          aiMetadata: typeof cur.aiMetadata === 'boolean' ? cur.aiMetadata : true,
+        })
+        strapi.log.info(
+          '[blog-cms] Upload: responsiveDimensions=false (set UPLOAD_RESPONSIVE=true to allow large/medium/small variants).'
+        )
+      } catch (e) {
+        strapi.log.warn(`[blog-cms] Upload settings tweak skipped: ${e}`)
+      }
+    }
+
     const publicRole = await strapi.db.query('plugin::users-permissions.role').findOne({
       where: { type: 'public' },
     })
