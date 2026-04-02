@@ -24,7 +24,13 @@ export default ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Plugin =>
             s3Options: {
               credentials: { accessKeyId, secretAccessKey },
               region: env('AWS_REGION', 'ap-south-1').trim(),
-              params: { Bucket: bucket },
+              params: {
+                Bucket: bucket,
+                // New buckets use "Bucket owner enforced" — default public-read ACL causes AccessControlListNotSupported.
+                // `ACL` key present but null → no ACL header on PutObject; use bucket policy for public reads.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider accepts null to skip ACL
+                ACL: null as any,
+              },
             },
           },
         },
