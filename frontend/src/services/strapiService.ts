@@ -413,15 +413,27 @@ function articlesListUrl(origin: string): string {
   return url.toString()
 }
 
-/** Single article: full populate for richtext / nested media in body (one document — acceptable cost). */
+/**
+ * Single article: cover + media inside richtext image blocks only.
+ * Avoids populate=* (very large graph on Strapi / slow on cold hosts like Render).
+ */
 function articleBySlugUrl(origin: string, slug: string): string {
   const url = new URL('/api/articles', origin)
-  url.searchParams.set('populate', '*')
   url.searchParams.set('filters[slug][$eq]', slug)
+  url.searchParams.set('populate[coverImage]', 'true')
+  // Strapi 5 default block UID for inline images in richtext (400 → fallback to populate=* below)
+  url.searchParams.set('populate[description][on][blocks.image][populate][image]', 'true')
   return url.toString()
 }
 
-const ARTICLES_CACHE_TTL_MS = 45_000
+function articleBySlugUrlPopulateAll(origin: string, slug: string): string {
+  const url = new URL('/api/articles', origin)
+  url.searchParams.set('filters[slug][$eq]', slug)
+  url.searchParams.set('populate', '*')
+  return url.toString()
+}
+
+const ARTICLES_CACHE_TTL_MS = 120_000
 type ArticlesCache = { origin: string; exp: number; data: StrapiArticle[] }
 let articlesCache: ArticlesCache | null = null
 
@@ -447,10 +459,22 @@ export const strapiService = {
 
   async getArticleBySlug(slug: string): Promise<StrapiArticle | null> {
     const origin = getStrapiOrigin()
-    const res = await fetch(articleBySlugUrl(origin, slug), {
+    const now = Date.now()
+    // Same payload as list (first page): skip a second Strapi round-trip after /blog → /blog/:slug
+    if (articlesCache && articlesCache.origin === origin && now < articlesCache.exp) {
+      const fromList = articlesCache.data.find((a) => a.slug === slug)
+      if (fromList) return fromList
+    }
+    let res = await fetch(articleBySlugUrl(origin, slug), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     })
+    if (res.status === 400) {
+      res = await fetch(articleBySlugUrlPopulateAll(origin, slug), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      })
+    }
     const list = await parseList(res)
     return list[0] ?? null
   },

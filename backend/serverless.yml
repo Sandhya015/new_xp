@@ -69,7 +69,8 @@ functions:
   api:
     handler: safe_handler.handler
     timeout: 30
-    memorySize: 256
+    # More CPU for JSON encode + PyMongo; helps cold/warm latency vs 256MB.
+    memorySize: 512
     layers:
       - Ref: PythonRequirementsLambdaLayer
     package:

@@ -9,6 +9,19 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+type CoursesListResponse = { items: unknown[]; total: number; page: number; limit: number }
+const LIST_CACHE_TTL_MS = 60_000
+let coursesListCache: { key: string; exp: number; data: CoursesListResponse } | null = null
+
+function coursesListCacheKey(params?: { page?: number; limit?: number; category?: string; search?: string }) {
+  return JSON.stringify({
+    page: params?.page ?? 1,
+    limit: params?.limit ?? 10,
+    category: (params?.category ?? '').trim(),
+    search: (params?.search ?? '').trim(),
+  })
+}
+
 export type CourseContent = {
   id: string
   title: string
@@ -36,7 +49,13 @@ export type PythonQuizQuestion = { id: string; question: string; options: string
 
 export const courseService = {
   async list(params?: { page?: number; limit?: number; category?: string; search?: string }) {
-    const { data } = await api.get<{ items: unknown[]; total: number; page: number; limit: number }>('/api/courses', { params })
+    const key = coursesListCacheKey(params)
+    const now = Date.now()
+    if (coursesListCache && coursesListCache.key === key && now < coursesListCache.exp) {
+      return coursesListCache.data
+    }
+    const { data } = await api.get<CoursesListResponse>('/api/courses', { params })
+    coursesListCache = { key, exp: now + LIST_CACHE_TTL_MS, data }
     return data
   },
   async getById(id: string) {

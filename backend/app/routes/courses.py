@@ -11,6 +11,21 @@ from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
 courses_bp = Blueprint("courses", __name__)
 
+# List view only — excludes curriculum, materials, quizzes, etc. (large nested blobs).
+_LIST_FIELDS = {
+    "_id": 1,
+    "title": 1,
+    "description": 1,
+    "category": 1,
+    "duration": 1,
+    "mode": 1,
+    "universities": 1,
+    "price": 1,
+    "tag": 1,
+    "active": 1,
+    "createdAt": 1,
+}
+
 
 def _course_to_item(c):
     if not c:
@@ -48,9 +63,28 @@ def list_courses():
             {"description": {"$regex": search, "$options": "i"}},
         ]
     skip = (page - 1) * limit
-    total = coll.count_documents(q)
-    cursor = coll.find(q).sort("createdAt", -1).skip(skip).limit(limit)
-    items = [_course_to_item(c) for c in cursor]
+    # Single round-trip: match + sort + page + count (avoids extra latency vs count + find on Lambda↔Mongo).
+    pipeline = [
+        {"$match": q},
+        {
+            "$facet": {
+                "items": [
+                    {"$sort": {"createdAt": -1}},
+                    {"$skip": skip},
+                    {"$limit": limit},
+                    {"$project": _LIST_FIELDS},
+                ],
+                "total": [{"$count": "c"}],
+            }
+        },
+    ]
+    doc = next(coll.aggregate(pipeline), None)
+    if not doc:
+        return jsonify({"items": [], "page": page, "limit": limit, "total": 0})
+    rows = doc.get("items") or []
+    total_bits = doc.get("total") or []
+    total = int(total_bits[0]["c"]) if total_bits else 0
+    items = [_course_to_item(c) for c in rows]
     return jsonify({"items": items, "page": page, "limit": limit, "total": total})
 
 
