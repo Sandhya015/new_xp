@@ -105,6 +105,36 @@ def get_support_tickets_collection() -> Collection:
     return get_db()["support_tickets"]
 
 
+def get_registration_verifications_collection() -> Collection:
+    """Pending student sign-ups (email OTP) before users row is created."""
+    return get_db()["registration_verifications"]
+
+
+def get_registration_lockouts_collection() -> Collection:
+    """Short lockouts after too many failed OTP attempts (by email)."""
+    return get_db()["registration_lockouts"]
+
+
+def get_company_registration_verifications_collection() -> Collection:
+    """Pending company sign-ups (OTP) before users row is created."""
+    return get_db()["company_registration_verifications"]
+
+
+def get_company_registration_lockouts_collection() -> Collection:
+    """Lockouts for failed company registration OTP (by company email)."""
+    return get_db()["company_registration_lockouts"]
+
+
+def get_password_reset_tokens_collection() -> Collection:
+    """Single-use password reset tokens (hashed); scoped by email."""
+    return get_db()["password_reset_tokens"]
+
+
+def get_password_reset_attempts_collection() -> Collection:
+    """Forgot-password request log for per-email rate limiting (TTL cleanup)."""
+    return get_db()["password_reset_attempts"]
+
+
 def _ix(collection: Collection, keys, **kwargs) -> None:
     """Create one index; log and continue if it fails (e.g. duplicate keys on unique)."""
     try:
@@ -176,6 +206,38 @@ def ensure_indexes(db: Database) -> None:
         [("studentId", 1), ("issueDate", -1)],
         name="idx_certificates_student_issue",
     )
+
+    _ix(
+        db["registration_verifications"],
+        "verificationId",
+        unique=True,
+        name="idx_regverif_verificationId",
+    )
+    _ix(db["registration_verifications"], "email", name="idx_regverif_email")
+    _ix(db["registration_lockouts"], "email", unique=True, name="idx_reglock_email")
+
+    _ix(
+        db["company_registration_verifications"],
+        "verificationId",
+        unique=True,
+        name="idx_cregverif_verificationId",
+    )
+    _ix(db["company_registration_verifications"], "email", name="idx_cregverif_email")
+    _ix(db["company_registration_lockouts"], "email", unique=True, name="idx_creglock_email")
+
+    _ix(db["password_reset_tokens"], "tokenHash", unique=True, name="idx_pwdreset_tokenHash")
+    _ix(db["password_reset_tokens"], "email", name="idx_pwdreset_email")
+    _ix(db["password_reset_tokens"], "expiresAt", name="idx_pwdreset_expiresAt")
+
+    _ix(db["password_reset_attempts"], [("email", 1), ("createdAt", -1)], name="idx_pwdresetatt_email_created")
+    try:
+        db["password_reset_attempts"].create_index(
+            "createdAt",
+            expireAfterSeconds=172800,
+            name="idx_pwdresetatt_created_ttl",
+        )
+    except Exception as e:
+        logger.warning("Mongo TTL index on password_reset_attempts skipped: %s", e)
 
 
 def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:

@@ -2,20 +2,63 @@
 Auth: register (student/company), login, me, refresh. JWT + MongoDB.
 Uses werkzeug for password hashing (pure Python, no bcrypt native lib on Lambda).
 """
+import hashlib
 import os
 import re
-from datetime import datetime
-from flask import Blueprint, request, jsonify
+import secrets
+from datetime import datetime, timedelta
+from urllib.parse import quote
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.db import get_db, get_users_collection
+from app.company_registration_validate import (
+    normalized_company_to_user_payload,
+    validate_company_registration,
+)
+from app.db import (
+    get_company_registration_lockouts_collection,
+    get_company_registration_verifications_collection,
+    get_db,
+    get_notifications_collection,
+    get_password_reset_attempts_collection,
+    get_password_reset_tokens_collection,
+    get_registration_lockouts_collection,
+    get_registration_verifications_collection,
+    get_users_collection,
+)
+from app.email_smtp import send_company_registration_otp, send_password_reset_email, send_registration_otp
+from app.email_templates import public_app_url
 from app.notifications import schedule_welcome_email
+from app.registration_otp import (
+    MAX_RESENDS,
+    MAX_WRONG_OTP_ATTEMPTS,
+    RESEND_COOLDOWN_SECONDS,
+    generate_otp_code,
+    generate_verification_id,
+    hash_otp,
+    lockout_until_utc,
+    otp_expiry_utc,
+    smtp_or_ses_configured,
+    utcnow,
+    verify_otp_constant_time,
+)
+from app.registration_validate import normalized_to_user_doc, validate_student_registration
 
 auth_bp = Blueprint("auth", __name__)
 
 # Werkzeug method (pbkdf2:sha256) — no native deps, works on Lambda
 _PASSWORD_METHOD = "pbkdf2:sha256"
+
+_PASSWORD_RESET_EXPIRY = timedelta(hours=1)
+_MAX_FORGOT_ATTEMPTS_PER_HOUR = 5
+_FORGOT_GENERIC_MESSAGE = (
+    "If an account exists for that email, you will receive password reset instructions shortly."
+)
+
+
+def _hash_password_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
 def _hash_password(password: str) -> str:
@@ -55,6 +98,9 @@ def _user_to_response(user: dict) -> dict:
         out["semester"] = user.get("semester") or ""
         out["stream"] = user.get("stream") or ""
         out["collegeName"] = user.get("collegeName") or ""
+        m = user.get("mobile")
+        if m:
+            out["mobile"] = str(m)
     return out
 
 
@@ -69,27 +115,86 @@ def _validate_password(password: str) -> tuple[bool, str]:
 
 
 # ----- routes -----
+def _registration_lockout_active(email: str):
+    """Return lockedUntil datetime if email is locked; else None and clear stale lockout."""
+    col = get_registration_lockouts_collection()
+    doc = col.find_one({"email": email})
+    if not doc:
+        return None
+    until = doc.get("lockedUntil")
+    if until and until > utcnow():
+        return until
+    col.delete_one({"email": email})
+    return None
+
+
+def _set_registration_lockout(email: str) -> None:
+    get_registration_lockouts_collection().update_one(
+        {"email": email},
+        {"$set": {"email": email, "lockedUntil": lockout_until_utc()}},
+        upsert=True,
+    )
+
+
+def _company_registration_lockout_active(email: str):
+    col = get_company_registration_lockouts_collection()
+    doc = col.find_one({"email": email})
+    if not doc:
+        return None
+    until = doc.get("lockedUntil")
+    if until and until > utcnow():
+        return until
+    col.delete_one({"email": email})
+    return None
+
+
+def _set_company_registration_lockout(email: str) -> None:
+    get_company_registration_lockouts_collection().update_one(
+        {"email": email},
+        {"$set": {"email": email, "lockedUntil": lockout_until_utc()}},
+        upsert=True,
+    )
+
+
+def _notify_admins_company_pending_review(company_name: str, company_email: str) -> None:
+    """In-app notification for admins (best-effort)."""
+    try:
+        coll = get_notifications_collection()
+        users = get_users_collection()
+        now = datetime.utcnow()
+        msg = f"{company_name} ({company_email}) completed verification and is pending approval."
+        for admin in users.find({"role": "admin"}):
+            coll.insert_one({
+                "userId": str(admin["_id"]),
+                "type": "admin",
+                "title": "New company registration",
+                "message": msg,
+                "read": False,
+                "link": "/admin/companies?tab=pending",
+                "createdAt": now,
+            })
+    except Exception:
+        current_app.logger.exception("Failed to notify admins of new company registration")
+
+
 @auth_bp.route("/register", methods=["POST"])
 def register():
-    """Register a new user (student or company). Body: name, email, password, mobile; role optional (default student)."""
+    """Student: validate, send email OTP, return verificationId (no JWT). Company uses /company/register."""
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
 
     data = request.get_json() or {}
     role = (data.get("role") or "student").strip().lower()
-    if role not in ("student", "company"):
-        role = "student"
-
     if role == "company":
-        name = (data.get("companyName") or data.get("name") or "").strip()
-        email = (data.get("companyEmail") or data.get("email") or "").strip().lower()
-    else:
-        name = (data.get("name") or data.get("fullName") or "").strip()
-        email = (data.get("email") or "").strip().lower()
+        return jsonify({
+            "error": "Company sign-up uses email verification first. Use the Company tab on the register page.",
+            "code": "use_company_register_endpoint",
+        }), 400
 
+    name = (data.get("name") or data.get("fullName") or "").strip()
+    email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
-    mobile = (data.get("mobile") or "").strip()
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
@@ -102,61 +207,538 @@ def register():
     ok, msg = _validate_password(password)
     if not ok:
         return jsonify({"error": msg}), 400
-    if role == "company" and data.get("confirmPassword") and data["confirmPassword"] != password:
-        return jsonify({"error": "Passwords do not match"}), 400
-    if role == "student" and data.get("confirmPassword") and data["confirmPassword"] != password:
+    if data.get("confirmPassword") and data["confirmPassword"] != password:
         return jsonify({"error": "Passwords do not match"}), 400
 
     users = get_users_collection()
     if users.find_one({"email": email}):
         return jsonify({"error": "An account with this email already exists"}), 409
 
-    doc = {
-        "email": email,
-        "password": _hash_password(password),
-        "name": name,
-        "fullName": name,
-        "mobile": mobile or None,
-        "role": role,
+    if not data.get("acceptTerms"):
+        return jsonify({
+            "error": "You must accept the Terms & Conditions.",
+            "fields": {"acceptTerms": "You must accept the Terms & Conditions."},
+        }), 400
+
+    lock_until = _registration_lockout_active(email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    field_errors, normalized = validate_student_registration(data)
+    if field_errors:
+        first = next(iter(field_errors.values()))
+        return jsonify({"error": first, "fields": field_errors}), 400
+
+    cfg = current_app.config
+    if not smtp_or_ses_configured(cfg):
+        current_app.logger.error("Student registration OTP skipped: email transport not configured")
+        return jsonify({
+            "error": "Email verification is temporarily unavailable. Please try again later.",
+        }), 503
+
+    assert normalized is not None
+    user_payload = normalized_to_user_doc(normalized, _hash_password(normalized["password"]))
+    otp = generate_otp_code()
+    verification_id = generate_verification_id()
+    secret = (cfg.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    otp_hash = hash_otp(verification_id, otp, secret)
+
+    ver_col = get_registration_verifications_collection()
+    ver_col.delete_many({"email": normalized["email"]})
+
+    ver_col.insert_one({
+        "verificationId": verification_id,
+        "email": normalized["email"],
+        "otpHash": otp_hash,
+        "expiresAt": otp_expiry_utc(),
+        "wrongAttempts": 0,
+        "resendCount": 0,
+        "lastOtpSentAt": utcnow(),
+        "userPayload": user_payload,
         "createdAt": datetime.utcnow(),
-    }
-    if role == "company":
-        doc["companyName"] = name
-        doc["status"] = "pending"
-        doc["hrName"] = (data.get("hrName") or "").strip() or name
-        doc["hrMobile"] = (data.get("hrMobile") or "").strip() or None
-        doc["industryType"] = (data.get("industryType") or "").strip() or None
-        doc["address"] = (data.get("address") or "").strip() or None
-        doc["website"] = (data.get("website") or "").strip() or None
-    else:
-        doc["university"] = (data.get("university") or "").strip() or None
-        doc["collegeName"] = (data.get("collegeName") or "").strip() or None
-        doc["semester"] = (data.get("semester") or "").strip() or None
-        doc["collegeRegNo"] = (data.get("collegeRegNo") or "").strip() or None
-        doc["course"] = (data.get("course") or "").strip() or None
-        doc["stream"] = (data.get("stream") or "").strip() or None
-        doc["linkedin"] = (data.get("linkedin") or "").strip() or None
+    })
 
-    result = users.insert_one(doc)
-    user = {**doc, "_id": result.inserted_id}
+    sent = send_registration_otp(cfg, normalized["fullName"], normalized["email"], otp)
+    if not sent:
+        ver_col.delete_one({"verificationId": verification_id})
+        return jsonify({"error": "Could not send verification email. Please try again later."}), 503
+
+    return jsonify({
+        "message": "OTP sent",
+        "verificationId": verification_id,
+        "expiresInSeconds": 600,
+    }), 200
+
+
+@auth_bp.route("/company/register", methods=["POST"])
+def company_register():
+    """Start company registration: validate fields, send OTP to company email (SMS/WhatsApp: future)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    channel = (data.get("otpChannel") or "email").strip().lower()
+    if channel != "email":
+        return jsonify({
+            "error": "SMS and WhatsApp OTP are not enabled yet. Please choose Email.",
+            "code": "otp_channel_unavailable",
+        }), 400
+
+    field_errors, normalized = validate_company_registration(data)
+    if field_errors:
+        return jsonify({"error": next(iter(field_errors.values())), "fields": field_errors}), 400
+
+    assert normalized is not None
+    email = normalized["email"]
+    users = get_users_collection()
+    if users.find_one({"email": email}):
+        return jsonify({"error": "An account with this email already exists"}), 409
+
+    lock_until = _company_registration_lockout_active(email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    cfg = current_app.config
+    if not smtp_or_ses_configured(cfg):
+        return jsonify({"error": "Email verification is temporarily unavailable. Please try again later."}), 503
+
+    user_payload = normalized_company_to_user_payload(normalized, _hash_password(normalized["password"]))
+    otp = generate_otp_code()
+    verification_id = generate_verification_id()
+    secret = (cfg.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    otp_hash = hash_otp(verification_id, otp, secret)
+
+    ver_col = get_company_registration_verifications_collection()
+    ver_col.delete_many({"email": email})
+
+    ver_col.insert_one({
+        "verificationId": verification_id,
+        "email": email,
+        "otpHash": otp_hash,
+        "expiresAt": otp_expiry_utc(),
+        "wrongAttempts": 0,
+        "resendCount": 0,
+        "lastOtpSentAt": utcnow(),
+        "otpChannel": channel,
+        "userPayload": user_payload,
+        "createdAt": datetime.utcnow(),
+    })
+
+    sent = send_company_registration_otp(cfg, normalized["companyName"], email, otp)
+    if not sent:
+        ver_col.delete_one({"verificationId": verification_id})
+        return jsonify({"error": "Could not send verification email. Please try again later."}), 503
+
+    return jsonify({
+        "message": "OTP sent",
+        "verificationId": verification_id,
+        "expiresInSeconds": 600,
+    }), 200
+
+
+@auth_bp.route("/company/register/verify-otp", methods=["POST"])
+def company_register_verify_otp():
+    """After OTP: create company user (pending admin). No JWT — company cannot log in until approved."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    verification_id = (data.get("verificationId") or "").strip()
+    otp = (re.sub(r"\D", "", str(data.get("otp") or "")))[:6]
+    if not verification_id or len(otp) != 6:
+        return jsonify({"error": "verificationId and a 6-digit OTP are required."}), 400
+
+    ver_col = get_company_registration_verifications_collection()
+    doc = ver_col.find_one({"verificationId": verification_id})
+    if not doc:
+        return jsonify({"error": "Invalid or expired verification session. Please start registration again."}), 400
+
+    lock_email = doc.get("email", "")
+    lock_until = _company_registration_lockout_active(lock_email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    if doc.get("expiresAt") and doc["expiresAt"] < utcnow():
+        return jsonify({"error": "OTP has expired.", "code": "otp_expired"}), 400
+
+    secret = (current_app.config.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    if not verify_otp_constant_time(verification_id, otp, secret, doc.get("otpHash") or ""):
+        wrong = int(doc.get("wrongAttempts") or 0) + 1
+        remaining = max(0, MAX_WRONG_OTP_ATTEMPTS - wrong)
+        if wrong >= MAX_WRONG_OTP_ATTEMPTS:
+            ver_col.delete_one({"verificationId": verification_id})
+            _set_company_registration_lockout(lock_email)
+            return jsonify({
+                "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+                "attemptsRemaining": 0,
+            }), 400
+        ver_col.update_one({"verificationId": verification_id}, {"$set": {"wrongAttempts": wrong}})
+        return jsonify({
+            "error": "Incorrect OTP. Please check and try again.",
+            "attemptsRemaining": remaining,
+        }), 400
+
+    users = get_users_collection()
+    payload = doc.get("userPayload") or {}
+    email = (payload.get("email") or "").strip().lower()
+    if users.find_one({"email": email}):
+        ver_col.delete_one({"verificationId": verification_id})
+        return jsonify({"error": "An account with this email already exists"}), 409
+
+    company_name = payload.get("companyName") or payload.get("name") or "Company"
+    insert_doc = {**payload, "createdAt": datetime.utcnow()}
+    result = users.insert_one(insert_doc)
+    ver_col.delete_one({"verificationId": verification_id})
+    get_company_registration_lockouts_collection().delete_one({"email": email})
+
+    _notify_admins_company_pending_review(str(company_name), email)
+
+    return jsonify({
+        "message": "Registration submitted! You will receive an email once your account is approved.",
+    }), 201
+
+
+@auth_bp.route("/company/register/resend-otp", methods=["POST"])
+def company_register_resend_otp():
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    verification_id = (data.get("verificationId") or "").strip()
+    if not verification_id:
+        return jsonify({"error": "verificationId is required."}), 400
+
+    ver_col = get_company_registration_verifications_collection()
+    doc = ver_col.find_one({"verificationId": verification_id})
+    if not doc:
+        return jsonify({"error": "Invalid or expired verification session. Please start registration again."}), 400
+
+    email = doc.get("email", "")
+    lock_until = _company_registration_lockout_active(email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    if int(doc.get("resendCount") or 0) >= MAX_RESENDS:
+        return jsonify({"error": "Maximum resend attempts reached. Please start registration again."}), 400
+
+    last_sent = doc.get("lastOtpSentAt")
+    if last_sent:
+        delta = (utcnow() - last_sent).total_seconds()
+        if delta < RESEND_COOLDOWN_SECONDS:
+            retry = int(RESEND_COOLDOWN_SECONDS - delta) + 1
+            return jsonify({
+                "error": f"Please wait {retry}s before requesting another code.",
+                "retryAfterSeconds": retry,
+            }), 429
+
+    cfg = current_app.config
+    if not smtp_or_ses_configured(cfg):
+        return jsonify({"error": "Email verification is temporarily unavailable."}), 503
+
+    otp = generate_otp_code()
+    secret = (cfg.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    otp_hash = hash_otp(verification_id, otp, secret)
+    new_resend = int(doc.get("resendCount") or 0) + 1
+
+    payload = doc.get("userPayload") or {}
+    name = payload.get("companyName") or payload.get("name") or "Company"
+
+    ver_col.update_one(
+        {"verificationId": verification_id},
+        {
+            "$set": {
+                "otpHash": otp_hash,
+                "expiresAt": otp_expiry_utc(),
+                "wrongAttempts": 0,
+                "resendCount": new_resend,
+                "lastOtpSentAt": utcnow(),
+            },
+        },
+    )
+
+    sent = send_company_registration_otp(cfg, str(name), str(email), otp)
+    if not sent:
+        return jsonify({"error": "Could not send verification email. Please try again later."}), 503
+
+    return jsonify({"message": "OTP sent", "verificationId": verification_id}), 200
+
+
+@auth_bp.route("/register/verify-otp", methods=["POST"])
+def register_verify_otp():
+    """Complete student registration after email OTP."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    verification_id = (data.get("verificationId") or "").strip()
+    otp = (re.sub(r"\D", "", str(data.get("otp") or "")))[:6]
+    if not verification_id or len(otp) != 6:
+        return jsonify({"error": "verificationId and a 6-digit OTP are required."}), 400
+
+    ver_col = get_registration_verifications_collection()
+    doc = ver_col.find_one({"verificationId": verification_id})
+    if not doc:
+        return jsonify({"error": "Invalid or expired verification session. Please start registration again."}), 400
+
+    lock_check_email = doc.get("email", "")
+    lock_until = _registration_lockout_active(lock_check_email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    if doc.get("expiresAt") and doc["expiresAt"] < utcnow():
+        return jsonify({"error": "OTP has expired.", "code": "otp_expired"}), 400
+
+    secret = (current_app.config.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    if not verify_otp_constant_time(verification_id, otp, secret, doc.get("otpHash") or ""):
+        wrong = int(doc.get("wrongAttempts") or 0) + 1
+        remaining = max(0, MAX_WRONG_OTP_ATTEMPTS - wrong)
+        if wrong >= MAX_WRONG_OTP_ATTEMPTS:
+            ver_col.delete_one({"verificationId": verification_id})
+            _set_registration_lockout(lock_check_email)
+            return jsonify({
+                "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+                "attemptsRemaining": 0,
+            }), 400
+        ver_col.update_one({"verificationId": verification_id}, {"$set": {"wrongAttempts": wrong}})
+        return jsonify({
+            "error": "Incorrect OTP. Please check and try again.",
+            "attemptsRemaining": remaining,
+        }), 400
+
+    users = get_users_collection()
+    payload = doc.get("userPayload") or {}
+    email = (payload.get("email") or "").strip().lower()
+    if users.find_one({"email": email}):
+        ver_col.delete_one({"verificationId": verification_id})
+        return jsonify({"error": "An account with this email already exists"}), 409
+
+    insert_doc = {**payload, "createdAt": datetime.utcnow()}
+    result = users.insert_one(insert_doc)
+    ver_col.delete_one({"verificationId": verification_id})
+    get_registration_lockouts_collection().delete_one({"email": email})
+
+    user = {**insert_doc, "_id": result.inserted_id}
     user.pop("password", None)
+    display_name = user.get("name") or user.get("fullName") or "there"
 
-    if role == "student":
-        from flask import current_app
-
-        # Optional: skip welcome SMTP during register (e.g. while fixing Zoho); avoids slow/failed SMTP delaying the response.
-        if os.environ.get("REGISTER_SKIP_WELCOME_EMAIL", "").strip().lower() not in ("1", "true", "yes"):
-            schedule_welcome_email(current_app._get_current_object(), name, email)
+    if os.environ.get("REGISTER_SKIP_WELCOME_EMAIL", "").strip().lower() not in ("1", "true", "yes"):
+        schedule_welcome_email(current_app._get_current_object(), display_name, email)
 
     token = create_access_token(
         identity=str(result.inserted_id),
-        additional_claims={"email": email, "role": role},
+        additional_claims={"email": email, "role": "student"},
     )
     return jsonify({
-        "message": "Registration successful",
+        "message": "Account created successfully! Welcome to XpertIntern.",
         "token": token,
         "user": _user_to_response(user),
     }), 201
+
+
+@auth_bp.route("/register/resend-otp", methods=["POST"])
+def register_resend_otp():
+    """Send a new OTP for the same verification session (max 3 resends, 30s cooldown)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    verification_id = (data.get("verificationId") or "").strip()
+    if not verification_id:
+        return jsonify({"error": "verificationId is required."}), 400
+
+    ver_col = get_registration_verifications_collection()
+    doc = ver_col.find_one({"verificationId": verification_id})
+    if not doc:
+        return jsonify({"error": "Invalid or expired verification session. Please start registration again."}), 400
+
+    email = doc.get("email", "")
+    lock_until = _registration_lockout_active(email)
+    if lock_until:
+        return jsonify({
+            "error": "Too many incorrect attempts. Please wait 15 minutes and try again.",
+            "lockedUntil": lock_until.isoformat() + "Z",
+        }), 429
+
+    if int(doc.get("resendCount") or 0) >= MAX_RESENDS:
+        return jsonify({"error": "Maximum resend attempts reached. Please start registration again."}), 400
+
+    last_sent = doc.get("lastOtpSentAt")
+    if last_sent:
+        delta = (utcnow() - last_sent).total_seconds()
+        if delta < RESEND_COOLDOWN_SECONDS:
+            retry = int(RESEND_COOLDOWN_SECONDS - delta) + 1
+            return jsonify({
+                "error": f"Please wait {retry}s before requesting another code.",
+                "retryAfterSeconds": retry,
+            }), 429
+
+    cfg = current_app.config
+    if not smtp_or_ses_configured(cfg):
+        return jsonify({"error": "Email verification is temporarily unavailable."}), 503
+
+    otp = generate_otp_code()
+    secret = (cfg.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
+    otp_hash = hash_otp(verification_id, otp, secret)
+    new_resend = int(doc.get("resendCount") or 0) + 1
+
+    payload = doc.get("userPayload") or {}
+    name = payload.get("fullName") or payload.get("name") or "there"
+
+    ver_col.update_one(
+        {"verificationId": verification_id},
+        {
+            "$set": {
+                "otpHash": otp_hash,
+                "expiresAt": otp_expiry_utc(),
+                "wrongAttempts": 0,
+                "resendCount": new_resend,
+                "lastOtpSentAt": utcnow(),
+            },
+        },
+    )
+
+    sent = send_registration_otp(cfg, str(name), str(email), otp)
+    if not sent:
+        return jsonify({"error": "Could not send verification email. Please try again later."}), 503
+
+    return jsonify({"message": "OTP sent", "verificationId": verification_id}), 200
+
+
+@auth_bp.route("/forgot-password", methods=["POST"])
+def forgot_password():
+    """
+    Request a password reset email. Same response whether or not the email exists (enumeration-safe).
+    Rate-limited per email when an account exists.
+    """
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email or not _validate_email(email):
+        return jsonify({"error": "Please enter a valid email address."}), 400
+
+    users = get_users_collection()
+    user = users.find_one({"email": email})
+
+    if not user:
+        return jsonify({"message": _FORGOT_GENERIC_MESSAGE}), 200
+
+    att_col = get_password_reset_attempts_collection()
+    hour_ago = utcnow() - timedelta(hours=1)
+    recent = att_col.count_documents({"email": email, "createdAt": {"$gte": hour_ago}})
+    if recent >= _MAX_FORGOT_ATTEMPTS_PER_HOUR:
+        current_app.logger.warning("Forgot-password rate limit for %s", email)
+        return jsonify({"message": _FORGOT_GENERIC_MESSAGE}), 200
+
+    cfg = current_app.config
+    if not smtp_or_ses_configured(cfg):
+        # Same body as success to avoid revealing whether the email is registered.
+        current_app.logger.error("Forgot-password: email transport not configured (reset email not sent)")
+        return jsonify({"message": _FORGOT_GENERIC_MESSAGE}), 200
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _hash_password_reset_token(raw_token)
+    expires_at = utcnow() + _PASSWORD_RESET_EXPIRY
+
+    tok_col = get_password_reset_tokens_collection()
+    tok_col.delete_many({"email": email, "used": {"$ne": True}})
+
+    insert_res = tok_col.insert_one({
+        "tokenHash": token_hash,
+        "email": email,
+        "expiresAt": expires_at,
+        "used": False,
+        "createdAt": datetime.utcnow(),
+    })
+
+    base = public_app_url().rstrip("/")
+    reset_url = f"{base}/reset-password?token={quote(raw_token, safe='')}"
+
+    display_name = (
+        user.get("name")
+        or user.get("fullName")
+        or user.get("companyName")
+        or email.split("@", 1)[0]
+    )
+
+    sent = send_password_reset_email(cfg, str(display_name), email, reset_url)
+    if not sent:
+        tok_col.delete_one({"_id": insert_res.inserted_id})
+        current_app.logger.error("Forgot-password: send_password_reset_email failed for %s", email)
+        return jsonify({"message": _FORGOT_GENERIC_MESSAGE}), 200
+
+    att_col.insert_one({"email": email, "createdAt": datetime.utcnow()})
+    return jsonify({"message": _FORGOT_GENERIC_MESSAGE}), 200
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+    """Complete password reset using token from email link (single use, 1 hour)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    raw_token = (data.get("token") or "").strip()
+    new_pw = (data.get("newPassword") or data.get("new_password") or "").strip()
+    confirm = (data.get("confirmPassword") or data.get("confirm_password") or "").strip()
+
+    if len(raw_token) < 24:
+        return jsonify({"error": "This reset link is invalid or has expired. Please request a new one."}), 400
+    if not new_pw:
+        return jsonify({"error": "New password is required"}), 400
+    if new_pw != confirm:
+        return jsonify({"error": "Passwords do not match"}), 400
+    ok, msg = _validate_password(new_pw)
+    if not ok:
+        return jsonify({"error": msg}), 400
+
+    token_hash = _hash_password_reset_token(raw_token)
+    tok_col = get_password_reset_tokens_collection()
+    doc = tok_col.find_one_and_update(
+        {
+            "tokenHash": token_hash,
+            "used": False,
+            "expiresAt": {"$gt": utcnow()},
+        },
+        {"$set": {"used": True, "usedAt": datetime.utcnow()}},
+    )
+    if not doc:
+        return jsonify({"error": "This reset link is invalid or has expired. Please request a new one."}), 400
+
+    email = (doc.get("email") or "").strip().lower()
+    users = get_users_collection()
+    user = users.find_one({"email": email})
+    if not user:
+        tok_col.delete_one({"_id": doc["_id"]})
+        return jsonify({"error": "This reset link is invalid or has expired. Please request a new one."}), 400
+
+    users.update_one({"_id": user["_id"]}, {"$set": {"password": _hash_password(new_pw)}})
+    tok_col.delete_one({"_id": doc["_id"]})
+    tok_col.delete_many({"email": email, "used": {"$ne": True}})
+    return jsonify({"message": "Your password has been updated. You can sign in with your new password."}), 200
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -179,6 +761,19 @@ def login():
         if not user or not _check_password(password, user.get("password", "")):
             return jsonify({"error": "Invalid email or password"}), 401
 
+        if user.get("role") == "company":
+            st = user.get("status")
+            if st == "pending":
+                return jsonify({
+                    "error": "Your company registration is pending admin approval. We will email you when you can sign in.",
+                    "code": "company_pending_approval",
+                }), 403
+            if st == "rejected":
+                return jsonify({
+                    "error": "Your company application was not approved. Check your email for details.",
+                    "code": "company_rejected",
+                }), 403
+
         token = create_access_token(
             identity=str(user["_id"]),
             additional_claims={"email": user["email"], "role": user.get("role", "student")},
@@ -188,7 +783,6 @@ def login():
             "user": _user_to_response(user),
         })
     except Exception as e:
-        from flask import current_app
         current_app.logger.exception("Login error")
         err_msg = "Login failed. Please try again."
         if current_app.config.get("DEBUG"):
@@ -228,8 +822,9 @@ def update_me():
     data = request.get_json() or {}
     users = get_users_collection()
     allowed = {
-        "name", "fullName", "mobile", "university", "collegeName", "semester",
-        "course", "stream", "collegeRegNo", "linkedin", "dateOfBirth", "gender",
+        "name", "fullName", "mobile", "university", "universityOther", "collegeName", "semester",
+        "course", "courseOther", "stream", "branch", "branchOther", "subject", "subjectOther",
+        "collegeRegNo", "linkedin", "dateOfBirth", "gender",
         "alternateContact", "cgpa", "percentage",
     }
     updates = {k: (data.get(k) if data.get(k) is not None else None) for k in allowed if k in data}

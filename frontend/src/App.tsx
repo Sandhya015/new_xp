@@ -14,6 +14,7 @@ import { CertVerify } from './pages/public/CertVerify'
 import { Login } from './pages/public/Login'
 import { Register } from './pages/public/Register'
 import { ForgotPassword } from './pages/public/ForgotPassword'
+import { ResetPassword } from './pages/public/ResetPassword'
 import { Dashboard } from './pages/student/Dashboard'
 import { StudentTraining } from './pages/student/StudentTraining'
 import { StudentTrainingDetail } from './pages/student/StudentTrainingDetail'
@@ -126,6 +127,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/terms" element={<LegalPlaceholder title="Terms and Conditions" />} />
             <Route path="/privacy" element={<LegalPlaceholder title="Privacy Policy" />} />
             <Route path="/refund" element={<LegalPlaceholder title="Refund & Cancellation Policy" />} />

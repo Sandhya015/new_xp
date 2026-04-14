@@ -1,15 +1,29 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Mail } from 'lucide-react'
+import { authService } from '@/services/authService'
 
 export function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
+  const [sentMessage, setSentMessage] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: POST /api/auth/forgot-password
-    setSent(true)
+    setError('')
+    setLoading(true)
+    try {
+      const res = await authService.forgotPassword(email.trim().toLowerCase())
+      setSentMessage(res.message || 'If an account exists for that email, you will receive password reset instructions shortly.')
+      setSent(true)
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { error?: string } }; message?: string }
+      setError(ax.response?.data?.error || ax.message || 'Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -24,10 +38,11 @@ export function ForgotPassword() {
           {sent ? (
             <div className="mt-6 rounded-lg bg-green-50 border border-green-200 p-4">
               <p className="text-sm font-medium text-green-800">Check your email</p>
-              <p className="mt-1 text-sm text-green-700">If an account exists for {email}, you will receive a password reset link.</p>
+              <p className="mt-1 text-sm text-green-700">{sentMessage}</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+              {error ? <p className="text-sm text-red-600">{error}</p> : null}
               <div>
                 <label htmlFor="forgot-email" className="block text-sm font-medium text-gray-700">Email *</label>
                 <div className="mt-1 relative">
@@ -45,9 +60,10 @@ export function ForgotPassword() {
               </div>
               <button
                 type="submit"
-                className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+                disabled={loading}
+                className="w-full rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-50"
               >
-                Send reset link
+                {loading ? 'Sending…' : 'Send reset link'}
               </button>
             </form>
           )}

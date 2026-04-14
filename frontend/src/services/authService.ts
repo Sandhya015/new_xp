@@ -20,31 +20,43 @@ export const authService = {
     const { data } = await api.post('/api/auth/login', { email, password })
     return data
   },
-  async register(body: {
-    name?: string
-    fullName?: string
-    email?: string
-    password: string
-    confirmPassword?: string
-    mobile?: string
-    role?: 'student' | 'company'
-    hrName?: string
-    companyName?: string
-    companyEmail?: string
-    hrMobile?: string
-    industryType?: string
-    address?: string
-    website?: string
-    university?: string
-    collegeName?: string
-    semester?: string
-    collegeRegNo?: string
-    course?: string
-    stream?: string
-    linkedin?: string
-  }) {
+  async register(body: Record<string, unknown>) {
     const { data } = await api.post('/api/auth/register', body)
-    return data
+    return data as {
+      message?: string
+      verificationId?: string
+      expiresInSeconds?: number
+      token?: string
+      user?: unknown
+    }
+  },
+  async verifyRegisterOtp(verificationId: string, otp: string) {
+    const { data } = await api.post('/api/auth/register/verify-otp', { verificationId, otp })
+    return data as { message?: string; token: string; user: unknown }
+  },
+  async resendRegisterOtp(verificationId: string) {
+    const { data } = await api.post('/api/auth/register/resend-otp', { verificationId })
+    return data as { message?: string; verificationId?: string; retryAfterSeconds?: number }
+  },
+  async companyRegister(body: Record<string, unknown>) {
+    const { data } = await api.post('/api/auth/company/register', body)
+    return data as { message?: string; verificationId?: string; expiresInSeconds?: number }
+  },
+  async companyVerifyRegisterOtp(verificationId: string, otp: string) {
+    const { data } = await api.post('/api/auth/company/register/verify-otp', { verificationId, otp })
+    return data as { message?: string }
+  },
+  async companyResendRegisterOtp(verificationId: string) {
+    const { data } = await api.post('/api/auth/company/register/resend-otp', { verificationId })
+    return data as { message?: string; retryAfterSeconds?: number }
+  },
+  async forgotPassword(email: string) {
+    const { data } = await api.post('/api/auth/forgot-password', { email })
+    return data as { message?: string }
+  },
+  async resetPassword(body: { token: string; newPassword: string; confirmPassword: string }) {
+    const { data } = await api.post('/api/auth/reset-password', body)
+    return data as { message?: string }
   },
   async me() {
     const { data } = await api.get('/api/auth/me')

@@ -117,19 +117,43 @@ def _strip_html_simple(html: str) -> str:
     return " ".join(t.split())
 
 
+def send_company_registration_otp(config: Mapping[str, Any], company_name: str, to_email: str, otp: str) -> bool:
+    """OTP email for company registration (contact verification before admin queue)."""
+    from app.email_templates import company_registration_otp_bodies
+
+    subject, html_body, text_body = company_registration_otp_bodies(company_name, otp)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
+
+
+def send_registration_otp(config: Mapping[str, Any], student_name: str, to_email: str, otp: str) -> bool:
+    """6-digit email OTP for student registration (branded template)."""
+    from app.email_templates import registration_otp_bodies
+
+    subject, html_body, text_body = registration_otp_bodies(student_name, otp)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
+
+
+def send_password_reset_email(config: Mapping[str, Any], recipient_name: str, to_email: str, reset_url: str) -> bool:
+    """Forgot-password flow: single-use link (see auth routes)."""
+    from app.email_templates import password_reset_email_bodies
+
+    subject, html_body, text_body = password_reset_email_bodies(recipient_name, reset_url)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
+
+
+def send_company_approval_email(config: Mapping[str, Any], company_name: str, to_email: str, login_url: str) -> bool:
+    """Transactional email after admin approves a company (see admin routes)."""
+    from app.email_templates import company_approval_email_bodies
+
+    subject, html_body, text_body = company_approval_email_bodies(company_name, login_url)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
+
+
 def send_student_welcome(config: Mapping[str, Any], student_name: str, to_email: str) -> bool:
-    name = student_name or "there"
-    subject = "Welcome to XpertIntern"
-    html = f"""
-    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
-    <p>Hi {name},</p>
-    <p>Welcome to <strong>XpertIntern</strong> — we are glad you joined our learning community.</p>
-    <p>You can log in anytime to explore trainings, enroll in courses, and track your progress from your student dashboard.</p>
-    <p>If you have questions, reply to this email or use <strong>Help &amp; Support</strong> in your dashboard.</p>
-    <p>Happy learning,<br/>Team XpertIntern</p>
-    </body></html>
-    """
-    return send_email(config, to_email, subject, html)
+    from app.email_templates import welcome_email_bodies
+
+    subject, html_body, text_body = welcome_email_bodies(student_name)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
 
 
 def send_enrollment_confirmation(

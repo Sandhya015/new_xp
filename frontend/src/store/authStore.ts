@@ -2,13 +2,14 @@ import { create } from 'zustand'
 
 const AUTH_KEY = 'xpertintern_auth'
 
-interface User {
+export interface User {
   id: string
   name: string
   email: string
   role?: 'student' | 'admin' | 'company'
   companyName?: string
   hrName?: string
+  mobile?: string
   university?: string
   course?: string
   semester?: string

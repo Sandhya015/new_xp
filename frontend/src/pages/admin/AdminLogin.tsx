@@ -100,7 +100,9 @@ export function AdminLogin() {
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
-            <p className="mt-6 text-center text-sm text-gray-500">
+            <p className="mt-6 text-center text-sm text-gray-500 space-x-2">
+              <Link to="/forgot-password" className="text-brand-accent hover:underline">Forgot password?</Link>
+              <span aria-hidden>·</span>
               <Link to="/" className="text-brand-accent hover:underline">Back to home</Link>
             </p>
           </div>

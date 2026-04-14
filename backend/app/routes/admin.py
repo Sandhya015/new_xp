@@ -3,7 +3,7 @@ Admin: dashboard, course CRUD, students, leads, payments, companies, internships
 """
 from datetime import datetime, timedelta
 from bson import ObjectId
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.db import (
@@ -658,13 +658,42 @@ def approve_company(company_id):
         return err
     if not ObjectId.is_valid(company_id):
         return jsonify({"error": "Invalid company id"}), 400
-    result = get_users_collection().update_one(
-        {"_id": ObjectId(company_id), "role": "company"},
-        {"$set": {"status": "active"}}
+
+    from app.email_smtp import send_company_approval_email
+    from app.email_templates import public_app_url
+    from app.registration_otp import smtp_or_ses_configured
+
+    oid = ObjectId(company_id)
+    users = get_users_collection()
+    user = users.find_one({"_id": oid, "role": "company"})
+    if not user:
+        return jsonify({"error": "Company not found"}), 404
+
+    st = user.get("status")
+    if st != "pending":
+        if st == "active":
+            return jsonify({"error": "Company is already approved"}), 400
+        if st == "rejected":
+            return jsonify({"error": "This application was rejected; it cannot be approved from here"}), 400
+        return jsonify({"error": "Company is not awaiting approval"}), 400
+
+    result = users.update_one(
+        {"_id": oid, "role": "company", "status": "pending"},
+        {"$set": {"status": "active"}},
     )
     if result.modified_count == 0:
-        return jsonify({"error": "Company not found"}), 404
-    return jsonify({"ok": True, "message": "Company approved"})
+        return jsonify({"error": "Could not update company status"}), 500
+
+    company_name = user.get("companyName") or user.get("name") or "Your organisation"
+    to_email = (user.get("email") or "").strip()
+    cfg = current_app.config
+    if to_email and smtp_or_ses_configured(cfg):
+        base = public_app_url().rstrip("/")
+        login_url = f"{base}/login"
+        if not send_company_approval_email(cfg, str(company_name), to_email, login_url):
+            current_app.logger.warning("Company approval email failed for %s", to_email)
+
+    return jsonify({"ok": True, "message": "Company approved"}), 200
 
 
 @admin_bp.route("/companies/<company_id>/reject", methods=["POST"])
