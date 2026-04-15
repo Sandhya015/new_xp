@@ -69,6 +69,8 @@ interface Course {
   duration: string
   mode: Mode
   universities: string
+  /** Program tag from API (used for search). */
+  tag: string
   price: number
   tagColor: string
   iconBg: string
@@ -88,6 +90,7 @@ function courseFromApi(
     duration: string
     mode: string
     universities: string
+    tag?: string
     price: number
   },
   i: number,
@@ -103,6 +106,7 @@ function courseFromApi(
     duration: c.duration,
     mode,
     universities: c.universities,
+    tag: (c.tag || '').trim(),
     price: c.price,
     tagColor: isTech ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
     iconBg: isTech ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600',
@@ -120,6 +124,7 @@ function ModeIcon({ mode }: { mode: Mode }) {
 export function Training() {
   const [courses, setCourses] = useState<Course[]>([])
   const [coursesLoading, setCoursesLoading] = useState(true)
+  const [coursesLoadError, setCoursesLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<Category>('all')
   const [branches, setBranches] = useState<Set<string>>(new Set())
@@ -194,22 +199,47 @@ export function Training() {
 
   useEffect(() => {
     let cancelled = false
-    courseService.list({ limit: 200 })
+    setCoursesLoadError(null)
+    courseService
+      .list({ limit: 200 })
       .then((res) => {
-        if (!cancelled && res.items)
-          setCourses((res.items as Array<{ id: string; title: string; description: string; shortDescription?: string; featuredImageUrl?: string; category: string; duration: string; mode: string; universities: string; price: number }>).map((c, i) => courseFromApi(c, i)))
+        if (cancelled) return
+        const items = Array.isArray(res.items) ? res.items : []
+        setCourses(
+          (items as Array<{
+            id: string
+            title: string
+            description: string
+            shortDescription?: string
+            featuredImageUrl?: string
+            category: string
+            duration: string
+            mode: string
+            universities: string
+            tag?: string
+            price: number
+          }>).map((c, i) => courseFromApi(c, i)),
+        )
       })
-      .finally(() => { if (!cancelled) setCoursesLoading(false) })
-    return () => { cancelled = true }
+      .catch(() => {
+        if (!cancelled) {
+          setCourses([])
+          setCoursesLoadError('Could not load trainings. Check your connection or try again in a moment.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCoursesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const filteredCourses = useMemo(() => {
     return courses.filter((c) => {
-      const q = search.toLowerCase()
-      const matchSearch =
-        !search ||
-        c.title.toLowerCase().includes(q) ||
-        c.description.toLowerCase().includes(q)
+      const q = search.trim().toLowerCase()
+      const haystack = `${c.title} ${c.description} ${c.tag} ${c.universities}`.toLowerCase()
+      const matchSearch = !q || haystack.includes(q)
       const matchCategory =
         category === 'all' ||
         (category === 'technical' && c.category === 'technical') ||
@@ -443,6 +473,9 @@ export function Training() {
         {/* Course grid */}
         <div className="flex-1 min-w-0">
           {coursesLoading && <p className="text-sm text-slate-gray py-4">Loading courses...</p>}
+          {!coursesLoading && coursesLoadError && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{coursesLoadError}</p>
+          )}
           <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {filteredCourses.map((course) => {
               const CourseIcon = course.Icon
@@ -509,8 +542,35 @@ export function Training() {
               )
             })}
           </div>
-          {filteredCourses.length === 0 && (
-            <p className="text-center py-12 text-slate-gray">No courses match your filters.</p>
+          {!coursesLoading && !coursesLoadError && courses.length === 0 && (
+            <p className="text-center py-12 text-slate-gray">
+              No trainings are listed yet. If you just added courses in the database, confirm this site uses the same API
+              environment and try a hard refresh.
+            </p>
+          )}
+          {!coursesLoading && !coursesLoadError && courses.length > 0 && filteredCourses.length === 0 && (
+            <div className="py-12 text-center space-y-3">
+              <p className="text-slate-gray">No courses match your current search or filters.</p>
+              {(search.trim() ||
+                category !== 'all' ||
+                durationWeeks.size > 0 ||
+                durationHours.size > 0 ||
+                modes.size > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('')
+                    setCategory('all')
+                    setDurationWeeks(new Set())
+                    setDurationHours(new Set())
+                    setModes(new Set())
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
+                >
+                  Clear search and filters
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
