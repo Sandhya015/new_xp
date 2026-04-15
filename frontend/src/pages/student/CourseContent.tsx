@@ -17,6 +17,8 @@ import {
   ExternalLink,
   Download,
   Loader2,
+  Lock,
+  Unlock,
 } from 'lucide-react'
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
 import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
@@ -317,18 +319,59 @@ export function CourseContent() {
             {(!course.curriculum || course.curriculum.length === 0) ? (
               <p className="text-slate-gray">No curriculum added yet.</p>
             ) : (
-              (course.curriculum as Array<{ name?: string; topics?: string[] }>).map((mod, i) => (
-                <div key={i} className="rounded-lg border border-gray-100 p-3">
-                  <h4 className="font-semibold text-brand-navy">{mod.name || `Module ${i + 1}`}</h4>
-                  {mod.topics && mod.topics.length > 0 && (
-                    <ul className="mt-2 list-inside list-disc text-sm text-gray-600">
-                      {mod.topics.map((t, j) => (
-                        <li key={j}>{typeof t === 'string' ? t : (t as { title?: string })?.title || 'Topic'}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))
+              (course.curriculum as Array<{
+                id?: string
+                title?: string
+                name?: string
+                topics?: Array<string | { id?: string; title?: string; type?: string; duration?: string; lockedUntilPayment?: boolean }>
+              }>).map((mod, i) => {
+                const price = course.price ?? 0
+                const hasPaidRecord = !!(enrollment?.orderId && String(enrollment.orderId).trim())
+                const paymentUnlocked = price <= 0 || hasPaidRecord
+                return (
+                  <div key={mod.id || i} className="rounded-lg border border-gray-100 p-3">
+                    <h4 className="font-semibold text-brand-navy">{mod.title || mod.name || `Module ${i + 1}`}</h4>
+                    {mod.topics && mod.topics.length > 0 && (
+                      <ul className="mt-2 divide-y divide-gray-100 rounded-md border border-gray-100">
+                        {mod.topics.map((t, j) => {
+                          const topic = typeof t === 'string' ? { title: t } : t
+                          const title = topic.title || (typeof t === 'string' ? t : 'Topic')
+                          const typ = topic.type ? ` · ${topic.type}` : ''
+                          const dur = topic.duration ? ` · ${topic.duration}` : ''
+                          const gated = price > 0 && topic.lockedUntilPayment === true && !paymentUnlocked
+                          return (
+                            <li key={topic.id || j} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm text-gray-700">
+                              <span className="min-w-0">
+                                <span className="font-medium text-gray-900">{title}</span>
+                                <span className="text-gray-500">{typ}</span>
+                                <span className="text-gray-400">{dur}</span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
+                                {gated ? (
+                                  <>
+                                    <Lock className="h-4 w-4 text-amber-600" aria-hidden />
+                                    <span>Complete payment to unlock</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Unlock className="h-4 w-4 text-emerald-600" aria-hidden />
+                                    <span>Unlocked</span>
+                                  </>
+                                )}
+                              </span>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                    {price > 0 && !paymentUnlocked ? (
+                      <p className="mt-2 text-xs text-amber-800">
+                        Some lessons stay locked until your enrollment is linked to a successful payment (order on file).
+                      </p>
+                    ) : null}
+                  </div>
+                )
+              })
             )}
           </div>
         )}

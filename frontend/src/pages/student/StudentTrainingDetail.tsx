@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BookOpen, ArrowLeft, Loader2 } from 'lucide-react'
 import { courseService } from '@/services/courseService'
+import { plainTextFromHtml } from '@/utils/sanitizeHtml'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -107,8 +108,10 @@ export function StudentTrainingDetail() {
             ) : null}
           </div>
         </div>
-        <div className="mt-4 prose prose-sm max-w-none text-slate-gray">
-          <p className="whitespace-pre-wrap">{course.description || 'No description provided.'}</p>
+        <div className="mt-4 text-sm text-slate-gray">
+          <p className="whitespace-pre-wrap">
+            {plainTextFromHtml(course.description || '') || 'No description provided.'}
+          </p>
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
           <button

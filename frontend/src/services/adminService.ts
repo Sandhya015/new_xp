@@ -160,6 +160,15 @@ export const adminService = {
     return data
   },
 
+  /** Replace curriculum only; server normalizes to the Add Training / Tutor topic shape. */
+  async updateCourseCurriculum(courseId: string, curriculum: unknown[]) {
+    const { data } = await api.put<{ ok: boolean; curriculum: unknown[] }>(
+      `/api/admin/courses/${courseId}/curriculum`,
+      { curriculum }
+    )
+    return data
+  },
+
   async createCourse(payload: Record<string, unknown>) {
     const { data } = await api.post('/api/admin/courses', payload)
     return data

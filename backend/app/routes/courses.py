@@ -1,6 +1,8 @@
 """
 Courses: list (paginated), get by id, get content for enrolled student. Public + admin CRUD.
 """
+from datetime import datetime
+
 from bson import ObjectId
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -11,11 +13,34 @@ from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
 courses_bp = Blueprint("courses", __name__)
 
+
+def _public_catalog_match(category: str, search: str) -> dict:
+    """Active trainings visible on the public catalog (excludes unlisted)."""
+    visibility_clause = {
+        "$or": [
+            {"listingVisibility": {"$exists": False}},
+            {"listingVisibility": "public"},
+        ]
+    }
+    clauses = [{"active": True}, visibility_clause]
+    if category:
+        clauses.append({"category": category})
+    if search:
+        clauses.append({
+            "$or": [
+                {"title": {"$regex": search, "$options": "i"}},
+                {"description": {"$regex": search, "$options": "i"}},
+            ]
+        })
+    return {"$and": clauses}
+
+
 # List view only — excludes curriculum, materials, quizzes, etc. (large nested blobs).
 _LIST_FIELDS = {
     "_id": 1,
     "title": 1,
     "description": 1,
+    "shortDescription": 1,
     "category": 1,
     "duration": 1,
     "mode": 1,
@@ -24,6 +49,8 @@ _LIST_FIELDS = {
     "tag": 1,
     "active": 1,
     "createdAt": 1,
+    "slug": 1,
+    "featuredImageUrl": 1,
 }
 
 
@@ -34,6 +61,7 @@ def _course_to_item(c):
         "id": str(c["_id"]),
         "title": c.get("title", ""),
         "description": c.get("description", ""),
+        "shortDescription": c.get("shortDescription", "") or "",
         "category": c.get("category", "technical"),
         "duration": c.get("duration", ""),
         "mode": c.get("mode", "Online"),
@@ -41,7 +69,69 @@ def _course_to_item(c):
         "price": c.get("price", 0),
         "tag": c.get("tag", ""),
         "active": c.get("active", True),
+        "slug": c.get("slug", "") or "",
+        "featuredImageUrl": c.get("featuredImageUrl", "") or "",
     }
+
+
+def _iso_utc(dt):
+    if not dt or not isinstance(dt, datetime):
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sanitize_curriculum_public(curriculum):
+    """Marketing-safe curriculum: titles/types/durations only; topics shown as locked until enroll."""
+    if not isinstance(curriculum, list):
+        return []
+    out = []
+    for i, mod in enumerate(curriculum):
+        if not isinstance(mod, dict):
+            continue
+        topics = []
+        for j, t in enumerate(mod.get("topics") or []):
+            if not isinstance(t, dict):
+                continue
+            topics.append({
+                "id": str(t.get("id", f"{i}_{j}")),
+                "title": (t.get("title", "") or "").strip() or "Untitled",
+                "type": (t.get("type", "Lecture") or "Lecture"),
+                "duration": (t.get("duration") or t.get("durationLabel") or "").strip() or "—",
+                "locked": True,
+            })
+        out.append({
+            "id": str(mod.get("id", f"mod_{i}")),
+            "title": (mod.get("title", "") or "").strip() or f"Module {i + 1}",
+            "order": mod.get("order", i),
+            "topics": topics,
+        })
+    return out
+
+
+def _course_to_public_detail(c, enrollment_count=0):
+    """Rich course payload for public marketing page (GET /api/courses/:id)."""
+    base = _course_to_item(c) or {}
+    base.update({
+        "fullDescription": (c.get("fullDescription") or c.get("description", "") or ""),
+        "difficulty": c.get("difficulty") or "Intermediate",
+        "introVideoUrl": (c.get("introVideoUrl") or "") or "",
+        "originalPrice": int(c.get("originalPrice") or 0),
+        "trainerName": (c.get("trainerName") or "") or "",
+        "whatYouWillLearn": c.get("whatYouWillLearn") if isinstance(c.get("whatYouWillLearn"), list) else [],
+        "targetAudience": (c.get("targetAudience") or "") or "",
+        "materialsIncluded": c.get("materialsIncluded") if isinstance(c.get("materialsIncluded"), list) else [],
+        "instructions": (c.get("instructions") or "") or "",
+        "trainingTags": c.get("trainingTags") if isinstance(c.get("trainingTags"), list) else [],
+        "marketingCategories": c.get("marketingCategories") if isinstance(c.get("marketingCategories"), list) else [],
+        "authorName": (c.get("authorName") or "") or "",
+        "courses": c.get("courses") if isinstance(c.get("courses"), list) else [],
+        "streams": c.get("streams") if isinstance(c.get("streams"), list) else [],
+        "curriculum": _sanitize_curriculum_public(c.get("curriculum") or []),
+        "batches": c.get("batches") if isinstance(c.get("batches"), list) else [],
+        "enrollmentCount": int(enrollment_count or 0),
+        "updatedAt": _iso_utc(c.get("updatedAt")) or _iso_utc(c.get("createdAt")),
+    })
+    return base
 
 
 @courses_bp.route("", methods=["GET"])
@@ -54,14 +144,7 @@ def list_courses():
     limit = min(max(1, request.args.get("limit", 10, type=int)), 50)
     category = request.args.get("category", "").strip()
     search = request.args.get("search", "").strip()
-    q = {"active": True}
-    if category:
-        q["category"] = category
-    if search:
-        q["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"description": {"$regex": search, "$options": "i"}},
-        ]
+    q = _public_catalog_match(category, search)
     skip = (page - 1) * limit
     # Single round-trip: match + sort + page + count (avoids extra latency vs count + find on Lambda↔Mongo).
     pipeline = [
@@ -99,7 +182,9 @@ def get_course(course_id):
     c = coll.find_one({"_id": ObjectId(course_id), "active": True})
     if not c:
         return jsonify({"error": "Course not found"}), 404
-    return jsonify(_course_to_item(c))
+    enroll_coll = get_enrollments_collection()
+    ec = enroll_coll.count_documents({"courseId": course_id})
+    return jsonify(_course_to_public_detail(c, ec))
 
 
 def _course_to_content(c):

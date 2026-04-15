@@ -1,11 +1,13 @@
 """
 Admin: dashboard, course CRUD, students, leads, payments, companies, internships, certificates. Admin JWT required.
 """
+import re
 from datetime import datetime, timedelta
 from bson import ObjectId
 from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
+from app.services.curriculum import normalize_curriculum
 from app.db import (
     get_db,
     get_users_collection,
@@ -20,6 +22,34 @@ from app.db import (
 )
 
 admin_bp = Blueprint("admin", __name__)
+
+
+def _slugify_title(title: str) -> str:
+    s = (title or "").lower().strip()
+    s = re.sub(r"[^\w\s-]", "", s, flags=re.UNICODE)
+    s = re.sub(r"[\s_]+", "-", s)
+    s = re.sub(r"-+", "-", s).strip("-")
+    return (s[:80] or "training")
+
+
+def _unique_course_slug(coll, base: str) -> str:
+    slug = (base or "training").strip("-")[:80] or "training"
+    candidate = slug
+    n = 2
+    while coll.find_one({"slug": candidate}):
+        candidate = f"{slug}-{n}"[:80]
+        n += 1
+    return candidate
+
+
+def _coerce_str_list(val):
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()]
+    if isinstance(val, str):
+        return [ln.strip() for ln in val.replace("\r\n", "\n").split("\n") if ln.strip()]
+    return []
 
 
 def _sum_order_amounts(orders_coll, match: dict) -> float:
@@ -75,6 +105,7 @@ def _course_to_item(c):
         "id": str(c["_id"]),
         "title": c.get("title", ""),
         "description": c.get("description", ""),
+        "shortDescription": c.get("shortDescription", "") or "",
         "category": c.get("category", "technical"),
         "duration": c.get("duration", ""),
         "mode": c.get("mode", "Online"),
@@ -82,15 +113,32 @@ def _course_to_item(c):
         "price": c.get("price", 0),
         "tag": c.get("tag", ""),
         "active": c.get("active", True),
+        "slug": c.get("slug", "") or "",
+        "featuredImageUrl": c.get("featuredImageUrl", "") or "",
     }
 
 
 def _course_to_detail(c):
     """Full course for manage/edit: includes batches, curriculum, classLinks, etc."""
     out = _course_to_item(c)
+    out["slug"] = c.get("slug", "") or ""
     out["shortDescription"] = c.get("shortDescription", "")
     out["fullDescription"] = c.get("fullDescription", "")
     out["trainerName"] = c.get("trainerName", "")
+    out["difficulty"] = c.get("difficulty", "") or "Intermediate"
+    out["featuredImageUrl"] = c.get("featuredImageUrl", "") or ""
+    out["introVideoUrl"] = c.get("introVideoUrl", "") or ""
+    out["originalPrice"] = int(c.get("originalPrice") or 0)
+    out["whatYouWillLearn"] = c.get("whatYouWillLearn") if isinstance(c.get("whatYouWillLearn"), list) else []
+    out["targetAudience"] = c.get("targetAudience", "") or ""
+    out["materialsIncluded"] = c.get("materialsIncluded") if isinstance(c.get("materialsIncluded"), list) else []
+    out["instructions"] = c.get("instructions", "") or ""
+    out["trainingTags"] = c.get("trainingTags") if isinstance(c.get("trainingTags"), list) else []
+    out["listingVisibility"] = c.get("listingVisibility", "") or "public"
+    out["scheduledPublishAt"] = c.get("scheduledPublishAt")
+    out["marketingCategories"] = c.get("marketingCategories") if isinstance(c.get("marketingCategories"), list) else []
+    out["authorId"] = c.get("authorId", "") or ""
+    out["authorName"] = c.get("authorName", "") or ""
     out["durationValue"] = c.get("durationValue", "")
     out["durationUnit"] = c.get("durationUnit", "weeks")
     out["courses"] = c.get("courses", [])
@@ -130,7 +178,6 @@ def courses():
     title = (data.get("title") or "").strip()
     if not title:
         return jsonify({"error": "Title is required"}), 400
-    from datetime import datetime
     description = (data.get("description") or data.get("fullDesc") or "").strip()
     price = data.get("price") if data.get("price") is not None else data.get("fee")
     price = int(price or 0)
@@ -147,9 +194,18 @@ def courses():
     duration_val = data.get("duration") or ""
     if data.get("durationValue"):
         duration_val = f"{data.get('durationValue')} {data.get('durationUnit', 'weeks')}"
+    slug_input = (data.get("slug") or "").strip().lower()
+    slug_base = _slugify_title(slug_input) if slug_input else _slugify_title(title)
+    slug = _unique_course_slug(coll, slug_base)
+    original_price = data.get("originalPrice")
+    try:
+        original_price = int(original_price) if original_price is not None else 0
+    except (TypeError, ValueError):
+        original_price = 0
     doc = {
         "title": title,
         "description": description,
+        "slug": slug,
         "category": (data.get("category") or "technical").strip().lower(),
         "duration": duration_val.strip(),
         "mode": mode_str,
@@ -158,7 +214,33 @@ def courses():
         "tag": (data.get("tag") or "").strip(),
         "active": data.get("active", True),
         "createdAt": datetime.utcnow(),
+        "updatedAt": datetime.utcnow(),
+        "difficulty": (data.get("difficulty") or "Intermediate").strip() or "Intermediate",
+        "featuredImageUrl": (data.get("featuredImageUrl") or "").strip(),
+        "introVideoUrl": (data.get("introVideoUrl") or "").strip(),
+        "originalPrice": original_price,
+        "whatYouWillLearn": _coerce_str_list(data.get("whatYouWillLearn")),
+        "targetAudience": (data.get("targetAudience") or "").strip(),
+        "materialsIncluded": _coerce_str_list(data.get("materialsIncluded")),
+        "instructions": (data.get("instructions") or "").strip(),
+        "trainingTags": _coerce_str_list(data.get("trainingTags")),
     }
+    lv = (data.get("listingVisibility") or "public").strip().lower()
+    if lv not in ("public", "unlisted"):
+        lv = "public"
+    doc["listingVisibility"] = lv
+    if isinstance(data.get("marketingCategories"), list):
+        doc["marketingCategories"] = [str(x).strip() for x in data["marketingCategories"] if str(x).strip()]
+    sched = (data.get("scheduledPublishAt") or "").strip()
+    if sched:
+        doc["scheduledPublishAt"] = sched
+    uid = get_jwt_identity()
+    doc["authorId"] = str(uid) if uid else ""
+    doc["authorName"] = ""
+    if uid and ObjectId.is_valid(str(uid)):
+        u = get_users_collection().find_one({"_id": ObjectId(uid)})
+        if u:
+            doc["authorName"] = (u.get("name") or u.get("fullName") or "").strip()
     if data.get("shortDescription") is not None:
         doc["shortDescription"] = (data.get("shortDescription") or "").strip()
     if data.get("fullDescription") is not None:
@@ -175,8 +257,11 @@ def courses():
         doc["streams"] = data["streams"]
     if isinstance(data.get("batches"), list):
         doc["batches"] = data["batches"]
-    if isinstance(data.get("curriculum"), list):
-        doc["curriculum"] = data["curriculum"]
+    if "curriculum" in data:
+        norm, terr = normalize_curriculum(data.get("curriculum"))
+        if terr:
+            return jsonify({"error": terr}), 400
+        doc["curriculum"] = norm
     result = coll.insert_one(doc)
     doc["_id"] = result.inserted_id
     return jsonify(_course_to_item(doc)), 201
@@ -368,20 +453,32 @@ def update_course(course_id):
         return jsonify({"error": "Course not found"}), 404
     data = request.get_json() or {}
     updates = {}
-    for key in ("title", "description", "shortDescription", "fullDescription", "category", "duration", "mode", "universities", "trainerName", "durationValue", "durationUnit"):
+    for key in ("title", "description", "shortDescription", "fullDescription", "category", "duration", "trainerName", "durationValue", "durationUnit"):
         if key in data:
-            if key in ("universities",) and isinstance(data[key], list):
-                updates[key] = ",".join(str(x) for x in data[key]) if data[key] else ""
-            else:
-                updates[key] = data[key]
+            updates[key] = data[key]
+    if "universities" in data:
+        uv = data["universities"]
+        if isinstance(uv, list):
+            updates["universities"] = ",".join(str(x) for x in uv) if uv else ""
+        else:
+            updates["universities"] = uv
+    if "mode" in data:
+        mv = data["mode"]
+        if isinstance(mv, list):
+            updates["mode"] = ",".join(str(m) for m in mv) if mv else "Online"
+        else:
+            updates["mode"] = (str(mv or "Online")).strip() or "Online"
     if "price" in data or "fee" in data:
         updates["price"] = int(data.get("price") or data.get("fee") or 0)
     if "active" in data:
         updates["active"] = bool(data["active"])
     if "batches" in data and isinstance(data["batches"], list):
         updates["batches"] = data["batches"]
-    if "curriculum" in data and isinstance(data["curriculum"], list):
-        updates["curriculum"] = data["curriculum"]
+    if "curriculum" in data:
+        norm, terr = normalize_curriculum(data.get("curriculum"))
+        if terr:
+            return jsonify({"error": terr}), 400
+        updates["curriculum"] = norm
     if "classLinks" in data and isinstance(data["classLinks"], list):
         updates["classLinks"] = data["classLinks"]
     if "studyMaterials" in data and isinstance(data["studyMaterials"], list):
@@ -392,10 +489,83 @@ def update_course(course_id):
         updates["quizzes"] = data["quizzes"]
     if "announcements" in data and isinstance(data["announcements"], list):
         updates["announcements"] = data["announcements"]
+    if "slug" in data:
+        new_slug = _slugify_title(str(data.get("slug") or ""))
+        if new_slug:
+            clash = coll.find_one({"slug": new_slug, "_id": {"$ne": ObjectId(course_id)}})
+            if clash:
+                return jsonify({"error": "Slug already in use"}), 400
+            updates["slug"] = new_slug
+    if "difficulty" in data:
+        updates["difficulty"] = (str(data.get("difficulty") or "Intermediate").strip() or "Intermediate")
+    if "featuredImageUrl" in data:
+        updates["featuredImageUrl"] = (str(data.get("featuredImageUrl") or "")).strip()
+    if "introVideoUrl" in data:
+        updates["introVideoUrl"] = (str(data.get("introVideoUrl") or "")).strip()
+    if "originalPrice" in data:
+        try:
+            updates["originalPrice"] = int(data.get("originalPrice") or 0)
+        except (TypeError, ValueError):
+            updates["originalPrice"] = 0
+    if "whatYouWillLearn" in data:
+        updates["whatYouWillLearn"] = _coerce_str_list(data.get("whatYouWillLearn"))
+    if "targetAudience" in data:
+        updates["targetAudience"] = (str(data.get("targetAudience") or "")).strip()
+    if "materialsIncluded" in data:
+        updates["materialsIncluded"] = _coerce_str_list(data.get("materialsIncluded"))
+    if "instructions" in data:
+        updates["instructions"] = (str(data.get("instructions") or "")).strip()
+    if "trainingTags" in data:
+        updates["trainingTags"] = _coerce_str_list(data.get("trainingTags"))
+    if "listingVisibility" in data:
+        lv = (str(data.get("listingVisibility") or "public")).strip().lower()
+        updates["listingVisibility"] = lv if lv in ("public", "unlisted") else "public"
+    if "scheduledPublishAt" in data:
+        s = (str(data.get("scheduledPublishAt") or "")).strip()
+        if s:
+            updates["scheduledPublishAt"] = s
+        else:
+            updates["scheduledPublishAt"] = None
+    if "marketingCategories" in data and isinstance(data.get("marketingCategories"), list):
+        updates["marketingCategories"] = [str(x).strip() for x in data["marketingCategories"] if str(x).strip()]
+    if "courses" in data and isinstance(data["courses"], list):
+        updates["courses"] = data["courses"]
+    if "streams" in data and isinstance(data["streams"], list):
+        updates["streams"] = data["streams"]
     if updates:
+        updates["updatedAt"] = datetime.utcnow()
         coll.update_one({"_id": ObjectId(course_id)}, {"$set": updates})
     updated = coll.find_one({"_id": ObjectId(course_id)})
     return jsonify(_course_to_detail(updated))
+
+
+@admin_bp.route("/courses/<course_id>/curriculum", methods=["PUT"])
+@jwt_required()
+def put_course_curriculum(course_id):
+    """Replace course curriculum with a normalized payload (Add Training shape)."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    data = request.get_json() or {}
+    if "curriculum" not in data:
+        return jsonify({"error": "Request body must include a curriculum array"}), 400
+    norm, terr = normalize_curriculum(data.get("curriculum"))
+    if terr:
+        return jsonify({"error": terr}), 400
+    coll.update_one(
+        {"_id": ObjectId(course_id)},
+        {"$set": {"curriculum": norm, "updatedAt": datetime.utcnow()}},
+    )
+    return jsonify({"ok": True, "curriculum": norm}), 200
 
 
 @admin_bp.route("/courses/<course_id>/enrollments", methods=["GET"])

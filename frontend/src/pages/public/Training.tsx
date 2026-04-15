@@ -73,16 +73,32 @@ interface Course {
   tagColor: string
   iconBg: string
   Icon: LucideIcon
+  featuredImageUrl?: string
 }
 
 const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
-function courseFromApi(c: { id: string; title: string; description: string; category: string; duration: string; mode: string; universities: string; price: number }, i: number): Course {
+function courseFromApi(
+  c: {
+    id: string
+    title: string
+    description: string
+    shortDescription?: string
+    featuredImageUrl?: string
+    category: string
+    duration: string
+    mode: string
+    universities: string
+    price: number
+  },
+  i: number,
+): Course {
   const isTech = (c.category || 'technical') === 'technical'
   const mode: Mode = ['Online', 'Offline', 'Hybrid'].includes(c.mode) ? c.mode as Mode : 'Online'
+  const blurb = (c.shortDescription || c.description || '').trim()
   return {
     id: c.id,
     title: c.title,
-    description: c.description,
+    description: blurb,
     category: isTech ? 'technical' : 'non-technical',
     duration: c.duration,
     mode,
@@ -91,6 +107,7 @@ function courseFromApi(c: { id: string; title: string; description: string; cate
     tagColor: isTech ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
     iconBg: isTech ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600',
     Icon: ICON_MAP[i % ICON_MAP.length],
+    featuredImageUrl: (c.featuredImageUrl || '').trim() || undefined,
   }
 }
 
@@ -180,7 +197,7 @@ export function Training() {
     courseService.list({ limit: 50 })
       .then((res) => {
         if (!cancelled && res.items)
-          setCourses((res.items as Array<{ id: string; title: string; description: string; category: string; duration: string; mode: string; universities: string; price: number }>).map((c, i) => courseFromApi(c, i)))
+          setCourses((res.items as Array<{ id: string; title: string; description: string; shortDescription?: string; featuredImageUrl?: string; category: string; duration: string; mode: string; universities: string; price: number }>).map((c, i) => courseFromApi(c, i)))
       })
       .finally(() => { if (!cancelled) setCoursesLoading(false) })
     return () => { cancelled = true }
@@ -188,10 +205,11 @@ export function Training() {
 
   const filteredCourses = useMemo(() => {
     return courses.filter((c) => {
+      const q = search.toLowerCase()
       const matchSearch =
         !search ||
-        c.title.toLowerCase().includes(search.toLowerCase()) ||
-        c.description.toLowerCase().includes(search.toLowerCase())
+        c.title.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q)
       const matchCategory =
         category === 'all' ||
         (category === 'technical' && c.category === 'technical') ||
@@ -430,6 +448,11 @@ export function Training() {
                   key={course.id}
                   className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition min-w-0"
                 >
+                  {course.featuredImageUrl ? (
+                    <Link to={`/training/${course.id}`} className="relative block aspect-[16/9] bg-gray-200 shrink-0">
+                      <img src={course.featuredImageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                    </Link>
+                  ) : null}
                   <div className="p-4 sm:p-5 flex flex-col flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div
@@ -444,7 +467,9 @@ export function Training() {
                       </span>
                     </div>
                     <h2 className="mt-3 text-base font-bold text-brand-navy sm:text-lg line-clamp-2">
-                      {course.title}
+                      <Link to={`/training/${course.id}`} className="hover:text-brand-accent transition">
+                        {course.title}
+                      </Link>
                     </h2>
                     <p className="mt-1.5 text-sm text-slate-gray line-clamp-2">{course.description}</p>
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
@@ -462,7 +487,13 @@ export function Training() {
                       ₹{course.price.toLocaleString('en-IN')} / course
                     </p>
                   </div>
-                  <div className="border-t border-gray-100 p-4 sm:p-5 pt-0">
+                  <div className="border-t border-gray-100 p-4 sm:p-5 pt-0 flex flex-col gap-2">
+                    <Link
+                      to={`/training/${course.id}`}
+                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-gray-50 transition"
+                    >
+                      View details <ArrowRight className="h-4 w-4" />
+                    </Link>
                     <button
                       type="button"
                       onClick={() => setEnrollCourse(course)}

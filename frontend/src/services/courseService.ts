@@ -13,6 +13,11 @@ type CoursesListResponse = { items: unknown[]; total: number; page: number; limi
 const LIST_CACHE_TTL_MS = 60_000
 let coursesListCache: { key: string; exp: number; data: CoursesListResponse } | null = null
 
+/** Clears the in-memory catalog cache (e.g. after seeding or admin publish). */
+export function invalidateCoursesListCache() {
+  coursesListCache = null
+}
+
 function coursesListCacheKey(params?: { page?: number; limit?: number; category?: string; search?: string }) {
   return JSON.stringify({
     page: params?.page ?? 1,
@@ -45,6 +50,27 @@ export type CourseContent = {
   announcements?: Array<{ title?: string; message?: string; createdAt?: string }>
 }
 
+/** Public marketing payload from GET /api/courses/:id (extends enrolled content shape where fields overlap). */
+export type CoursePublicDetail = CourseContent & {
+  slug?: string
+  featuredImageUrl?: string
+  difficulty?: string
+  introVideoUrl?: string
+  originalPrice?: number
+  whatYouWillLearn?: string[]
+  targetAudience?: string
+  materialsIncluded?: string[]
+  instructions?: string
+  trainingTags?: string[]
+  marketingCategories?: string[]
+  authorName?: string
+  listingVisibility?: string
+  scheduledPublishAt?: string | null
+  enrollmentCount?: number
+  updatedAt?: string | null
+  batches?: unknown[]
+}
+
 export type PythonQuizQuestion = { id: string; question: string; options: string[] }
 
 export const courseService = {
@@ -55,7 +81,13 @@ export const courseService = {
       return coursesListCache.data
     }
     const { data } = await api.get<CoursesListResponse>('/api/courses', { params })
-    coursesListCache = { key, exp: now + LIST_CACHE_TTL_MS, data }
+    // Avoid caching empty catalogs for a long time (e.g. DB seeded after first load).
+    const total = typeof data.total === 'number' ? data.total : 0
+    if (total > 0) {
+      coursesListCache = { key, exp: now + LIST_CACHE_TTL_MS, data }
+    } else {
+      coursesListCache = null
+    }
     return data
   },
   async getById(id: string) {
