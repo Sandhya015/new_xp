@@ -69,6 +69,8 @@ export type StrapiArticle = {
   readTime: number
   publishedDate: string | null
   coverImageUrl: string | null
+  /** List endpoint omits richtext body; detail fetch required before showing full article. */
+  missingBody?: boolean
 }
 
 type UnknownRecord = Record<string, unknown>
@@ -370,8 +372,23 @@ function normalizeArticle(entry: unknown, origin: string): StrapiArticle | null 
   if (!slug || !title) return null
 
   const rawDesc = fields.description
-  const descriptionHtml = richTextToHtml(rawDesc, origin)
-  const excerptPlain = richTextToExcerpt(rawDesc, descriptionHtml)
+  const hasDescription =
+    rawDesc != null &&
+    (typeof rawDesc === 'string'
+      ? rawDesc.trim().length > 0
+      : Array.isArray(rawDesc) ||
+        (isRecord(rawDesc) && isRecord(rawDesc.root) && Array.isArray(rawDesc.root.children)))
+
+  let descriptionHtml = ''
+  let excerptPlain = ''
+  let missingBody = false
+  if (hasDescription) {
+    descriptionHtml = richTextToHtml(rawDesc, origin)
+    excerptPlain = richTextToExcerpt(rawDesc, descriptionHtml)
+  } else {
+    missingBody = true
+  }
+
   const category = str(fields.category).trim() || 'General'
   const readTime = num(fields.readTime) ?? 5
   const publishedRaw = fields.publishedAt ?? fields.publishedDate
@@ -388,6 +405,7 @@ function normalizeArticle(entry: unknown, origin: string): StrapiArticle | null 
     readTime,
     publishedDate,
     coverImageUrl: mediaUrl(fields, origin),
+    ...(missingBody ? { missingBody: true } : {}),
   }
 }
 
@@ -404,12 +422,28 @@ async function parseList(res: Response): Promise<StrapiArticle[]> {
   return rows.map((row) => normalizeArticle(row, origin)).filter((a): a is StrapiArticle => a != null)
 }
 
-/** Lean list: only coverImage (not populate=*); caps page size. Public role should still hide drafts. */
+/**
+ * Blog index: omit `description` (large richtext × N rows — slow on Strapi + huge JSON).
+ * Cards use title + cover + optional excerpt (empty → UI fallback). Detail page loads full body by slug.
+ */
 function articlesListUrl(origin: string): string {
+  const url = new URL('/api/articles', origin)
+  const listFields = ['title', 'slug', 'category', 'readTime', 'publishedDate'] as const
+  listFields.forEach((f, i) => {
+    url.searchParams.set(`fields[${i}]`, f)
+  })
+  url.searchParams.set('populate[coverImage]', 'true')
+  url.searchParams.set('sort', 'publishedDate:desc')
+  url.searchParams.set('pagination[pageSize]', '12')
+  return url.toString()
+}
+
+/** If Strapi rejects `fields[]` (version/config), still avoid loading 30 full bodies. */
+function articlesListUrlLegacy(origin: string): string {
   const url = new URL('/api/articles', origin)
   url.searchParams.set('populate[coverImage]', 'true')
   url.searchParams.set('sort', 'publishedDate:desc')
-  url.searchParams.set('pagination[pageSize]', '30')
+  url.searchParams.set('pagination[pageSize]', '12')
   return url.toString()
 }
 
@@ -433,7 +467,7 @@ function articleBySlugUrlPopulateAll(origin: string, slug: string): string {
   return url.toString()
 }
 
-const ARTICLES_CACHE_TTL_MS = 120_000
+const ARTICLES_CACHE_TTL_MS = 300_000
 type ArticlesCache = { origin: string; exp: number; data: StrapiArticle[] }
 let articlesCache: ArticlesCache | null = null
 
@@ -448,10 +482,16 @@ export const strapiService = {
     if (articlesCache && articlesCache.origin === origin && now < articlesCache.exp) {
       return articlesCache.data
     }
-    const res = await fetch(articlesListUrl(origin), {
+    let res = await fetch(articlesListUrl(origin), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     })
+    if (res.status === 400) {
+      res = await fetch(articlesListUrlLegacy(origin), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      })
+    }
     const data = await parseList(res)
     articlesCache = { origin, exp: now + ARTICLES_CACHE_TTL_MS, data }
     return data
@@ -463,7 +503,7 @@ export const strapiService = {
     // Same payload as list (first page): skip a second Strapi round-trip after /blog → /blog/:slug
     if (articlesCache && articlesCache.origin === origin && now < articlesCache.exp) {
       const fromList = articlesCache.data.find((a) => a.slug === slug)
-      if (fromList) return fromList
+      if (fromList && !fromList.missingBody) return fromList
     }
     let res = await fetch(articleBySlugUrl(origin, slug), {
       method: 'GET',

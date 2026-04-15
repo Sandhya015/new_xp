@@ -88,7 +88,7 @@ export function Blog() {
         </div>
       </section>
 
-      {!fetchFailed && articles.length > 0 && (
+      {!loading && !fetchFailed && articles.length > 0 && (
         <section className="border-b border-gray-200 bg-white">
           <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-wrap gap-2">
@@ -120,9 +120,10 @@ export function Blog() {
             <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
           </div>
         ) : loading ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-24 text-slate-gray">
+          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-gray-100 bg-white/80 py-20 text-slate-gray shadow-sm">
             <Loader2 className="h-10 w-10 animate-spin text-brand-accent" aria-hidden />
             <p className="text-sm font-medium">Loading articles…</p>
+            <p className="max-w-sm px-4 text-center text-xs text-slate-gray">This can take a few seconds the first time our blog service wakes up.</p>
           </div>
         ) : !featured ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
