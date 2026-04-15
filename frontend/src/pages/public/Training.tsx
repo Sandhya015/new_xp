@@ -194,7 +194,7 @@ export function Training() {
 
   useEffect(() => {
     let cancelled = false
-    courseService.list({ limit: 50 })
+    courseService.list({ limit: 200 })
       .then((res) => {
         if (!cancelled && res.items)
           setCourses((res.items as Array<{ id: string; title: string; description: string; shortDescription?: string; featuredImageUrl?: string; category: string; duration: string; mode: string; universities: string; price: number }>).map((c, i) => courseFromApi(c, i)))
@@ -218,10 +218,13 @@ export function Training() {
       const hoursMatch = c.duration.match(/^(\d+)\s*Hours?$/i)
       const courseWeeks = weeksMatch ? parseInt(weeksMatch[1], 10) : null
       const courseHours = hoursMatch ? parseInt(hoursMatch[1], 10) : null
+      const durationFiltersActive = durationWeeks.size > 0 || durationHours.size > 0
+      const unparsedDuration = courseWeeks === null && courseHours === null
       const matchDuration =
-        (durationWeeks.size === 0 && durationHours.size === 0) ||
+        !durationFiltersActive ||
         (courseWeeks !== null && durationWeeks.has(courseWeeks)) ||
-        (courseHours !== null && durationHours.has(courseHours))
+        (courseHours !== null && durationHours.has(courseHours)) ||
+        (durationFiltersActive && unparsedDuration)
       const matchMode =
         modes.size === 0 || modes.has(c.mode)
       return matchSearch && matchCategory && matchDuration && matchMode

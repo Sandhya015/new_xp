@@ -63,7 +63,7 @@ export function StudentTraining() {
     setLoading(true)
     setLoadError(null)
     courseService
-      .list({ limit: 50 })
+      .list({ limit: 200 })
       .then((res) => {
         if (cancelled) return
         const items = (res.items || []) as Array<{

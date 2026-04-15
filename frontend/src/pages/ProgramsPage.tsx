@@ -11,7 +11,7 @@ export function ProgramsPage() {
 
   useEffect(() => {
     let cancelled = false
-    courseService.list({ limit: 50 })
+    courseService.list({ limit: 200 })
       .then((res) => { if (!cancelled) setItems((res.items || []) as CourseItem[]) })
       .catch(() => { if (!cancelled) setError('Failed to load courses') })
       .finally(() => { if (!cancelled) setLoading(false) })

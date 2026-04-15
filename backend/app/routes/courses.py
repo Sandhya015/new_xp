@@ -13,6 +13,9 @@ from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
 courses_bp = Blueprint("courses", __name__)
 
+# Treat missing `active` as published (legacy rows); only explicit false hides from catalog.
+_PUBLIC_ACTIVE_OR_LEGACY = {"$or": [{"active": True}, {"active": {"$exists": False}}]}
+
 
 def _public_catalog_match(category: str, search: str) -> dict:
     """Active trainings visible on the public catalog (excludes unlisted)."""
@@ -22,7 +25,7 @@ def _public_catalog_match(category: str, search: str) -> dict:
             {"listingVisibility": "public"},
         ]
     }
-    clauses = [{"active": True}, visibility_clause]
+    clauses = [_PUBLIC_ACTIVE_OR_LEGACY, visibility_clause]
     if category:
         clauses.append({"category": category})
     if search:
@@ -141,7 +144,7 @@ def list_courses():
         return jsonify({"items": [], "page": 1, "limit": 10, "total": 0, "message": "Database not configured"}), 503
     coll = get_courses_collection()
     page = max(1, request.args.get("page", 1, type=int))
-    limit = min(max(1, request.args.get("limit", 10, type=int)), 50)
+    limit = min(max(1, request.args.get("limit", 10, type=int)), 200)
     category = request.args.get("category", "").strip()
     search = request.args.get("search", "").strip()
     q = _public_catalog_match(category, search)
@@ -179,7 +182,7 @@ def get_course(course_id):
     if not ObjectId.is_valid(course_id):
         return jsonify({"error": "Invalid course id"}), 400
     coll = get_courses_collection()
-    c = coll.find_one({"_id": ObjectId(course_id), "active": True})
+    c = coll.find_one({"_id": ObjectId(course_id), **_PUBLIC_ACTIVE_OR_LEGACY})
     if not c:
         return jsonify({"error": "Course not found"}), 404
     enroll_coll = get_enrollments_collection()
