@@ -10,6 +10,8 @@ Run from backend/:
   python scripts/seed_demo_training.py --replace
   python scripts/seed_demo_training.py --replace --enroll-email you@example.com
   python scripts/seed_demo_training.py --replace --enroll-email you@example.com --with-payment
+  python scripts/seed_demo_training.py --status
+  python scripts/seed_demo_training.py --list-recent
 
 Enrollment orderId matches production: internal Mongo id of the orders row
 (str(order["_id"])), same as Razorpay verify flow.
@@ -244,12 +246,35 @@ def main() -> None:
         action="store_true",
         help="Only print whether the seed course exists in Mongo and would appear on the public catalog; no writes.",
     )
+    parser.add_argument(
+        "--list-recent",
+        action="store_true",
+        help="Read-only: print Mongo host, database name, total course count, and latest courses (compare with Admin UI).",
+    )
     args = parser.parse_args()
 
     uri = (os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI") or "").strip()
     if not uri:
         print("ERROR: MONGODB_URI (or MONGO_URI) not set.")
         sys.exit(1)
+
+    if args.list_recent:
+        client = MongoClient(uri)
+        db = client[DB_NAME]
+        coll = db["courses"]
+        total = coll.count_documents({})
+        print("MongoDB host:", _mongo_host(uri))
+        print("Database name (must match app):", DB_NAME)
+        print("Total documents in courses collection:", total)
+        print("Latest up to 25 (by createdAt):")
+        for c in coll.find({}, {"title": 1, "slug": 1, "createdAt": 1}).sort("createdAt", -1).limit(25):
+            sid = str(c.get("_id", ""))
+            slug = (c.get("slug") or "").strip() or "—"
+            title = (c.get("title") or "").strip() or "—"
+            print(f"  {sid[:8]}…  slug={slug!r}  title={title[:70]!r}")
+        demo = coll.find_one({"slug": DEMO_SLUG})
+        print("Seed slug present:", bool(demo))
+        sys.exit(0)
 
     if args.status:
         client = MongoClient(uri)
