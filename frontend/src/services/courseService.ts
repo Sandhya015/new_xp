@@ -42,6 +42,9 @@ export type CourseContent = {
   price?: number
   tag?: string
   trainerName?: string
+  /** Course slug from API (used for completion quiz variant). */
+  slug?: string
+  whatYouWillLearn?: string[]
   curriculum?: unknown[]
   classLinks?: Array<{ title?: string; date?: string; time?: string; platform?: string; link?: string; batch?: string }>
   studyMaterials?: Array<{ title?: string; module?: string; type?: string; url?: string }>

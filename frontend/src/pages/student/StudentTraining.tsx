@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import { BarChart3, Brain, Code2, Cpu, Filter, Loader2, Megaphone, Search, Smartphone } from 'lucide-react'
 import { courseService } from '@/services/courseService'
+import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { useAuth } from '@/hooks/useAuth'
+import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
 
 type Mode = 'Online' | 'Offline' | 'Hybrid'
 
@@ -51,12 +53,51 @@ function courseFromApi(
 }
 
 export function StudentTraining() {
+  const location = useLocation()
   const [search, setSearch] = useState('')
   const [courses, setCourses] = useState<CourseCard[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const { user, token } = useAuth()
-  const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
+  const { startCheckout, busy: payBusy, checkoutCourseId, error: payError, clearError: clearPayError } =
+    useRazorpayCheckout()
+  const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
+  const [completedCourseIds, setCompletedCourseIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!token) {
+      setEnrolledCourseIds(new Set())
+      setCompletedCourseIds(new Set())
+      return
+    }
+    const path = location.pathname.replace(/\/$/, '')
+    if (path !== '/dashboard/training') {
+      return
+    }
+    let cancelled = false
+    enrollmentService
+      .list()
+      .then((res) => {
+        if (cancelled) return
+        const enrolled = new Set<string>()
+        const completed = new Set<string>()
+        for (const i of res.items || []) {
+          if (i.courseId) enrolled.add(i.courseId)
+          if (i.courseId && i.certificateIssued) completed.add(i.courseId)
+        }
+        setEnrolledCourseIds(enrolled)
+        setCompletedCourseIds(completed)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEnrolledCourseIds(new Set())
+          setCompletedCourseIds(new Set())
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, location.pathname, location.key])
 
   useEffect(() => {
     let cancelled = false
@@ -147,7 +188,11 @@ export function StudentTraining() {
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((c) => (
+          {filtered.map((c) => {
+            const isEnrolled = Boolean(token && enrolledCourseIds.has(c.id))
+            const isCompleted = Boolean(token && completedCourseIds.has(c.id))
+            const detailTo = isEnrolled ? courseContentPath(c.id) : courseMarketingPath(c.id)
+            return (
             <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
               <div className="flex items-start justify-between gap-2">
                 <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${c.category === 'technical' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
@@ -169,33 +214,46 @@ export function StudentTraining() {
               </p>
               <div className="mt-4 flex gap-2 mt-auto">
                 <Link
-                  to={`/dashboard/training/${c.id}`}
+                  to={detailTo}
                   className="flex-1 rounded-lg border border-gray-300 py-2 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  View Details
+                  {isEnrolled ? 'View course' : 'View details'}
                 </Link>
-                <button
-                  type="button"
-                  disabled={payBusy || !token}
-                  onClick={() =>
-                    startCheckout({
-                      courseId: c.id,
-                      courseTitle: c.title,
-                      price: c.price,
-                      prefill: {
-                        name: user?.name,
-                        email: user?.email,
-                        contact: user?.mobile,
-                      },
-                    })
-                  }
-                  className="flex-1 rounded-lg bg-brand-accent py-2 text-center text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
-                >
-                  {payBusy ? 'Please wait…' : 'Enroll Now'}
-                </button>
+                {isEnrolled ? (
+                  <span
+                    className={`flex-1 rounded-lg border py-2 text-center text-sm font-semibold ${
+                      isCompleted
+                        ? 'border-violet-200 bg-violet-50 text-violet-900'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    }`}
+                  >
+                    {isCompleted ? 'Completed' : 'Enrolled'}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!token || (payBusy && checkoutCourseId === c.id)}
+                    onClick={() =>
+                      startCheckout({
+                        courseId: c.id,
+                        courseTitle: c.title,
+                        price: c.price,
+                        prefill: {
+                          name: user?.name,
+                          email: user?.email,
+                          contact: user?.mobile,
+                        },
+                      })
+                    }
+                    className="flex-1 rounded-lg bg-brand-accent py-2 text-center text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+                  >
+                    {payBusy && checkoutCourseId === c.id ? 'Please wait…' : 'Enroll Now'}
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

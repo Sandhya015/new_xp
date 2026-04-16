@@ -396,8 +396,7 @@ export function LessonBuilderModal({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <span className="text-sm font-medium text-gray-900">Lesson preview</span>
-                    <span className="ml-2 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">Pro</span>
-                    <p className="mt-1 text-[11px] text-gray-600">Let learners preview this lesson before enrolling when your plan supports it.</p>
+                    <p className="mt-1 text-[11px] text-gray-600">Let learners preview this lesson before enrolling when enabled.</p>
                   </div>
                   <button
                     type="button"

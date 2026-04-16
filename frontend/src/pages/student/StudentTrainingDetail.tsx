@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { BookOpen, ArrowLeft, Loader2 } from 'lucide-react'
 import { courseService } from '@/services/courseService'
+import { enrollmentService } from '@/services/enrollmentService'
+import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
 import { plainTextFromHtml } from '@/utils/sanitizeHtml'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { useAuth } from '@/hooks/useAuth'
@@ -23,6 +25,7 @@ export function StudentTrainingDetail() {
   const [course, setCourse] = useState<CourseDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [userIsEnrolled, setUserIsEnrolled] = useState<boolean | null>(null)
   const { user, token } = useAuth()
   const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
 
@@ -54,6 +57,27 @@ export function StudentTrainingDetail() {
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    if (!id) return
+    if (!token) {
+      setUserIsEnrolled(false)
+      return
+    }
+    let cancelled = false
+    setUserIsEnrolled(null)
+    enrollmentService
+      .getByCourseId(id)
+      .then(() => {
+        if (!cancelled) setUserIsEnrolled(true)
+      })
+      .catch(() => {
+        if (!cancelled) setUserIsEnrolled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id, token])
 
   if (loading) {
     return (
@@ -113,29 +137,60 @@ export function StudentTrainingDetail() {
             {plainTextFromHtml(course.description || '') || 'No description provided.'}
           </p>
         </div>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            disabled={payBusy || !token}
-            onClick={() =>
-              startCheckout({
-                courseId: course.id,
-                courseTitle: course.title,
-                price: course.price,
-                prefill: {
-                  name: user?.name,
-                  email: user?.email,
-                  contact: user?.mobile,
-                },
-              })
-            }
-            className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
-          >
-            {payBusy ? 'Opening payment…' : course.price > 0 ? 'Enroll & Pay with Razorpay' : 'Enroll for free'}
-          </button>
-          <button type="button" className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
-            Share
-          </button>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          {userIsEnrolled === true ? (
+            <>
+              <Link
+                to={courseContentPath(course.id)}
+                className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+              >
+                View course content
+              </Link>
+              <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800">
+                Enrolled
+              </span>
+              <Link
+                to={courseMarketingPath(course.id)}
+                className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Program overview
+              </Link>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={payBusy || !token || userIsEnrolled === null}
+                onClick={() =>
+                  startCheckout({
+                    courseId: course.id,
+                    courseTitle: course.title,
+                    price: course.price,
+                    prefill: {
+                      name: user?.name,
+                      email: user?.email,
+                      contact: user?.mobile,
+                    },
+                  })
+                }
+                className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+              >
+                {userIsEnrolled === null && token
+                  ? 'Checking enrollment…'
+                  : payBusy
+                    ? 'Opening payment…'
+                    : course.price > 0
+                      ? 'Enroll & Pay with Razorpay'
+                      : 'Enroll for free'}
+              </button>
+              <Link
+                to={courseMarketingPath(course.id)}
+                className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                View details
+              </Link>
+            </>
+          )}
         </div>
         {!token ? (
           <p className="mt-3 text-xs text-amber-800">You need to be signed in to enroll.</p>

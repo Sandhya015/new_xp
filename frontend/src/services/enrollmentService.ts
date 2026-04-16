@@ -23,6 +23,9 @@ export type EnrollmentItem = {
   pythonQuizScore?: number
   certificateIssued?: boolean
   certificateNumber?: string | null
+  /** Successful PDF streams from generate-from-quiz (max 2). */
+  certificatePdfDownloadCount?: number
+  certificatePdfDownloadsRemaining?: number
   pythonQuizAvailable?: boolean
 }
 

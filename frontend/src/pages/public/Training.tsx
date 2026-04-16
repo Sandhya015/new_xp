@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
+import { enrollmentService } from '@/services/enrollmentService'
+import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
 import {
   Search,
   Filter,
@@ -75,7 +77,6 @@ interface Course {
   tagColor: string
   iconBg: string
   Icon: LucideIcon
-  featuredImageUrl?: string
 }
 
 const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
@@ -85,7 +86,6 @@ function courseFromApi(
     title: string
     description: string
     shortDescription?: string
-    featuredImageUrl?: string
     category: string
     duration: string
     mode: string
@@ -111,7 +111,6 @@ function courseFromApi(
     tagColor: isTech ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
     iconBg: isTech ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600',
     Icon: ICON_MAP[i % ICON_MAP.length],
-    featuredImageUrl: (c.featuredImageUrl || '').trim() || undefined,
   }
 }
 
@@ -122,6 +121,7 @@ function ModeIcon({ mode }: { mode: Mode }) {
 }
 
 export function Training() {
+  const location = useLocation()
   const [courses, setCourses] = useState<Course[]>([])
   const [coursesLoading, setCoursesLoading] = useState(true)
   const [coursesLoadError, setCoursesLoadError] = useState<string | null>(null)
@@ -136,7 +136,44 @@ export function Training() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [enrollCourse, setEnrollCourse] = useState<Course | null>(null)
   const [enrollForm, setEnrollForm] = useState(INITIAL_ENROLL_FORM)
-  const { user } = useAuth()
+  const { user, token } = useAuth()
+  const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
+  const [completedCourseIds, setCompletedCourseIds] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!token) {
+      setEnrolledCourseIds(new Set())
+      setCompletedCourseIds(new Set())
+      return
+    }
+    const path = location.pathname.replace(/\/$/, '')
+    if (path !== '/training') {
+      return
+    }
+    let cancelled = false
+    enrollmentService
+      .list()
+      .then((res) => {
+        if (cancelled) return
+        const enrolled = new Set<string>()
+        const completed = new Set<string>()
+        for (const i of res.items || []) {
+          if (i.courseId) enrolled.add(i.courseId)
+          if (i.courseId && i.certificateIssued) completed.add(i.courseId)
+        }
+        setEnrolledCourseIds(enrolled)
+        setCompletedCourseIds(completed)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEnrolledCourseIds(new Set())
+          setCompletedCourseIds(new Set())
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, location.pathname, location.key])
   const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
 
   /** Fresh form each time the modal opens; clear when it closes (avoids stale admin / previous user data). */
@@ -211,7 +248,6 @@ export function Training() {
             title: string
             description: string
             shortDescription?: string
-            featuredImageUrl?: string
             category: string
             duration: string
             mode: string
@@ -479,16 +515,15 @@ export function Training() {
           <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {filteredCourses.map((course) => {
               const CourseIcon = course.Icon
+              const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
+              const isCompleted = Boolean(token && completedCourseIds.has(course.id))
+              const detailTo = isEnrolled ? courseContentPath(course.id) : courseMarketingPath(course.id)
               return (
                 <article
                   key={course.id}
                   className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition min-w-0"
                 >
-                  {course.featuredImageUrl ? (
-                    <Link to={`/training/${course.id}`} className="relative block aspect-[16/9] bg-gray-200 shrink-0">
-                      <img src={course.featuredImageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                    </Link>
-                  ) : null}
+                  {/* Cover image only on course detail (/training/:id), not in list cards */}
                   <div className="p-4 sm:p-5 flex flex-col flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div
@@ -503,7 +538,7 @@ export function Training() {
                       </span>
                     </div>
                     <h2 className="mt-3 text-base font-bold text-brand-navy sm:text-lg line-clamp-2">
-                      <Link to={`/training/${course.id}`} className="hover:text-brand-accent transition">
+                      <Link to={detailTo} className="hover:text-brand-accent transition">
                         {course.title}
                       </Link>
                     </h2>
@@ -520,23 +555,43 @@ export function Training() {
                       </span>
                     </div>
                     <p className="mt-3 text-sm font-semibold text-brand-navy">
-                      ₹{course.price.toLocaleString('en-IN')} / course
+                      {course.price > 0 ? `₹${course.price.toLocaleString('en-IN')} / course` : 'Free'}
                     </p>
                   </div>
                   <div className="border-t border-gray-100 p-4 sm:p-5 pt-0 flex flex-col gap-2">
                     <Link
-                      to={`/training/${course.id}`}
+                      to={detailTo}
                       className="flex w-full items-center justify-center gap-1 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-gray-50 transition"
                     >
-                      View details <ArrowRight className="h-4 w-4" />
+                      {isEnrolled ? (
+                        <>
+                          View course <ArrowRight className="h-4 w-4" />
+                        </>
+                      ) : (
+                        <>
+                          View details <ArrowRight className="h-4 w-4" />
+                        </>
+                      )}
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() => setEnrollCourse(course)}
-                      className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
-                    >
-                      Enroll Now
-                    </button>
+                    {isEnrolled ? (
+                      <span
+                        className={`flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-semibold ${
+                          isCompleted
+                            ? 'border-violet-200 bg-violet-50 text-violet-900'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        }`}
+                      >
+                        {isCompleted ? 'Completed' : 'Enrolled'}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEnrollCourse(course)}
+                        className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+                      >
+                        Enroll Now
+                      </button>
+                    )}
                   </div>
                 </article>
               )

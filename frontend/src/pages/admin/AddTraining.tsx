@@ -32,15 +32,9 @@ import {
 import { plainTextFromHtml } from '@/utils/sanitizeHtml'
 import { useAuthStore } from '@/store/authStore'
 
-/** Non‑Pro types first; Lab, Assignment, Interview (Pro) at the end. */
+/** Topic type buttons order (stored values unchanged). */
 const TOPIC_TYPE_ORDER = ['Lecture', 'Quiz', 'Reading', 'Recording', 'Lab', 'Assignment', 'Interview'] as const
 type TopicType = (typeof TOPIC_TYPE_ORDER)[number]
-
-const PRO_TOPIC_TYPES = new Set<TopicType>(['Lab', 'Assignment', 'Interview'])
-
-function isProTopicType(t: TopicType): boolean {
-  return PRO_TOPIC_TYPES.has(t)
-}
 
 /** Button labels aligned with Tutor-style wording; values stored unchanged. */
 function topicTypeButtonLabel(t: TopicType): string {
@@ -1070,11 +1064,6 @@ export function AddTraining() {
                                       >
                                         <Plus className="h-3.5 w-3.5 shrink-0 opacity-80" />
                                         {topicTypeButtonLabel(t)}
-                                        {isProTopicType(t) ? (
-                                          <span className="ml-0.5 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold uppercase leading-none text-white">
-                                            Pro
-                                          </span>
-                                        ) : null}
                                       </button>
                                     ))}
                                   </div>
@@ -1139,13 +1128,6 @@ export function AddTraining() {
                                         <ClipboardList className="h-3.5 w-3.5" />
                                         Open quiz builder
                                       </button>
-                                    </div>
-                                  ) : null}
-                                  {isProTopicType(topic.type) ? (
-                                    <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
-                                      <span className="font-bold uppercase tracking-wide">Pro</span>
-                                      {' '}
-                                      — Advanced delivery, grading, and analytics for this topic type can be enabled for your workspace tier.
                                     </div>
                                   ) : null}
                                 </div>

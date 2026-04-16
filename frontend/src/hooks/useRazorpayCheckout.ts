@@ -15,7 +15,8 @@ type RazorpaySuccessResponse = {
 export function useRazorpayCheckout() {
   const navigate = useNavigate()
   const { token, user } = useAuth()
-  const [busy, setBusy] = useState(false)
+  /** Which course is currently in a checkout / enroll flow (only that card should show loading). */
+  const [checkoutCourseId, setCheckoutCourseId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const startCheckout = useCallback(
@@ -35,25 +36,38 @@ export function useRazorpayCheckout() {
       }
 
       if (price <= 0) {
-        setBusy(true)
+        setCheckoutCourseId(courseId)
+        const goToCourse = () => {
+          try {
+            onSuccess?.()
+          } catch {
+            /* modal callbacks must not block navigation */
+          }
+          navigate(`/dashboard/my-courses/${encodeURIComponent(courseId)}`)
+        }
         try {
           await enrollmentService.create({ courseId })
-          onSuccess?.()
-          navigate('/dashboard/my-courses')
-        } catch {
-          setError('Could not enroll. You may already be enrolled in this course.')
+          setError(null)
+          goToCourse()
+        } catch (e: unknown) {
+          if (axios.isAxiosError(e) && e.response?.status === 409) {
+            setError(null)
+            goToCourse()
+          } else {
+            setError('Could not enroll. Check your connection and try again.')
+          }
         } finally {
-          setBusy(false)
+          setCheckoutCourseId(null)
         }
         return
       }
 
-      setBusy(true)
+      setCheckoutCourseId(courseId)
       try {
         const loaded = await loadRazorpayScript()
         if (!loaded || !window.Razorpay) {
           setError('Could not load payment gateway. Check your connection and try again.')
-          setBusy(false)
+          setCheckoutCourseId(null)
           return
         }
 
@@ -73,12 +87,16 @@ export function useRazorpayCheckout() {
                 response.razorpay_order_id,
                 response.razorpay_signature
               )
-              setBusy(false)
-              onSuccess?.()
+              setCheckoutCourseId(null)
+              try {
+                onSuccess?.()
+              } catch {
+                /* ignore */
+              }
               navigate('/dashboard/my-courses')
             } catch {
               setError('Payment received but verification failed. Please contact support with your payment ID.')
-              setBusy(false)
+              setCheckoutCourseId(null)
             }
           },
           prefill: {
@@ -88,14 +106,14 @@ export function useRazorpayCheckout() {
           },
           theme: { color: '#2563eb' },
           modal: {
-            ondismiss: () => setBusy(false),
+            ondismiss: () => setCheckoutCourseId(null),
           },
         }
 
         const rzp = new window.Razorpay!(options)
         rzp.on('payment.failed', () => {
           setError('Payment failed or was cancelled.')
-          setBusy(false)
+          setCheckoutCourseId(null)
         })
         rzp.open()
       } catch (e: unknown) {
@@ -119,11 +137,18 @@ export function useRazorpayCheckout() {
           }
         }
         setError(message)
-        setBusy(false)
+        setCheckoutCourseId(null)
       }
     },
     [token, user, navigate]
   )
 
-  return { startCheckout, busy, error, clearError: () => setError(null) }
+  return {
+    startCheckout,
+    /** True while any course checkout is in progress (single-course pages can use this). */
+    busy: checkoutCourseId !== null,
+    checkoutCourseId,
+    error,
+    clearError: () => setError(null),
+  }
 }

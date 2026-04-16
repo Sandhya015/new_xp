@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { courseService } from '@/services/courseService'
+import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
+import { useAuth } from '@/hooks/useAuth'
+import { courseContentPath } from '@/utils/courseStudyLink'
 import {
   Loader2,
   Lock,
@@ -131,6 +134,8 @@ export function CourseDetail() {
   const [openModules, setOpenModules] = useState<Set<string>>(() => new Set())
   const [aboutExpanded, setAboutExpanded] = useState(false)
   const [shareHint, setShareHint] = useState<string | null>(null)
+  const [userIsEnrolled, setUserIsEnrolled] = useState<boolean | null>(null)
+  const { token } = useAuth()
   const { startCheckout, busy, error: payError, clearError } = useRazorpayCheckout()
 
   useEffect(() => {
@@ -151,6 +156,27 @@ export function CourseDetail() {
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    if (!course?.id) return
+    if (!token) {
+      setUserIsEnrolled(false)
+      return
+    }
+    let cancelled = false
+    setUserIsEnrolled(null)
+    enrollmentService
+      .getByCourseId(course.id)
+      .then(() => {
+        if (!cancelled) setUserIsEnrolled(true)
+      })
+      .catch(() => {
+        if (!cancelled) setUserIsEnrolled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [course?.id, token])
 
   const embedUrl = useMemo(() => (course?.introVideoUrl ? getYoutubeEmbedUrl(course.introVideoUrl) : null), [course?.introVideoUrl])
 
@@ -377,22 +403,38 @@ export function CourseDetail() {
                   </p>
                 ) : null}
 
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    clearError()
-                    void startCheckout({
-                      courseId: course.id,
-                      courseTitle: course.title,
-                      price: course.price,
-                    })
-                  }}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60 min-h-[44px]"
-                >
-                  {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {course.price > 0 ? 'Add to cart' : 'Enroll free'}
-                </button>
+                {userIsEnrolled === true ? (
+                  <div className="mt-4 space-y-2">
+                    <Link
+                      to={courseContentPath(course.id)}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 min-h-[44px]"
+                    >
+                      View course content
+                    </Link>
+                    <p className="text-center text-xs font-medium text-emerald-700">You are enrolled in this program.</p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy || (Boolean(token) && userIsEnrolled === null)}
+                    onClick={() => {
+                      clearError()
+                      void startCheckout({
+                        courseId: course.id,
+                        courseTitle: course.title,
+                        price: course.price,
+                      })
+                    }}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60 min-h-[44px]"
+                  >
+                    {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {Boolean(token) && userIsEnrolled === null
+                      ? 'Checking enrollment…'
+                      : course.price > 0
+                        ? 'Add to cart'
+                        : 'Enroll free'}
+                  </button>
+                )}
 
                 <ul className="mt-5 space-y-3 border-t border-gray-100 pt-5 text-sm text-gray-700">
                   <li className="flex items-start gap-3">

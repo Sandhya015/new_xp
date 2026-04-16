@@ -23,6 +23,9 @@ import {
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
 import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
 import { certificateService } from '@/services/certificateService'
+import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
+
+const CERTIFICATE_PDF_DOWNLOAD_LIMIT = 2
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
@@ -35,8 +38,24 @@ const TABS = [
   { id: 'certificate', label: 'Certificate', icon: Award },
 ] as const
 
+function completionQuizCopy(slug: string | undefined) {
+  if ((slug || '').toLowerCase() === 'demo-java-programming-seed') {
+    return {
+      title: 'Java completion quiz',
+      passedTitle: 'You have passed the Java completion quiz.',
+      intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
+    }
+  }
+  return {
+    title: 'Python fundamentals quiz',
+    passedTitle: 'You have passed the Python fundamentals quiz.',
+    intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
+  }
+}
+
 function PythonCourseQuizBlock({
   courseId,
+  courseSlug,
   passed,
   score,
   onUpdate,
@@ -44,9 +63,12 @@ function PythonCourseQuizBlock({
   certificateNumber,
   certBusy,
   certMessage,
+  certMessageTone,
+  certificateDownloadsRemaining,
   onGenerateCertificate,
 }: {
   courseId: string
+  courseSlug?: string
   passed: boolean
   score?: number
   onUpdate: () => void | Promise<void>
@@ -54,8 +76,22 @@ function PythonCourseQuizBlock({
   certificateNumber?: string | null
   certBusy?: boolean
   certMessage?: string | null
+  certMessageTone?: 'success' | 'error' | 'info'
+  certificateDownloadsRemaining?: number
   onGenerateCertificate?: () => void
 }) {
+  const copy = completionQuizCopy(courseSlug)
+  const tone = certMessageTone ?? 'success'
+  const feedbackClass =
+    tone === 'error'
+      ? 'text-red-800 bg-red-50 border-red-200'
+      : tone === 'info'
+        ? 'text-slate-800 bg-slate-50 border-slate-200'
+        : 'text-emerald-900 bg-emerald-50/90 border-emerald-200'
+  const downloadsLeft =
+    typeof certificateDownloadsRemaining === 'number'
+      ? certificateDownloadsRemaining
+      : CERTIFICATE_PDF_DOWNLOAD_LIMIT
   const [loading, setLoading] = useState(!passed)
   const [questions, setQuestions] = useState<PythonQuizQuestion[]>([])
   const [passPercent, setPassPercent] = useState(60)
@@ -107,9 +143,13 @@ function PythonCourseQuizBlock({
     return (
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 space-y-4">
         <div>
-          <p className="font-semibold">You have passed the Python fundamentals quiz.</p>
+          <p className="font-semibold">{copy.passedTitle}</p>
           {score != null && <p className="mt-1 text-sm">Your score: {score}%</p>}
         </div>
+        <p className="text-sm leading-relaxed text-emerald-950 bg-white/70 border border-emerald-100 rounded-lg px-3 py-2.5">
+          Thank you for taking the quiz. We have emailed your certificate of completion to your registered email address
+          (when outgoing mail is enabled on the server).
+        </p>
         {certificateNumber && (
           <p className="text-sm text-emerald-800">
             Certificate ID:{' '}
@@ -117,9 +157,9 @@ function PythonCourseQuizBlock({
           </p>
         )}
         {certMessage && (
-          <p className="text-sm text-emerald-800 bg-white/60 border border-emerald-200/80 rounded-lg px-3 py-2">{certMessage}</p>
+          <p className={`text-sm rounded-lg border px-3 py-2 ${feedbackClass}`}>{certMessage}</p>
         )}
-        {onGenerateCertificate && (
+        {onGenerateCertificate && downloadsLeft > 0 ? (
           <button
             type="button"
             disabled={certBusy}
@@ -127,12 +167,23 @@ function PythonCourseQuizBlock({
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
           >
             {certBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            {certificateIssued ? 'Download certificate again' : 'Generate certificate (PDF)'}
+            {certificateIssued ? 'Generate certificate again' : 'Generate certificate (PDF)'}
           </button>
-        )}
+        ) : onGenerateCertificate && downloadsLeft <= 0 ? (
+          <p className="text-sm text-emerald-900">
+            You have used all {CERTIFICATE_PDF_DOWNLOAD_LIMIT} certificate generations for this course. Use the copies
+            from your email, or contact support if you need help.
+          </p>
+        ) : null}
         <p className="text-xs text-emerald-800/90">
-          First time you generate, we email a copy to your registered address (if mail is configured on the server).
+          You can generate the certificate PDF at most {CERTIFICATE_PDF_DOWNLOAD_LIMIT} times. Each successful generation
+          downloads the PDF and emails a copy to your registered address when mail is configured on the server.
         </p>
+        {downloadsLeft > 0 && downloadsLeft < CERTIFICATE_PDF_DOWNLOAD_LIMIT ? (
+          <p className="text-xs font-medium text-emerald-900">
+            Generations remaining: {downloadsLeft}
+          </p>
+        ) : null}
       </div>
     )
   }
@@ -152,10 +203,8 @@ function PythonCourseQuizBlock({
   return (
     <div className="space-y-4 rounded-xl border border-brand-navy/15 bg-[#f8fafc] p-4">
       <div>
-        <h3 className="text-lg font-semibold text-brand-navy">Python fundamentals quiz</h3>
-        <p className="mt-1 text-sm text-slate-gray">
-          Pass with at least {passPercent}% to unlock your certificate of completion.
-        </p>
+        <h3 className="text-lg font-semibold text-brand-navy">{copy.title}</h3>
+        <p className="mt-1 text-sm text-slate-gray">{copy.intro.replace('{pct}', String(passPercent))}</p>
       </div>
       {banner && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{banner}</p>}
       <ol className="space-y-6">
@@ -206,6 +255,7 @@ export function CourseContent() {
   const [activeTab, setActiveTab] = useState<string>('overview')
   const [certBusy, setCertBusy] = useState(false)
   const [certMessage, setCertMessage] = useState<string | null>(null)
+  const [certMessageTone, setCertMessageTone] = useState<'success' | 'error' | 'info'>('success')
 
   const refreshEnrollment = useCallback(() => {
     if (!courseId) return Promise.resolve()
@@ -234,6 +284,7 @@ export function CourseContent() {
     if (!courseId) return
     setCertBusy(true)
     setCertMessage(null)
+    setCertMessageTone('success')
     certificateService
       .generateFromQuiz(courseId)
       .then((blob) => {
@@ -243,11 +294,29 @@ export function CourseContent() {
         a.download = `XpertIntern-certificate-${courseId.slice(-8)}.pdf`
         a.click()
         URL.revokeObjectURL(url)
-        setCertMessage('Download started. If this was your first issue, check your inbox for the certificate email.')
+        setCertMessageTone('success')
+        setCertMessage('Your certificate PDF has started downloading. A copy is also being sent to your email when mail is configured.')
         void refreshEnrollment()
       })
       .catch((err: unknown) => {
-        setCertMessage(err instanceof Error ? err.message : 'Could not generate certificate.')
+        const raw = err instanceof Error ? err.message : String(err)
+        if (raw.startsWith('CERT_UI_UNCERTAIN|')) {
+          setCertMessageTone('info')
+          setCertMessage(raw.slice('CERT_UI_UNCERTAIN|'.length))
+          void refreshEnrollment()
+          return
+        }
+        const lower = raw.toLowerCase()
+        if (lower.includes('network error') || lower.includes('failed to fetch')) {
+          setCertMessageTone('info')
+          setCertMessage(
+            'We could not confirm the download in your browser. Your certificate may still have downloaded or been emailed — please check your downloads folder and inbox.',
+          )
+          void refreshEnrollment()
+          return
+        }
+        setCertMessageTone('error')
+        setCertMessage(raw || 'Could not generate certificate.')
       })
       .finally(() => setCertBusy(false))
   }, [courseId, refreshEnrollment])
@@ -304,16 +373,62 @@ export function CourseContent() {
       </div>
 
       <div className="rounded-b-xl border border-t-0 border-gray-200 bg-white p-6 shadow-sm">
-        {activeTab === 'overview' && (
-          <div className="prose prose-sm max-w-none">
-            <p className="text-gray-700">{course.fullDescription || course.description || 'No description.'}</p>
-            <ul className="mt-4 list-inside list-disc text-gray-600">
-              {course.duration && <li>Duration: {course.duration}</li>}
-              {course.mode && <li>Mode: {course.mode}</li>}
-              {course.universities && <li>Universities: {course.universities}</li>}
-            </ul>
-          </div>
-        )}
+        {activeTab === 'overview' && (() => {
+          const raw = (course.fullDescription || course.description || '').trim()
+          const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(raw)
+          const goals = Array.isArray(course.whatYouWillLearn) ? course.whatYouWillLearn.filter((x) => String(x).trim()) : []
+          return (
+            <div className="max-w-none space-y-6">
+              <div className="rounded-xl border border-gray-100 bg-gradient-to-br from-slate-50 to-white p-5 sm:p-6">
+                <h2 className="text-base font-semibold text-brand-navy">About this program</h2>
+                {looksLikeHtml ? (
+                  <div
+                    className="prose prose-sm prose-slate mt-3 max-w-none text-gray-700 [&_a]:text-brand-accent [&_a]:underline [&_p]:mt-2 [&_ul]:mt-2"
+                    dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(raw) }}
+                  />
+                ) : (
+                  <p className="mt-3 text-sm leading-relaxed text-gray-700">{raw || 'No description yet.'}</p>
+                )}
+                {!looksLikeHtml && course.shortDescription?.trim() && (
+                  <p className="mt-3 text-sm text-slate-gray">{course.shortDescription.trim()}</p>
+                )}
+                {looksLikeHtml && course.shortDescription?.trim() && (
+                  <p className="mt-4 border-t border-gray-100 pt-4 text-sm text-slate-gray">{course.shortDescription.trim()}</p>
+                )}
+              </div>
+              {goals.length > 0 && (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-5 sm:p-6">
+                  <h2 className="text-base font-semibold text-brand-navy">What you will learn</h2>
+                  <ul className="mt-3 list-inside list-disc space-y-1.5 text-sm text-gray-800">
+                    {goals.map((g, i) => (
+                      <li key={i}>{plainTextFromHtml(String(g))}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="grid gap-3 sm:grid-cols-3">
+                {course.duration ? (
+                  <div className="rounded-lg border border-gray-100 bg-white px-4 py-3 text-center shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-gray">Duration</p>
+                    <p className="mt-1 text-sm font-semibold text-brand-navy">{course.duration}</p>
+                  </div>
+                ) : null}
+                {course.mode ? (
+                  <div className="rounded-lg border border-gray-100 bg-white px-4 py-3 text-center shadow-sm">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-gray">Mode</p>
+                    <p className="mt-1 text-sm font-semibold text-brand-navy">{course.mode}</p>
+                  </div>
+                ) : null}
+                {course.universities ? (
+                  <div className="rounded-lg border border-gray-100 bg-white px-4 py-3 text-center shadow-sm sm:col-span-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-gray">Universities</p>
+                    <p className="mt-1 text-sm font-semibold text-brand-navy">{course.universities}</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )
+        })()}
         {activeTab === 'curriculum' && (
           <div className="space-y-4">
             {(!course.curriculum || course.curriculum.length === 0) ? (
@@ -325,9 +440,15 @@ export function CourseContent() {
                 name?: string
                 topics?: Array<string | { id?: string; title?: string; type?: string; duration?: string; lockedUntilPayment?: boolean }>
               }>).map((mod, i) => {
-                const price = course.price ?? 0
+                const priceNum = (() => {
+                  const p = course.price
+                  if (typeof p === 'number' && !Number.isNaN(p)) return p
+                  const n = parseFloat(String(p ?? '').trim())
+                  return Number.isFinite(n) ? n : 0
+                })()
+                const isFreeCourse = priceNum <= 0
                 const hasPaidRecord = !!(enrollment?.orderId && String(enrollment.orderId).trim())
-                const paymentUnlocked = price <= 0 || hasPaidRecord
+                const paymentUnlocked = isFreeCourse || hasPaidRecord
                 return (
                   <div key={mod.id || i} className="rounded-lg border border-gray-100 p-3">
                     <h4 className="font-semibold text-brand-navy">{mod.title || mod.name || `Module ${i + 1}`}</h4>
@@ -338,7 +459,7 @@ export function CourseContent() {
                           const title = topic.title || (typeof t === 'string' ? t : 'Topic')
                           const typ = topic.type ? ` · ${topic.type}` : ''
                           const dur = topic.duration ? ` · ${topic.duration}` : ''
-                          const gated = price > 0 && topic.lockedUntilPayment === true && !paymentUnlocked
+                          const gated = !isFreeCourse && topic.lockedUntilPayment === true && !paymentUnlocked
                           return (
                             <li key={topic.id || j} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm text-gray-700">
                               <span className="min-w-0">
@@ -364,7 +485,7 @@ export function CourseContent() {
                         })}
                       </ul>
                     )}
-                    {price > 0 && !paymentUnlocked ? (
+                    {!isFreeCourse && !paymentUnlocked ? (
                       <p className="mt-2 text-xs text-amber-800">
                         Some lessons stay locked until your enrollment is linked to a successful payment (order on file).
                       </p>
@@ -450,6 +571,7 @@ export function CourseContent() {
             {enrollment?.pythonQuizAvailable && courseId && (
               <PythonCourseQuizBlock
                 courseId={courseId}
+                courseSlug={course.slug}
                 passed={!!enrollment.pythonQuizPassed}
                 score={enrollment.pythonQuizScore}
                 onUpdate={refreshEnrollment}
@@ -457,6 +579,10 @@ export function CourseContent() {
                 certificateNumber={enrollment.certificateNumber}
                 certBusy={certBusy}
                 certMessage={certMessage}
+                certMessageTone={certMessageTone}
+                certificateDownloadsRemaining={
+                  enrollment.certificatePdfDownloadsRemaining ?? CERTIFICATE_PDF_DOWNLOAD_LIMIT
+                }
                 onGenerateCertificate={
                   enrollment.pythonQuizPassed ? handleGenerateCertificate : undefined
                 }
@@ -466,8 +592,8 @@ export function CourseContent() {
               !enrollment?.pythonQuizAvailable && <p className="text-slate-gray">No quizzes yet.</p>
             ) : (
               <div className="space-y-3">
-                {enrollment?.pythonQuizAvailable && (
-                  <p className="text-sm font-medium text-brand-navy">Other course quizzes</p>
+                {enrollment?.pythonQuizAvailable && course.quizzes && course.quizzes.length > 0 && (
+                  <p className="text-sm font-medium text-brand-navy">Additional quizzes</p>
                 )}
                 {course.quizzes.map((q, i) => (
                   <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
@@ -506,14 +632,14 @@ export function CourseContent() {
               <>
                 {!enrollment.pythonQuizPassed && (
                   <p className="font-medium text-gray-700">
-                    Pass the <strong>Python fundamentals quiz</strong> in the <strong>Quizzes</strong> tab, then use{' '}
-                    <strong>Generate certificate</strong> there to download your PDF.
+                    Pass the <strong>{completionQuizCopy(course.slug).title}</strong> in the <strong>Quizzes</strong> tab, then use{' '}
+                    <strong>Generate certificate</strong> there to get your PDF (and email copy when configured).
                   </p>
                 )}
                 {enrollment.pythonQuizPassed && (
                   <p className="font-medium text-gray-700">
                     You have passed the quiz. Open the <strong>Quizzes</strong> tab and use <strong>Generate certificate (PDF)</strong>{' '}
-                    below your pass message to download (and trigger the certificate email on first issue).
+                    below your pass message to download and email your certificate.
                   </p>
                 )}
               </>
