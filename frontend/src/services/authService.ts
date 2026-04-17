@@ -20,6 +20,11 @@ export const authService = {
     const { data } = await api.post('/api/auth/login', { email, password })
     return data
   },
+  /** Super-admin panel only; backend enforces allowed email + admin role + password. */
+  async loginAdmin(email: string, password: string) {
+    const { data } = await api.post('/api/auth/admin/login', { email, password })
+    return data as { token: string; user: Record<string, unknown> }
+  },
   async register(body: Record<string, unknown>) {
     const { data } = await api.post('/api/auth/register', body)
     return data as {

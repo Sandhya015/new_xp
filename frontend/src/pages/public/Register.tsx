@@ -178,7 +178,7 @@ const emptyStudentForm = (): StudentFormState => ({
 
 export function Register() {
   const navigate = useNavigate()
-  const { setUser, setToken } = useAuthStore()
+  const setSession = useAuthStore((s) => s.setSession)
   const [tab, setTab] = useState<Tab>('student')
   const [authError, setAuthError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -362,8 +362,7 @@ export function Register() {
     setOtpSubmitting(true)
     try {
       const res = await authService.verifyRegisterOtp(verificationId, otp)
-      setToken(res.token)
-      setUser(res.user as AuthUser)
+      setSession(res.user as AuthUser, res.token)
       resetOtpUi()
       setSuccessToastText('Account created successfully! Welcome to XpertIntern.')
       setShowSuccessToast(true)

@@ -64,11 +64,18 @@ def _sum_order_amounts(orders_coll, match: dict) -> float:
     return float(rows[0]["total"])
 
 
+def _admin_panel_allowed_email() -> str:
+    return (current_app.config.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
+
+
 def _admin_required():
-    """After @jwt_required(), check role is admin. Returns (error_response, status) or None."""
+    """After @jwt_required(): admin role, admin-portal token, and allowed email only."""
     claims = get_jwt()
-    if claims.get("role") != "admin":
-        return jsonify({"error": "Admin access required"}), 403
+    if claims.get("role") != "admin" or claims.get("admin_portal") is not True:
+        return jsonify({"error": "Admin access required", "code": "admin_portal_required"}), 403
+    email = (claims.get("email") or "").strip().lower()
+    if email != _admin_panel_allowed_email():
+        return jsonify({"error": "Admin panel access denied"}), 403
     return None
 
 

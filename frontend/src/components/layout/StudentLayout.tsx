@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useAuthStore } from '@/store/authStore'
+import { isCompanyUser, isStudentUser, isSuperAdminPanelUser } from '@/constants/adminAccess'
 import {
   Home,
   BookOpen,
@@ -72,6 +74,7 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
 
 export function StudentLayout() {
   const { user, logout } = useAuth()
+  const token = useAuthStore((s) => s.token)
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -79,10 +82,34 @@ export function StudentLayout() {
   const path = location.pathname
   const breadcrumbs = getBreadcrumbs(path)
 
+  useEffect(() => {
+    if (!token || !user) {
+      navigate('/login', { replace: true })
+      return
+    }
+    if (isSuperAdminPanelUser(user)) {
+      navigate('/admin', { replace: true })
+      return
+    }
+    if (isCompanyUser(user)) {
+      navigate('/company', { replace: true })
+      return
+    }
+    if (!isStudentUser(user)) {
+      navigate('/login', { replace: true })
+    }
+  }, [token, user, navigate])
+
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
     logout()
     navigate('/login')
+  }
+
+  const handleGoToPublicSite = () => {
+    closeSidebar()
+    logout()
+    navigate('/', { replace: true })
   }
 
   const closeSidebar = () => setSidebarOpen(false)
@@ -172,14 +199,14 @@ export function StudentLayout() {
           </ul>
         </nav>
         <div className="border-t border-white/10 p-4 space-y-0.5">
-          <Link
-            to="/"
-            onClick={closeSidebar}
-            className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-white/90 hover:bg-white/10 rounded-lg transition-colors"
+          <button
+            type="button"
+            onClick={handleGoToPublicSite}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-white/90 hover:bg-white/10 rounded-lg transition-colors"
           >
             <Globe className="h-4 w-4 shrink-0" />
             Public Site
-          </Link>
+          </button>
           <button
             type="button"
             onClick={() => setLogoutConfirmOpen(true)}

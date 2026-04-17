@@ -3,7 +3,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { authService } from '@/services/authService'
-import { useAuthStore } from '@/store/authStore'
+import { useAuthStore, type User } from '@/store/authStore'
 
 type LoginForm = { email: string; password: string }
 type Tab = 'student' | 'company'
@@ -15,7 +15,7 @@ export function Login() {
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { setUser, setToken } = useAuthStore()
+  const setSession = useAuthStore((s) => s.setSession)
 
   const safeRedirect = (path: string | null) => {
     if (!path || !path.startsWith('/') || path.startsWith('//')) return null
@@ -29,6 +29,11 @@ export function Login() {
     try {
       const res = await authService.login(data.email, data.password)
       const role = res.user?.role
+      if (role === 'admin') {
+        setError('Admin accounts must use the Admin portal: /admin/login')
+        setSubmitting(false)
+        return
+      }
       // Only allow login in the matching form: student tab → student role, company tab → company role
       if (tab === 'student') {
         if (role !== 'student') {
@@ -36,8 +41,7 @@ export function Login() {
           setSubmitting(false)
           return
         }
-        setToken(res.token)
-        setUser(res.user)
+        setSession(res.user as User, res.token)
         const r = safeRedirect(searchParams.get('redirect'))
         navigate(r || '/dashboard', { replace: true })
       } else {
@@ -46,8 +50,7 @@ export function Login() {
           setSubmitting(false)
           return
         }
-        setToken(res.token)
-        setUser(res.user)
+        setSession(res.user as User, res.token)
         navigate('/company', { replace: true })
       }
     } catch (err: unknown) {

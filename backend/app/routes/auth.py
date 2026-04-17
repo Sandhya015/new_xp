@@ -761,6 +761,12 @@ def login():
         if not user or not _check_password(password, user.get("password", "")):
             return jsonify({"error": "Invalid email or password"}), 401
 
+        if user.get("role") == "admin":
+            return jsonify({
+                "error": "Admin accounts must sign in via the Admin portal.",
+                "code": "admin_use_admin_portal",
+            }), 403
+
         if user.get("role") == "company":
             st = user.get("status")
             if st == "pending":
@@ -784,6 +790,50 @@ def login():
         })
     except Exception as e:
         current_app.logger.exception("Login error")
+        err_msg = "Login failed. Please try again."
+        if current_app.config.get("DEBUG"):
+            err_msg = str(e)
+        return jsonify({"error": err_msg}), 500
+
+
+@auth_bp.route("/admin/login", methods=["POST"])
+def admin_login():
+    """Dedicated admin panel sign-in: only ADMIN_PANEL_ALLOWED_EMAIL, role admin, correct password."""
+    try:
+        db = get_db()
+        if db is None:
+            return jsonify({"error": "Database not configured"}), 503
+
+        data = request.get_json() or {}
+        email = (data.get("email") or "").strip().lower()
+        password = data.get("password") or ""
+        allowed = (current_app.config.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
+
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
+
+        if email != allowed:
+            return jsonify({"error": "Invalid admin credentials."}), 401
+
+        users = get_users_collection()
+        user = users.find_one({"email": email})
+        if not user or not _check_password(password, user.get("password", "")):
+            return jsonify({"error": "Invalid admin credentials."}), 401
+
+        if user.get("role") != "admin":
+            return jsonify({"error": "Invalid admin credentials."}), 401
+
+        token = create_access_token(
+            identity=str(user["_id"]),
+            additional_claims={
+                "email": user["email"],
+                "role": "admin",
+                "admin_portal": True,
+            },
+        )
+        return jsonify({"token": token, "user": _user_to_response(user)})
+    except Exception as e:
+        current_app.logger.exception("Admin login error")
         err_msg = "Login failed. Please try again."
         if current_app.config.get("DEBUG"):
             err_msg = str(e)
@@ -873,8 +923,8 @@ def refresh():
     """Issue a new access token (same identity)."""
     identity = get_jwt_identity()
     claims = get_jwt()
-    token = create_access_token(
-        identity=identity,
-        additional_claims={"email": claims.get("email"), "role": claims.get("role", "student")},
-    )
+    extra = {"email": claims.get("email"), "role": claims.get("role", "student")}
+    if claims.get("admin_portal") is True:
+        extra["admin_portal"] = True
+    token = create_access_token(identity=identity, additional_claims=extra)
     return jsonify({"token": token})

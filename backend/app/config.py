@@ -40,6 +40,8 @@ class Config:
     EMAIL_TRANSPORT = os.environ.get("EMAIL_TRANSPORT", "smtp").strip().lower()
     SES_FROM_EMAIL = os.environ.get("SES_FROM_EMAIL", "").strip()
     SES_REGION = os.environ.get("SES_REGION", "").strip()
+    # Only this email may use POST /api/auth/admin/login and receive admin_portal JWTs.
+    ADMIN_PANEL_ALLOWED_EMAIL = (os.environ.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
 
 
 class DevelopmentConfig(Config):

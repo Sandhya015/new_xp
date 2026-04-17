@@ -22,6 +22,8 @@ provider:
     MONGODB_URI: ${env:MONGODB_URI, ''}
     SECRET_KEY: ${env:SECRET_KEY, ''}
     JWT_SECRET_KEY: ${env:JWT_SECRET_KEY, ''}
+    # Must match the Mongo user email allowed to use /api/auth/admin/login (default super admin).
+    ADMIN_PANEL_ALLOWED_EMAIL: ${env:ADMIN_PANEL_ALLOWED_EMAIL, 'admin@xpertintern.com'}
     # Strip /dev (stage) from path so Flask sees /api/... not /dev/api/...
     API_GATEWAY_BASE_PATH: ${self:provider.stage}
     # Comma-separated origins; include your frontend URL for CORS

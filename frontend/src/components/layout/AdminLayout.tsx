@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useAuthStore } from '@/store/authStore'
+import { isSuperAdminPanelUser } from '@/constants/adminAccess'
 import {
   Home,
   BookOpen,
@@ -66,6 +68,9 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
 export function AdminLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const token = useAuthStore((s) => s.token)
+  const user = useAuthStore((s) => s.user)
+  const logout = useAuthStore((s) => s.logout)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -74,9 +79,22 @@ export function AdminLayout() {
   const breadcrumbs = getBreadcrumbs(path)
   const unreadNotifCount = 2
 
+  useEffect(() => {
+    if (!token || !user || !isSuperAdminPanelUser(user)) {
+      navigate('/admin/login', { replace: true })
+    }
+  }, [token, user, navigate])
+
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
+    logout()
     navigate('/admin/login')
+  }
+
+  const handleGoToPublicSite = () => {
+    closeSidebar()
+    logout()
+    navigate('/', { replace: true })
   }
 
   const closeSidebar = () => setSidebarOpen(false)
@@ -168,14 +186,14 @@ export function AdminLayout() {
           </ul>
         </nav>
         <div className="border-t border-white/10 p-4 space-y-0.5">
-          <Link
-            to="/"
-            onClick={closeSidebar}
-            className="flex items-center gap-3 px-4 py-2.5 text-base font-medium text-white/90 hover:bg-white/10 rounded-lg transition-colors"
+          <button
+            type="button"
+            onClick={handleGoToPublicSite}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-base font-medium text-white/90 hover:bg-white/10 rounded-lg transition-colors"
           >
             <Globe className="h-5 w-5 shrink-0" />
             Public Site
-          </Link>
+          </button>
           <button
             type="button"
             onClick={() => setLogoutConfirmOpen(true)}

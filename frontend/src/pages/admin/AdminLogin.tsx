@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Lock, Mail, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
-import { useAuthStore } from '@/store/authStore'
+import { useAuthStore, type User } from '@/store/authStore'
+import { isSuperAdminPanelUser } from '@/constants/adminAccess'
 
 export function AdminLogin() {
   const [email, setEmail] = useState('')
@@ -11,20 +12,20 @@ export function AdminLogin() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-  const { setToken, setUser } = useAuthStore()
+  const setSession = useAuthStore((s) => s.setSession)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const data = await authService.login(email, password)
-      if (data.user?.role !== 'admin') {
-        setError('Admin access only. Use the main site to sign in as student or company.')
+      const data = await authService.loginAdmin(email, password)
+      const user = data.user as unknown as User
+      if (!isSuperAdminPanelUser(user)) {
+        setError('This account is not authorized for the admin panel.')
         return
       }
-      setToken(data.token)
-      setUser(data.user)
+      setSession(user, data.token)
       navigate('/admin')
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err

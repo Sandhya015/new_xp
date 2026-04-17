@@ -2,11 +2,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
-import { useAuthStore } from '@/store/authStore'
+import { useAuthStore, type User } from '@/store/authStore'
 
 export function LoginPage() {
   const navigate = useNavigate()
-  const { setToken, setUser } = useAuthStore()
+  const setSession = useAuthStore((s) => s.setSession)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -19,9 +19,13 @@ export function LoginPage() {
     setLoading(true)
     try {
       const data = await authService.login(email, password)
-      setToken(data.token)
-      setUser(data.user)
-      if (data.user?.role === 'company') navigate('/company')
+      const role = data.user?.role
+      if (role === 'admin') {
+        setError('Admin accounts must use the Admin portal (/admin/login).')
+        return
+      }
+      setSession(data.user as User, data.token)
+      if (role === 'company') navigate('/company')
       else navigate('/dashboard')
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err

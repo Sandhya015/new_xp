@@ -22,6 +22,8 @@ interface AuthState {
   token: string | null
   setUser: (user: User | null) => void
   setToken: (token: string | null) => void
+  /** Atomically persist user + token (avoids half-written localStorage between two updates). */
+  setSession: (user: User | null, token: string | null) => void
   logout: () => void
 }
 
@@ -56,6 +58,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     saveStored(s.user, token)
     return { token }
   }),
+  setSession: (user, token) =>
+    set(() => {
+      saveStored(user, token)
+      return { user, token }
+    }),
   logout: () => {
     saveStored(null, null)
     set({ user: null, token: null })
