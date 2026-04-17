@@ -6,10 +6,12 @@ from datetime import datetime
 from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from app.course_features import course_has_python_quiz
+from app.cert_constants import CERTIFICATE_PDF_DOWNLOAD_LIMIT
+from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_enrollments_collection, get_courses_collection
 from app.notifications import schedule_enrollment_email
 from app.python_quiz import PASS_PERCENT, grade_quiz
+from app.enrollment_lookup import user_course_enrollment_filter
 
 enrollments_bp = Blueprint("enrollments", __name__)
 
@@ -17,9 +19,12 @@ enrollments_bp = Blueprint("enrollments", __name__)
 def _enrollment_to_item(e, course=None):
     pq = e.get("pythonQuiz") or {}
     cc = e.get("courseCertificate") or {}
+    raw_cid = e.get("courseId")
+    course_id_str = str(raw_cid) if raw_cid is not None else ""
+    pdf_n = int(cc.get("pdfDownloadCount", 0) or 0)
     out = {
         "id": str(e["_id"]),
-        "courseId": e.get("courseId", ""),
+        "courseId": course_id_str,
         "courseTitle": course.get("title", "") if course else "",
         "orderId": e.get("orderId"),
         "status": e.get("status", "active"),
@@ -31,7 +36,9 @@ def _enrollment_to_item(e, course=None):
         "pythonQuizScore": pq.get("scorePercent"),
         "certificateIssued": bool(cc.get("issuedAt")),
         "certificateNumber": cc.get("certNo") or None,
-        "pythonQuizAvailable": bool(course and course_has_python_quiz(course)),
+        "certificatePdfDownloadCount": pdf_n,
+        "certificatePdfDownloadsRemaining": max(0, CERTIFICATE_PDF_DOWNLOAD_LIMIT - pdf_n),
+        "pythonQuizAvailable": bool(course and course_has_completion_quiz(course)),
     }
     return out
 
@@ -79,7 +86,7 @@ def get_enrollment_by_course(course_id):
     user_id = get_jwt_identity()
     coll = get_enrollments_collection()
     courses_coll = get_courses_collection()
-    e = coll.find_one({"userId": user_id, "courseId": course_id})
+    e = coll.find_one(user_course_enrollment_filter(user_id, course_id))
     if not e:
         return jsonify({"error": "Not enrolled in this course"}), 404
     c = courses_coll.find_one({"_id": ObjectId(course_id)})
@@ -104,8 +111,8 @@ def create_enrollment():
     if not courses_coll.find_one({"_id": ObjectId(course_id), "active": True}):
         return jsonify({"error": "Course not found"}), 404
     enroll_coll = get_enrollments_collection()
-    if enroll_coll.find_one({"userId": user_id, "courseId": course_id}):
-        return jsonify({"error": "Already enrolled in this course"}), 409
+    if enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id)):
+        return jsonify({"error": "Already enrolled in this course", "code": "already_enrolled"}), 409
     doc = {
         "userId": user_id,
         "courseId": course_id,
@@ -131,12 +138,12 @@ def submit_python_quiz(course_id):
     user_id = get_jwt_identity()
     enroll_coll = get_enrollments_collection()
     courses_coll = get_courses_collection()
-    e = enroll_coll.find_one({"userId": user_id, "courseId": course_id})
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
     if not e:
         return jsonify({"error": "Not enrolled in this course"}), 404
     c = courses_coll.find_one({"_id": ObjectId(course_id)})
-    if not c or not course_has_python_quiz(c):
-        return jsonify({"error": "Python quiz is not available for this course"}), 404
+    if not c or not course_has_completion_quiz(c):
+        return jsonify({"error": "Completion quiz is not available for this course"}), 404
 
     pq = e.get("pythonQuiz") or {}
     if pq.get("passedAt"):
@@ -152,7 +159,7 @@ def submit_python_quiz(course_id):
     if not isinstance(answers, list):
         return jsonify({"error": "answers must be a list of selected option indices (same order as questions)"}), 400
 
-    passed, pct = grade_quiz(answers)
+    passed, pct = grade_quiz(answers, c)
     if not passed:
         return jsonify({
             "passed": False,

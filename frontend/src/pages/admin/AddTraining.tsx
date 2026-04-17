@@ -19,6 +19,7 @@ import {
   Library,
   ClipboardList,
   BookOpen,
+  Pencil,
 } from 'lucide-react'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
 import { adminService } from '@/services/adminService'
@@ -104,6 +105,50 @@ function recordingOptionsForLesson(mod: CurriculumModule, currentTopicId: string
     }
   }
   return opts
+}
+
+/** Lines shown under a Lecture topic after the lesson builder has saved data. */
+function buildLessonPreviewLines(topic: CurriculumTopic): string[] {
+  const lines: string[] = []
+  const rawHtml = (topic.lessonContent || '').trim()
+  const text = plainTextFromHtml(rawHtml).trim()
+  if (text) {
+    lines.push(text.length > 140 ? `${text.slice(0, 140)}…` : text)
+  } else if (rawHtml) {
+    const withoutEmptyShell = rawHtml
+      .replace(/<\/?p\b[^>]*>/gi, '')
+      .replace(/<br\s*\/?>/gi, '')
+      .replace(/\s/g, '')
+      .trim()
+    if (withoutEmptyShell.length > 0) {
+      lines.push('Lesson body: rich HTML saved (no plain-text excerpt from current markup)')
+    }
+  }
+  const mode = lessonVideoAttachModeFromTopic(topic)
+  if (mode === 'url' && topic.lessonVideoUrl?.trim()) {
+    const u = topic.lessonVideoUrl.trim()
+    lines.push(`Video URL: ${u.length > 72 ? `${u.slice(0, 72)}…` : u}`)
+  }
+  if (mode === 'file' && topic.lessonVideoFile) {
+    lines.push(`Video file: ${topic.lessonVideoFile.name}`)
+  }
+  if (mode === 'recording' && topic.lessonVideoRecordingRef) {
+    lines.push(
+      topic.lessonVideoRecordingRef === '__module__'
+        ? 'Recording: linked to module recording'
+        : 'Recording: linked to another recording topic',
+    )
+  }
+  if (topic.lessonFeaturedImageFile) {
+    lines.push(`Featured image: ${topic.lessonFeaturedImageFile.name}`)
+  }
+  if (topic.lessonExerciseFile) {
+    lines.push(`Exercise / attachment: ${topic.lessonExerciseFile.name}`)
+  }
+  if (topic.lessonPreviewEnabled) {
+    lines.push('Learner preview: enabled')
+  }
+  return lines
 }
 
 const CATEGORIES = ['Technical', 'Non-Technical']
@@ -343,7 +388,8 @@ export function AddTraining() {
       title: basic.title.trim(),
       slug: basic.slug.trim() || undefined,
       description: metaDescription,
-      shortDescription: basic.shortDesc.trim(),
+      /** Catalog / cards expect plain text; short summary is authored in rich text but stored without tags. */
+      shortDescription: plainShort,
       fullDescription: basic.fullDesc.trim(),
       category: basic.category,
       universities: basic.universities,
@@ -1087,48 +1133,141 @@ export function AddTraining() {
                                 </div>
                                 <div className="mt-3 space-y-3">
                                   {topic.type === 'Lecture' ? (
-                                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2.5">
-                                      <div className="min-w-0">
-                                        <p className="text-sm font-medium text-brand-navy">Lesson content</p>
-                                        <p className="text-xs text-gray-600">
-                                          Write the full lesson in the editor; the summary field above is the short line in the curriculum list.
-                                        </p>
+                                    <>
+                                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2.5">
+                                        <div className="min-w-0">
+                                          <p className="text-sm font-medium text-brand-navy">Lesson content</p>
+                                          <p className="text-xs text-gray-600">
+                                            Write the full lesson in the editor; the summary field above is the short line in the curriculum list.
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setQuizEditor(null)
+                                            setLessonEditor({ moduleId: mod.id, topicId: topic.id })
+                                          }}
+                                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand-accent bg-white px-3 py-2 text-xs font-semibold text-brand-accent shadow-sm hover:bg-blue-50"
+                                        >
+                                          <BookOpen className="h-3.5 w-3.5" />
+                                          Add / edit lesson
+                                        </button>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setQuizEditor(null)
-                                          setLessonEditor({ moduleId: mod.id, topicId: topic.id })
-                                        }}
-                                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand-accent bg-white px-3 py-2 text-xs font-semibold text-brand-accent shadow-sm hover:bg-blue-50"
-                                      >
-                                        <BookOpen className="h-3.5 w-3.5" />
-                                        Open lesson builder
-                                      </button>
-                                    </div>
+                                      {buildLessonPreviewLines(topic).length > 0 ? (
+                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2.5">
+                                          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-900">
+                                            Added to this topic (preview)
+                                          </p>
+                                          <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-relaxed text-emerald-950">
+                                            {buildLessonPreviewLines(topic).map((line, li) => (
+                                              <li key={li}>{line}</li>
+                                            ))}
+                                          </ul>
+                                          <div className="mt-2 flex flex-wrap gap-2 border-t border-emerald-200/60 pt-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setQuizEditor(null)
+                                                setLessonEditor({ moduleId: mod.id, topicId: topic.id })
+                                              }}
+                                              className="inline-flex items-center gap-1 rounded-md border border-emerald-700/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100"
+                                            >
+                                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                              Edit lesson
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                                          <p className="text-xs text-slate-600">
+                                            Nothing saved yet. Use <strong>Save</strong> in the lesson window to store content, then you&apos;ll see it listed here.
+                                          </p>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setQuizEditor(null)
+                                              setLessonEditor({ moduleId: mod.id, topicId: topic.id })
+                                            }}
+                                            className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                            Open lesson builder
+                                          </button>
+                                        </div>
+                                      )}
+                                    </>
                                   ) : null}
                                   {topic.type === 'Quiz' ? (
-                                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-2.5">
-                                      <div className="min-w-0">
-                                        <p className="text-sm font-medium text-brand-navy">Quiz questions</p>
-                                        <p className="text-xs text-gray-600">
-                                          {(topic.quizQuestions?.length ?? 0) === 0
-                                            ? 'No questions yet.'
-                                            : `${topic.quizQuestions?.length} question(s); each can mark one correct option.`}
-                                        </p>
+                                    <>
+                                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-2.5">
+                                        <div className="min-w-0">
+                                          <p className="text-sm font-medium text-brand-navy">Quiz questions</p>
+                                          <p className="text-xs text-gray-600">
+                                            {(topic.quizQuestions?.length ?? 0) === 0
+                                              ? 'No questions yet.'
+                                              : `${topic.quizQuestions?.length} question(s); each can mark one correct option.`}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setLessonEditor(null)
+                                            setQuizEditor({ moduleId: mod.id, topicId: topic.id })
+                                          }}
+                                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-500/40 bg-white px-3 py-2 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-50"
+                                        >
+                                          <ClipboardList className="h-3.5 w-3.5" />
+                                          Add / edit quiz
+                                        </button>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setLessonEditor(null)
-                                          setQuizEditor({ moduleId: mod.id, topicId: topic.id })
-                                        }}
-                                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-500/40 bg-white px-3 py-2 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-50"
-                                      >
-                                        <ClipboardList className="h-3.5 w-3.5" />
-                                        Open quiz builder
-                                      </button>
-                                    </div>
+                                      {(topic.quizQuestions?.length ?? 0) > 0 ? (
+                                        <div className="rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2.5">
+                                          <p className="text-xs font-semibold uppercase tracking-wide text-violet-900">
+                                            Questions in this quiz (preview)
+                                          </p>
+                                          <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-violet-950">
+                                            {topic.quizQuestions!.map((q, qi) => (
+                                              <li key={q.id || qi}>
+                                                {(q.title || '').trim() || `Question ${qi + 1}`}
+                                                {typeof q.correctOptionIndex === 'number' && q.options?.length
+                                                  ? ` · ${q.options.length} options`
+                                                  : ''}
+                                              </li>
+                                            ))}
+                                          </ol>
+                                          <div className="mt-2 flex flex-wrap gap-2 border-t border-violet-200/60 pt-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setLessonEditor(null)
+                                                setQuizEditor({ moduleId: mod.id, topicId: topic.id })
+                                              }}
+                                              className="inline-flex items-center gap-1 rounded-md border border-violet-700/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100"
+                                            >
+                                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                              Edit quiz
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                                          <p className="text-xs text-slate-600">
+                                            No questions saved yet. Add questions in the quiz window and click <strong>Save</strong> to list them here.
+                                          </p>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setLessonEditor(null)
+                                              setQuizEditor({ moduleId: mod.id, topicId: topic.id })
+                                            }}
+                                            className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                            Open quiz builder
+                                          </button>
+                                        </div>
+                                      )}
+                                    </>
                                   ) : null}
                                 </div>
                                 {topic.type === 'Recording' && (

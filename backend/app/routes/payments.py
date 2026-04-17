@@ -14,6 +14,7 @@ from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.db import get_db, get_orders_collection, get_courses_collection, get_enrollments_collection
+from app.enrollment_lookup import user_course_enrollment_filter
 from app.notifications import schedule_payment_success_email
 
 payments_bp = Blueprint("payments", __name__)
@@ -217,7 +218,7 @@ def verify():
     enrollment_created = False
     if course_id and ObjectId.is_valid(str(course_id)):
         enroll = get_enrollments_collection()
-        if not enroll.find_one({"userId": user_id, "courseId": str(course_id)}):
+        if not enroll.find_one(user_course_enrollment_filter(user_id, str(course_id))):
             enroll.insert_one({
                 "userId": user_id,
                 "courseId": str(course_id),

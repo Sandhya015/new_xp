@@ -7,6 +7,7 @@ import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { useAuth } from '@/hooks/useAuth'
 import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
+import { courseListingBlurb } from '@/utils/sanitizeHtml'
 
 type Mode = 'Online' | 'Offline' | 'Hybrid'
 
@@ -29,6 +30,7 @@ function courseFromApi(
     id: string
     title: string
     description: string
+    shortDescription?: string
     category: string
     duration: string
     mode: string
@@ -42,7 +44,7 @@ function courseFromApi(
   return {
     id: c.id,
     title: c.title,
-    description: c.description || '',
+    description: courseListingBlurb(c.shortDescription, c.description),
     category: isTech ? 'technical' : 'non-technical',
     duration: c.duration || '—',
     mode,
@@ -111,6 +113,7 @@ export function StudentTraining() {
           id: string
           title: string
           description: string
+          shortDescription?: string
           category: string
           duration: string
           mode: string

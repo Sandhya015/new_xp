@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
+import { courseListingBlurb } from '@/utils/sanitizeHtml'
 
 const BRANCHES = [
   'Computer Science',
@@ -97,7 +98,7 @@ function courseFromApi(
 ): Course {
   const isTech = (c.category || 'technical') === 'technical'
   const mode: Mode = ['Online', 'Offline', 'Hybrid'].includes(c.mode) ? c.mode as Mode : 'Online'
-  const blurb = (c.shortDescription || c.description || '').trim()
+  const blurb = courseListingBlurb(c.shortDescription, c.description)
   return {
     id: c.id,
     title: c.title,

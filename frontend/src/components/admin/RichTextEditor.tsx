@@ -1,8 +1,6 @@
-import { useCallback, useEffect } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Underline from '@tiptap/extension-underline'
-import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import {
   Bold,
@@ -15,6 +13,11 @@ import {
   Undo,
   Redo,
 } from 'lucide-react'
+
+export type RichTextEditorHandle = {
+  /** Latest document HTML from TipTap (use on Save so the last keystroke is never dropped). */
+  getHtml: () => string
+}
 
 type RichTextEditorProps = {
   id?: string
@@ -52,24 +55,28 @@ function ToolbarButton({
   )
 }
 
-export function RichTextEditor({
-  id,
-  label,
-  hint,
-  value,
-  onChange,
-  placeholder = 'Start typing…',
-  minHeightClass = 'min-h-[140px]',
-}: RichTextEditorProps) {
+export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor(
+  {
+    id,
+    label,
+    hint,
+    value,
+    onChange,
+    placeholder = 'Start typing…',
+    minHeightClass = 'min-h-[140px]',
+  },
+  ref,
+) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         heading: { levels: [2, 3] },
         bulletList: { HTMLAttributes: { class: 'list-disc pl-5 my-1' } },
         orderedList: { HTMLAttributes: { class: 'list-decimal pl-5 my-1' } },
+        // Starter Kit v3 already registers link + underline; configure them here only (no duplicates).
+        link: { openOnClick: false, autolink: true, linkOnPaste: true },
+        underline: {},
       }),
-      Underline,
-      Link.configure({ openOnClick: false, autolink: true, linkOnPaste: true }),
       Placeholder.configure({ placeholder }),
     ],
     content: value || '',
@@ -82,6 +89,14 @@ export function RichTextEditor({
       onChange(editor.getHTML())
     },
   })
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getHtml: () => (editor ? editor.getHTML() : ''),
+    }),
+    [editor],
+  )
 
   const setLink = useCallback(() => {
     if (!editor) return
@@ -177,4 +192,6 @@ export function RichTextEditor({
       </div>
     </div>
   )
-}
+})
+
+RichTextEditor.displayName = 'RichTextEditor'

@@ -2,8 +2,34 @@
  * Client-side HTML sanitizer for admin-authored rich text (no script/on*).
  * Keeps common TipTap tags only.
  */
+const MAX_HTML_LEN = 600_000
+
+/** TipTap StarterKit + common paste shapes; unknown tags are unwrapped (text kept). */
 const ALLOWED = new Set([
-  'P', 'BR', 'STRONG', 'EM', 'B', 'I', 'U', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'BLOCKQUOTE', 'A', 'SPAN', 'DIV',
+  'P',
+  'BR',
+  'STRONG',
+  'EM',
+  'B',
+  'I',
+  'U',
+  'S',
+  'STRIKE',
+  'DEL',
+  'UL',
+  'OL',
+  'LI',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'BLOCKQUOTE',
+  'A',
+  'SPAN',
+  'DIV',
+  'CODE',
+  'PRE',
+  'HR',
 ])
 
 const FORBIDDEN = new Set(['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'INPUT', 'BUTTON', 'STYLE', 'LINK', 'META', 'SVG', 'BASE'])
@@ -16,6 +42,16 @@ export function plainTextFromHtml(html: string): string {
   const d = document.createElement('div')
   d.innerHTML = html
   return (d.textContent || '').replace(/\s+/g, ' ').trim()
+}
+
+/** Public catalog / cards: prefer shortDescription, strip tags so `<p>…</p>` never shows as raw HTML. */
+export function courseListingBlurb(
+  shortDescription: string | undefined | null,
+  description: string | undefined | null,
+): string {
+  const raw = (shortDescription || description || '').trim()
+  if (!raw) return ''
+  return plainTextFromHtml(raw).replace(/\s+/g, ' ').trim()
 }
 
 function sanitizeNode(node: Node): void {
@@ -52,12 +88,17 @@ function sanitizeNode(node: Node): void {
 }
 
 export function sanitizeRichHtml(html: string): string {
-  if (!html || typeof window === 'undefined') return ''
+  if (!html) return ''
+  if (typeof window === 'undefined') {
+    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').slice(0, MAX_HTML_LEN)
+  }
   try {
     const doc = new DOMParser().parseFromString(html, 'text/html')
     sanitizeNode(doc.body)
-    return doc.body.innerHTML
+    let out = doc.body.innerHTML
+    if (out.length > MAX_HTML_LEN) out = out.slice(0, MAX_HTML_LEN)
+    return out
   } catch {
-    return ''
+    return html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').slice(0, MAX_HTML_LEN)
   }
 }

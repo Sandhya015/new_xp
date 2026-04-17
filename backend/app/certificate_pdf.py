@@ -27,33 +27,81 @@ def build_course_certificate_pdf(
     pdf.set_margins(0, 0, 0)
     pdf.add_page()
     w, h = pdf.w, pdf.h
+    m = 16.0
 
-    # Double border (navy + gold)
-    pdf.set_draw_color(26, 43, 77)
-    pdf.rect(12, 12, w - 24, h - 24, style="D")
+    # Header wash
+    pdf.set_fill_color(241, 245, 249)
+    pdf.rect(0, 0, w, 40, style="F")
+
+    # Outer + inner frame
     pdf.set_draw_color(201, 162, 39)
-    pdf.rect(14, 14, w - 28, h - 28, style="D")
+    pdf.set_line_width(0.55)
+    pdf.rect(m, m, w - 2 * m, h - 2 * m, style="D")
+    pdf.set_draw_color(26, 43, 77)
+    pdf.set_line_width(0.35)
+    pdf.rect(m + 2.5, m + 2.5, w - 2 * m - 5, h - 2 * m - 5, style="D")
 
-    def row(y: float, text: str, size: int, style: str = "", tr: int = 26, tg: int = 43, tb: int = 77) -> None:
-        pdf.set_xy(0, y)
-        pdf.set_font("helvetica", style, size)
-        pdf.set_text_color(tr, tg, tb)
-        pdf.cell(w, 10, text, align="C", new_x="LMARGIN", new_y="NEXT")
-
-    row(h - 45, "Certificate of Completion", 28, "B")
-    pdf.set_text_color(74, 85, 104)
-    row(pdf.get_y() + 2, "This is to certify that", 12, "")
+    # Brand block (top center)
+    pdf.set_y(11)
+    pdf.set_font("helvetica", "B", 12)
     pdf.set_text_color(26, 43, 77)
-    row(pdf.get_y() + 4, _pdf_text(student_name or "Student"), 22, "B")
-    pdf.set_text_color(74, 85, 104)
-    row(pdf.get_y() + 4, "has successfully completed the program", 12, "")
-    title = _pdf_text((course_title or "Course")[:80])
+    pdf.cell(w, 5, "XpertIntern", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("helvetica", "", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(w, 4, "Industry-focused training & internships", align="C", new_x="LMARGIN", new_y="NEXT")
+
+    # Title
+    pdf.set_y(48)
+    pdf.set_font("helvetica", "B", 26)
     pdf.set_text_color(26, 43, 77)
-    row(pdf.get_y() + 6, title, 16, "B")
-    pdf.set_text_color(113, 128, 150)
-    row(pdf.get_y() + 8, _pdf_text(f"Certificate ID: {cert_no}  |  Issued: {issue_date_str}"), 10, "")
-    pdf.set_text_color(45, 55, 72)
-    row(28, "XpertIntern - Industry-focused training & internships", 11, "I")
+    pdf.cell(w, 11, "Certificate of Completion", align="C", new_x="LMARGIN", new_y="NEXT")
 
-    return pdf.output()
+    pdf.set_y(64)
+    pdf.set_font("helvetica", "", 11)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(w, 6, "This is to certify that", align="C", new_x="LMARGIN", new_y="NEXT")
 
+    pdf.set_y(74)
+    pdf.set_font("helvetica", "B", 21)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(w, 10, _pdf_text(student_name or "Student"), align="C", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_y(88)
+    pdf.set_font("helvetica", "", 11)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(w, 6, "has successfully completed the program", align="C", new_x="LMARGIN", new_y="NEXT")
+
+    # Program name (may wrap)
+    pdf.set_y(98)
+    pdf.set_font("helvetica", "B", 15)
+    pdf.set_text_color(26, 43, 77)
+    title = _pdf_text((course_title or "Course").strip())[:220]
+    inner_w = w - 2 * m - 48
+    pdf.set_x(m + 24)
+    pdf.multi_cell(inner_w, 8, title, align="C")
+
+    y_after = pdf.get_y() + 8
+    pdf.set_y(max(y_after, h - 46))
+    pdf.set_font("helvetica", "", 9)
+    pdf.set_text_color(100, 116, 139)
+    foot = _pdf_text(f"Certificate ID: {cert_no}    |    Issued: {issue_date_str}")
+    pdf.cell(w, 6, foot, align="C", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font("helvetica", "I", 8)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(
+        w,
+        5,
+        "Presented in recognition of your achievement. Retain this document for your records.",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+
+    pdf.set_draw_color(201, 162, 39)
+    pdf.set_line_width(0.5)
+    y_line = h - 14
+    pdf.line(m + 28, y_line, w - m - 28, y_line)
+
+    out = pdf.output()
+    return bytes(out) if isinstance(out, bytearray) else out

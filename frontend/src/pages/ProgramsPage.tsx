@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { courseService } from '@/services/courseService'
+import { courseListingBlurb } from '@/utils/sanitizeHtml'
 
 type CourseItem = { id: string; title: string; duration: string; tag: string; description: string }
 
@@ -11,8 +12,23 @@ export function ProgramsPage() {
 
   useEffect(() => {
     let cancelled = false
-    courseService.list({ limit: 200 })
-      .then((res) => { if (!cancelled) setItems((res.items || []) as CourseItem[]) })
+    courseService
+      .list({ limit: 200 })
+      .then((res) => {
+        if (cancelled) return
+        const raw = (res.items || []) as Array<
+          CourseItem & { shortDescription?: string; description?: string }
+        >
+        setItems(
+          raw.map((c) => ({
+            id: c.id,
+            title: c.title,
+            duration: c.duration || '',
+            tag: c.tag || 'Course',
+            description: courseListingBlurb(c.shortDescription, c.description),
+          })),
+        )
+      })
       .catch(() => { if (!cancelled) setError('Failed to load courses') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }

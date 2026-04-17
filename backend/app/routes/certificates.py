@@ -8,8 +8,9 @@ from bson import ObjectId
 from flask import Blueprint, Response, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from app.cert_constants import CERTIFICATE_PDF_DOWNLOAD_LIMIT
 from app.certificate_pdf import build_course_certificate_pdf
-from app.course_features import course_has_python_quiz
+from app.course_features import course_has_completion_quiz
 from app.db import (
     get_db,
     get_certificates_collection,
@@ -18,6 +19,7 @@ from app.db import (
     get_users_collection,
 )
 from app.notifications import schedule_certificate_email
+from app.enrollment_lookup import user_course_enrollment_filter
 
 certificates_bp = Blueprint("certificates", __name__)
 
@@ -48,7 +50,7 @@ def verify(cert_no):
 @jwt_required()
 def generate_from_quiz():
     """
-    After passing the Python course quiz: PDF certificate + email (first issue only).
+    After passing the course completion quiz: PDF certificate in the response; same PDF is emailed when SMTP is configured (each successful generation, up to download limit).
     Body: { "courseId": "<mongo id>" }
     """
     db = get_db()
@@ -62,7 +64,7 @@ def generate_from_quiz():
         return jsonify({"error": "Valid courseId is required"}), 400
 
     enroll_coll = get_enrollments_collection()
-    e = enroll_coll.find_one({"userId": user_id, "courseId": course_id})
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
     if not e:
         return jsonify({"error": "Not enrolled in this course"}), 404
 
@@ -72,7 +74,7 @@ def generate_from_quiz():
 
     courses_coll = get_courses_collection()
     c = courses_coll.find_one({"_id": ObjectId(course_id)})
-    if not c or not course_has_python_quiz(c):
+    if not c or not course_has_completion_quiz(c):
         return jsonify({"error": "Certificate is not available for this course"}), 404
 
     users_coll = get_users_collection()
@@ -87,8 +89,16 @@ def generate_from_quiz():
     course_title = c.get("title") or "Course"
 
     cc = e.get("courseCertificate") or {}
+    download_count = int(cc.get("pdfDownloadCount", 0) or 0)
+    if download_count >= CERTIFICATE_PDF_DOWNLOAD_LIMIT:
+        return jsonify({
+            "error": (
+                "You have reached the maximum number of certificate generations (2). "
+                "Check your email for previously sent copies."
+            ),
+        }), 429
+
     cert_no = cc.get("certNo")
-    newly_issued = False
     issue_dt = datetime.utcnow()
 
     if not cert_no:
@@ -109,9 +119,18 @@ def generate_from_quiz():
         })
         enroll_coll.update_one(
             {"_id": e["_id"]},
-            {"$set": {"courseCertificate": {"certNo": cert_no, "issuedAt": issue_dt}}},
+            {
+                "$set": {
+                    "courseCertificate": {
+                        "certNo": cert_no,
+                        "issuedAt": issue_dt,
+                        "pdfDownloadCount": 0,
+                    },
+                    "status": "completed",
+                    "completedAt": issue_dt,
+                },
+            },
         )
-        newly_issued = True
     else:
         issued = cc.get("issuedAt")
         if hasattr(issued, "strftime"):
@@ -121,7 +140,7 @@ def generate_from_quiz():
     pdf_bytes = build_course_certificate_pdf(student_name, course_title, cert_no, date_str)
 
     to_email = (user.get("email") or "").strip()
-    if newly_issued and to_email:
+    if to_email:
         schedule_certificate_email(
             current_app._get_current_object(),
             student_name,
@@ -130,6 +149,11 @@ def generate_from_quiz():
             cert_no,
             pdf_bytes,
         )
+
+    enroll_coll.update_one(
+        {"_id": e["_id"]},
+        {"$inc": {"courseCertificate.pdfDownloadCount": 1}},
+    )
 
     safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
     return Response(

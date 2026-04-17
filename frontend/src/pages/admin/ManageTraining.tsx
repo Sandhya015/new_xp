@@ -20,6 +20,7 @@ import {
   Pencil,
 } from 'lucide-react'
 import { adminService } from '@/services/adminService'
+import { courseListingBlurb } from '@/utils/sanitizeHtml'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
@@ -161,6 +162,8 @@ export function ManageTraining() {
   if (loading) return <div className="p-6 text-slate-gray">Loading training…</div>
   if (!course) return <div className="p-6 text-red-600">Training not found.</div>
 
+  const overviewDescriptionBlurb = courseListingBlurb(course.shortDescription, course.description)
+
   return (
     <div className="space-y-6 w-full">
       <div className="flex items-center gap-4">
@@ -214,12 +217,12 @@ export function ManageTraining() {
               <dt className="text-slate-500">Universities</dt><dd>{course.universities || '—'}</dd>
               <dt className="text-slate-500">Status</dt><dd>{course.active ? 'Active' : 'Draft'}</dd>
             </dl>
-            {(course.shortDescription || course.description) && (
+            {overviewDescriptionBlurb ? (
               <div>
                 <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Description</h4>
-                <p className="text-sm text-gray-700">{course.shortDescription || course.description}</p>
+                <p className="text-sm text-gray-700">{overviewDescriptionBlurb}</p>
               </div>
-            )}
+            ) : null}
             <div className="flex flex-wrap gap-4 pt-2 border-t border-gray-200">
               <span className="text-sm text-slate-500">Batches: {(course.batches || []).length}</span>
               <span className="text-sm text-slate-500">Curriculum modules: {(course.curriculum || []).length}</span>

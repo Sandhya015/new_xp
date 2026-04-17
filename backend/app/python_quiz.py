@@ -1,4 +1,4 @@
-"""Static Python fundamentals quiz (questions only revealed via API without correct indices)."""
+"""Static completion quizzes (Python fundamentals + Java seed); questions only via API without correct indices."""
 
 from __future__ import annotations
 
@@ -38,12 +38,65 @@ PYTHON_QUIZ_QUESTIONS: list[dict[str, Any]] = [
     },
 ]
 
+JAVA_QUIZ_QUESTIONS: list[dict[str, Any]] = [
+    {
+        "id": "jv1",
+        "question": "Which keyword declares a class in Java?",
+        "options": ["struct", "class", "def", "object"],
+        "correctIndex": 1,
+    },
+    {
+        "id": "jv2",
+        "question": "What is the correct signature of the application entry point in Java?",
+        "options": [
+            "public static void main(String[] args)",
+            "public void main(String argv)",
+            "static void main()",
+            "void main(String[] args)",
+        ],
+        "correctIndex": 0,
+    },
+    {
+        "id": "jv3",
+        "question": "Which type is used to store a key-value mapping in Java?",
+        "options": ["ArrayList", "HashMap", "HashSet", "LinkedList"],
+        "correctIndex": 1,
+    },
+    {
+        "id": "jv4",
+        "question": "Which access modifier makes a member visible only within its own class?",
+        "options": ["public", "protected", "private", "package-private (no keyword)"],
+        "correctIndex": 2,
+    },
+    {
+        "id": "jv5",
+        "question": "What does `final` mean when applied to a method in Java?",
+        "options": [
+            "The method cannot be overridden in subclasses",
+            "The method must return void",
+            "The method is synchronized",
+            "The method is deprecated",
+        ],
+        "correctIndex": 0,
+    },
+]
+
 PASS_PERCENT = 60
 
+JAVA_SEED_SLUG = "demo-java-programming-seed"
 
-def quiz_questions_for_client() -> list[dict[str, Any]]:
+
+def _question_bank(course: dict | None) -> list[dict[str, Any]]:
+    slug = (course.get("slug") or "").strip().lower() if course else ""
+    if slug == JAVA_SEED_SLUG:
+        return JAVA_QUIZ_QUESTIONS
+    return PYTHON_QUIZ_QUESTIONS
+
+
+def quiz_questions_for_client(course: dict | None = None) -> list[dict[str, Any]]:
+    bank = _question_bank(course)
     out = []
-    for q in PYTHON_QUIZ_QUESTIONS:
+    for q in bank:
         out.append({
             "id": q["id"],
             "question": q["question"],
@@ -52,18 +105,19 @@ def quiz_questions_for_client() -> list[dict[str, Any]]:
     return out
 
 
-def grade_quiz(answer_indices: list[int]) -> tuple[bool, int]:
+def grade_quiz(answer_indices: list[int], course: dict | None = None) -> tuple[bool, int]:
     """
-    answer_indices: selected option index per question, same order as PYTHON_QUIZ_QUESTIONS.
+    answer_indices: selected option index per question, same order as the bank for this course.
     Returns (passed, score_percent).
     """
-    total = len(PYTHON_QUIZ_QUESTIONS)
+    bank = _question_bank(course)
+    total = len(bank)
     if total == 0:
         return True, 100
     if len(answer_indices) != total:
         return False, 0
     correct = 0
-    for i, q in enumerate(PYTHON_QUIZ_QUESTIONS):
+    for i, q in enumerate(bank):
         try:
             sel = int(answer_indices[i])
         except (TypeError, ValueError):

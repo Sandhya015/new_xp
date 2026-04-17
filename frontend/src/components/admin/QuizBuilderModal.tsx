@@ -370,7 +370,7 @@ export function QuizBuilderModal({
                     onClick={handleSave}
                     className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
                   >
-                    Ok
+                    Save
                   </button>
                 </div>
               </aside>
@@ -767,7 +767,7 @@ export function QuizBuilderModal({
                     onClick={handleSave}
                     className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
                   >
-                    Ok
+                    Save
                   </button>
                 </div>
               </div>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, BookOpen, Image as ImageIcon, Video, Link2, Disc3, Paperclip } from 'lucide-react'
-import { RichTextEditor } from '@/components/admin/RichTextEditor'
+import { RichTextEditor, type RichTextEditorHandle } from '@/components/admin/RichTextEditor'
 import { sanitizeRichHtml } from '@/utils/sanitizeHtml'
 
 export type LessonVideoAttachMode = 'none' | 'file' | 'url' | 'recording'
@@ -75,6 +75,7 @@ export function LessonBuilderModal({
   const [featuredFile, setFeaturedFile] = useState<File | null>(initialLessonFeaturedImageFile)
   const [videoFile, setVideoFile] = useState<File | null>(initialLessonVideoFile)
   const [exerciseFile, setExerciseFile] = useState<File | null>(initialLessonExerciseFile)
+  const contentEditorRef = useRef<RichTextEditorHandle>(null)
 
   useEffect(() => {
     if (!open) return
@@ -107,9 +108,10 @@ export function LessonBuilderModal({
   ])
 
   const handleSave = () => {
+    const bodyHtml = contentEditorRef.current?.getHtml() ?? content
     onSave({
       title: title.trim(),
-      lessonContent: sanitizeRichHtml(content),
+      lessonContent: sanitizeRichHtml(bodyHtml),
       lessonVideoAttachMode: videoMode,
       lessonVideoUrl: videoUrl.trim(),
       lessonVideoRecordingRef: recordingRef,
@@ -181,6 +183,7 @@ export function LessonBuilderModal({
                 />
               </div>
               <RichTextEditor
+                ref={contentEditorRef}
                 label="Content"
                 hint="Visual editor — headings, lists, links."
                 value={content}
@@ -202,7 +205,7 @@ export function LessonBuilderModal({
                 onClick={handleSave}
                 className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
               >
-                Ok
+                Save
               </button>
             </div>
           </div>
