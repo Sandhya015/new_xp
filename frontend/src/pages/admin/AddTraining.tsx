@@ -31,7 +31,10 @@ import {
   OTHER_COURSE_TOKEN,
   OTHER_UNIVERSITY_TOKEN,
 } from '@/constants/trainingBranchesAndSubjects'
-import { validateFeaturedTrainingImage } from '@/utils/featuredImageValidation'
+import {
+  prepareFeaturedTrainingImage,
+  validateFeaturedTrainingImageQuick,
+} from '@/utils/featuredImageValidation'
 import { adminService } from '@/services/adminService'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
 import {
@@ -860,10 +863,10 @@ export function AddTraining() {
     let featuredUrl = basic.featuredImageUrl.trim()
     let introUrl = basic.introVideoUrl.trim()
     if (basic.thumbnail) {
-      const vr = await validateFeaturedTrainingImage(basic.thumbnail)
-      if (!vr.ok) return { ok: false, message: vr.message }
+      const pr = await prepareFeaturedTrainingImage(basic.thumbnail)
+      if (!pr.ok) return { ok: false, message: pr.message }
       try {
-        featuredUrl = await adminService.uploadCourseMedia(basic.thumbnail, 'featured')
+        featuredUrl = await adminService.uploadCourseMedia(pr.file, 'featured')
       } catch {
         return { ok: false, message: 'Featured image upload failed.' }
       }
@@ -1347,7 +1350,7 @@ export function AddTraining() {
               <div>
                 <label className="block text-sm font-medium text-gray-700">Featured image</label>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  16:9 required (min 1280×720; 1920×1080 recommended). JPEG or PNG, max 2MB. Optional URL, or upload below.
+                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9 and optimize to about 1920×1080 (under 2MB). Optional URL, or upload below.
                 </p>
                 <input
                   type="url"
@@ -1364,13 +1367,12 @@ export function AddTraining() {
                     setBasic((b) => ({ ...b, thumbnail: f }))
                     setFeaturedImageError(null)
                     if (!f) return
-                    void validateFeaturedTrainingImage(f).then((r) => {
-                      if (!r.ok) {
-                        setFeaturedImageError(r.message)
-                        setBasic((b) => ({ ...b, thumbnail: null }))
-                        e.target.value = ''
-                      }
-                    })
+                    const r = validateFeaturedTrainingImageQuick(f)
+                    if (!r.ok) {
+                      setFeaturedImageError(r.message)
+                      setBasic((b) => ({ ...b, thumbnail: null }))
+                      e.target.value = ''
+                    }
                   }}
                   className="mt-2 w-full text-xs text-gray-600"
                 />

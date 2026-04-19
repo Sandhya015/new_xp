@@ -270,7 +270,7 @@ export function LessonBuilderModal({
                   >
                     Upload image
                   </label>
-                  <p className="mt-2 text-[11px] leading-snug text-gray-500">16:9 thumbnail (JPEG/PNG). Optional if you use a video poster later.</p>
+                  <p className="mt-2 text-[11px] leading-snug text-gray-500">JPEG/PNG thumbnail; any ratio is fine. Optional if you use a video poster later.</p>
                   {featuredFile ? (
                     <p className="mt-2 truncate text-xs font-medium text-gray-700" title={featuredFile.name}>
                       {featuredFile.name}
