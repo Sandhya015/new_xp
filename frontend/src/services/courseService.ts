@@ -44,6 +44,8 @@ export type CourseContent = {
   trainerName?: string
   /** Course slug from API (used for completion quiz variant). */
   slug?: string
+  /** Same field as marketing page: YouTube/Vimeo or direct video URL. */
+  introVideoUrl?: string
   whatYouWillLearn?: string[]
   curriculum?: unknown[]
   classLinks?: Array<{ title?: string; date?: string; time?: string; platform?: string; link?: string; batch?: string }>

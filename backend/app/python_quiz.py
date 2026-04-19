@@ -84,12 +84,68 @@ JAVA_QUIZ_QUESTIONS: list[dict[str, Any]] = [
 PASS_PERCENT = 60
 
 JAVA_SEED_SLUG = "demo-java-programming-seed"
+AIML_SEED_SLUG = "aiml-foundations-seed"
+
+AIML_QUIZ_QUESTIONS: list[dict[str, Any]] = [
+    {
+        "id": "aiml1",
+        "question": "In supervised learning, what are paired with each example during training?",
+        "options": ["Only labels", "Features and labels", "Only features", "Hyperparameters only"],
+        "correctIndex": 1,
+    },
+    {
+        "id": "aiml2",
+        "question": "Why do we commonly split data into training and validation sets?",
+        "options": [
+            "To delete half the data",
+            "To estimate how well the model generalizes to unseen data",
+            "To make training slower",
+            "To avoid using labels",
+        ],
+        "correctIndex": 1,
+    },
+    {
+        "id": "aiml3",
+        "question": "Overfitting usually means the model has…",
+        "options": [
+            "Memorized training patterns but poor performance on new data",
+            "Perfect performance everywhere",
+            "Too few parameters",
+            "No access to features",
+        ],
+        "correctIndex": 0,
+    },
+    {
+        "id": "aiml4",
+        "question": "What is the typical role of a non-linearity (activation) between layers in a neural network?",
+        "options": [
+            "To remove all gradients",
+            "To allow the model to learn non-linear decision boundaries",
+            "To convert labels into features",
+            "To shuffle the dataset",
+        ],
+        "correctIndex": 1,
+    },
+    {
+        "id": "aiml5",
+        "question": "In a binary classifier, high recall usually implies…",
+        "options": [
+            "We catch most of the positive cases (fewer false negatives)",
+            "We never make false positives",
+            "Accuracy is always 100%",
+            "The model ignores the negative class",
+        ],
+        "correctIndex": 0,
+    },
+]
 
 
 def _question_bank(course: dict | None) -> list[dict[str, Any]]:
     slug = (course.get("slug") or "").strip().lower() if course else ""
     if slug == JAVA_SEED_SLUG:
         return JAVA_QUIZ_QUESTIONS
+    if slug == AIML_SEED_SLUG:
+        return AIML_QUIZ_QUESTIONS
     return PYTHON_QUIZ_QUESTIONS
 
 

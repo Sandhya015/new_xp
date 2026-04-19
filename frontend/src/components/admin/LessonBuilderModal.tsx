@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, BookOpen, Image as ImageIcon, Video, Link2, Disc3, Paperclip } from 'lucide-react'
+import { X, BookOpen, Image as ImageIcon, Video, Link2, Paperclip } from 'lucide-react'
 import { RichTextEditor, type RichTextEditorHandle } from '@/components/admin/RichTextEditor'
 import { sanitizeRichHtml } from '@/utils/sanitizeHtml'
+import { adminService } from '@/services/adminService'
 
 export type LessonVideoAttachMode = 'none' | 'file' | 'url' | 'recording'
 
@@ -40,7 +41,7 @@ type LessonBuilderModalProps = {
   initialLessonExerciseFile: File | null
   recordingOptions: RecordingOption[]
   onClose: () => void
-  onSave: (draft: LessonTopicDraft) => void
+  onSave: (draft: LessonTopicDraft) => void | Promise<void>
 }
 
 export function LessonBuilderModal({
@@ -75,13 +76,17 @@ export function LessonBuilderModal({
   const [featuredFile, setFeaturedFile] = useState<File | null>(initialLessonFeaturedImageFile)
   const [videoFile, setVideoFile] = useState<File | null>(initialLessonVideoFile)
   const [exerciseFile, setExerciseFile] = useState<File | null>(initialLessonExerciseFile)
+  const [mediaUploading, setMediaUploading] = useState(false)
+  const [mediaError, setMediaError] = useState<string | null>(null)
   const contentEditorRef = useRef<RichTextEditorHandle>(null)
 
   useEffect(() => {
     if (!open) return
     setTitle(initialTitle)
     setContent(initialLessonContent)
-    setVideoMode(initialVideoMode)
+    const safeMode =
+      initialVideoMode === 'recording' && recordingOptions.length === 0 ? 'none' : initialVideoMode
+    setVideoMode(safeMode)
     setVideoUrl(initialLessonVideoUrl)
     setRecordingRef(initialLessonVideoRecordingRef)
     setVh(initialVideoHours)
@@ -91,6 +96,8 @@ export function LessonBuilderModal({
     setFeaturedFile(initialLessonFeaturedImageFile)
     setVideoFile(initialLessonVideoFile)
     setExerciseFile(initialLessonExerciseFile)
+    setMediaError(null)
+    setMediaUploading(false)
   }, [
     open,
     initialTitle,
@@ -105,24 +112,46 @@ export function LessonBuilderModal({
     initialLessonFeaturedImageFile,
     initialLessonVideoFile,
     initialLessonExerciseFile,
+    recordingOptions,
   ])
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    setMediaError(null)
     const bodyHtml = contentEditorRef.current?.getHtml() ?? content
-    onSave({
-      title: title.trim(),
-      lessonContent: sanitizeRichHtml(bodyHtml),
-      lessonVideoAttachMode: videoMode,
-      lessonVideoUrl: videoUrl.trim(),
-      lessonVideoRecordingRef: recordingRef,
-      videoHours: vh,
-      videoMinutes: vm,
-      videoSeconds: vs,
-      lessonPreviewEnabled: previewEnabled,
-      lessonFeaturedImageFile: featuredFile,
-      lessonVideoFile: videoFile,
-      lessonExerciseFile: exerciseFile,
-    })
+    let outMode = videoMode
+    let outUrl = videoUrl.trim()
+    let outFile = videoFile
+
+    if (videoMode === 'file' && videoFile) {
+      setMediaUploading(true)
+      try {
+        outUrl = await adminService.uploadCourseMedia(videoFile, 'lesson')
+        outMode = 'url'
+        outFile = null
+      } catch {
+        setMediaError('Video upload failed. Use a smaller file (see server max MB) or paste a YouTube URL instead.')
+        setMediaUploading(false)
+        return
+      }
+      setMediaUploading(false)
+    }
+
+    await Promise.resolve(
+      onSave({
+        title: title.trim(),
+        lessonContent: sanitizeRichHtml(bodyHtml),
+        lessonVideoAttachMode: outMode,
+        lessonVideoUrl: outUrl,
+        lessonVideoRecordingRef: recordingRef,
+        videoHours: vh,
+        videoMinutes: vm,
+        videoSeconds: vs,
+        lessonPreviewEnabled: previewEnabled,
+        lessonFeaturedImageFile: featuredFile,
+        lessonVideoFile: outFile,
+        lessonExerciseFile: exerciseFile,
+      }),
+    )
   }
 
   if (!open) return null
@@ -184,29 +213,38 @@ export function LessonBuilderModal({
               </div>
               <RichTextEditor
                 ref={contentEditorRef}
-                label="Content"
-                hint="Visual editor — headings, lists, links."
+                label="Lesson content / notes"
+                hint="Rich text shown to students — headings, lists, links."
                 value={content}
                 onChange={setContent}
                 placeholder="Write your lesson…"
                 minHeightClass="min-h-[min(42vh,360px)]"
               />
             </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-gray-100 bg-gray-50/80 px-4 py-3 sm:px-6">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
-              >
-                Save
-              </button>
+            <div className="flex shrink-0 flex-col gap-2 border-t border-gray-100 bg-gray-50/80 px-4 py-3 sm:px-6">
+              {mediaError ? (
+                <p className="text-center text-xs text-red-600 sm:text-right" role="alert">
+                  {mediaError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={mediaUploading}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={mediaUploading}
+                  className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+                >
+                  {mediaUploading ? 'Uploading video…' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -216,12 +254,12 @@ export function LessonBuilderModal({
               <section>
                 <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   <ImageIcon className="h-4 w-4" aria-hidden />
-                  Featured image
+                  Lesson thumbnail
                 </h3>
                 <div className="rounded-lg border-2 border-dashed border-gray-200 bg-white px-3 py-4 text-center">
                   <input
                     type="file"
-                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    accept="image/jpeg,image/png,.jpg,.jpeg,.png"
                     className="hidden"
                     id="lesson-featured-input"
                     onChange={(e) => setFeaturedFile(e.target.files?.[0] ?? null)}
@@ -232,7 +270,7 @@ export function LessonBuilderModal({
                   >
                     Upload image
                   </label>
-                  <p className="mt-2 text-[11px] leading-snug text-gray-500">JPEG, PNG, GIF, WebP · keep uploads reasonably small for learners.</p>
+                  <p className="mt-2 text-[11px] leading-snug text-gray-500">16:9 thumbnail (JPEG/PNG). Optional if you use a video poster later.</p>
                   {featuredFile ? (
                     <p className="mt-2 truncate text-xs font-medium text-gray-700" title={featuredFile.name}>
                       {featuredFile.name}
@@ -276,23 +314,7 @@ export function LessonBuilderModal({
                     }`}
                   >
                     <Link2 className="h-3.5 w-3.5" />
-                    Add from URL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVideoMode('recording')
-                      setVideoFile(null)
-                      setVideoUrl('')
-                    }}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
-                      videoMode === 'recording'
-                        ? 'border-brand-accent bg-blue-50 text-brand-navy'
-                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    <Disc3 className="h-3.5 w-3.5" />
-                    From recordings
+                    External URL
                   </button>
                 </div>
 
@@ -300,11 +322,13 @@ export function LessonBuilderModal({
                   <div className="mt-3">
                     <input
                       type="file"
-                      accept="video/mp4,video/webm,.mp4,.webm"
+                      accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.avi"
                       className="text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-gray-800 file:px-2 file:py-1.5 file:text-xs file:font-medium file:text-white"
                       onChange={(e) => setVideoFile(e.target.files?.[0] ?? null)}
                     />
-                    <p className="mt-1 text-[11px] text-gray-500">MP4, WebM recommended.</p>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      MP4, MOV, or AVI from your computer. The file uploads when you click <strong>Save</strong> below; the lesson then keeps a hosted URL (same end result as pasting an external video link). Large files may take a moment.
+                    </p>
                     {videoFile ? <p className="mt-1 truncate text-xs text-gray-700">{videoFile.name}</p> : null}
                   </div>
                 ) : null}
@@ -312,36 +336,14 @@ export function LessonBuilderModal({
                 {videoMode === 'url' ? (
                   <div className="mt-3">
                     <label className="text-xs text-gray-600">Video URL</label>
+                    <p className="mt-0.5 text-[11px] text-gray-500">Recommended: host on YouTube and paste the watch or youtu.be link.</p>
                     <input
                       type="url"
                       value={videoUrl}
                       onChange={(e) => setVideoUrl(e.target.value)}
-                      placeholder="https://…"
+                      placeholder="https://www.youtube.com/watch?v=…"
                       className="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
                     />
-                  </div>
-                ) : null}
-
-                {videoMode === 'recording' ? (
-                  <div className="mt-3">
-                    <label className="text-xs text-gray-600">Link to a recording</label>
-                    <select
-                      value={recordingRef ?? ''}
-                      onChange={(e) => setRecordingRef(e.target.value || null)}
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    >
-                      <option value="">Select recording…</option>
-                      {recordingOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    {recordingOptions.length === 0 ? (
-                      <p className="mt-2 text-[11px] text-amber-800">
-                        Add a module recording or a &quot;Recording&quot; topic with a file first, then pick it here.
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
 
@@ -385,7 +387,7 @@ export function LessonBuilderModal({
               <section>
                 <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   <Paperclip className="h-4 w-4" aria-hidden />
-                  Exercise files
+                  Attachment
                 </h3>
                 <input
                   type="file"

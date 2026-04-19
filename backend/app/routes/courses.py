@@ -1,10 +1,12 @@
 """
 Courses: list (paginated), get by id, get content for enrolled student. Public + admin CRUD.
 """
+import re
 from datetime import datetime
+from pathlib import Path
 
 from bson import ObjectId
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, abort, send_from_directory, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.course_features import course_has_completion_quiz
@@ -55,12 +57,29 @@ _LIST_FIELDS = {
     "createdAt": 1,
     "slug": 1,
     "featuredImageUrl": 1,
+    "trainingStartDate": 1,
+    "trainingEndDate": 1,
+    "trainingMaxSeats": 1,
 }
+
+_COURSE_MEDIA_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(jpe?g|png|mp4|mov|avi)$",
+    re.IGNORECASE,
+)
+_STUDY_MATERIAL_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(pdf|pptx?|docx?|xlsx?|zip|txt|csv)$",
+    re.IGNORECASE,
+)
 
 
 def _course_to_item(c):
     if not c:
         return None
+    tms = c.get("trainingMaxSeats")
+    try:
+        training_max_seats = int(tms) if tms is not None and str(tms).strip() != "" else None
+    except (TypeError, ValueError):
+        training_max_seats = None
     return {
         "id": str(c["_id"]),
         "title": c.get("title", ""),
@@ -75,6 +94,9 @@ def _course_to_item(c):
         "active": c.get("active", True),
         "slug": c.get("slug", "") or "",
         "featuredImageUrl": c.get("featuredImageUrl", "") or "",
+        "trainingStartDate": (c.get("trainingStartDate") or "") or "",
+        "trainingEndDate": (c.get("trainingEndDate") or "") or "",
+        "trainingMaxSeats": training_max_seats,
     }
 
 
@@ -115,9 +137,16 @@ def _sanitize_curriculum_public(curriculum):
 def _course_to_public_detail(c, enrollment_count=0):
     """Rich course payload for public marketing page (GET /api/courses/:id)."""
     base = _course_to_item(c) or {}
+    tms = c.get("trainingMaxSeats")
+    training_max_seats = None
+    if tms is not None and str(tms).strip() != "":
+        try:
+            training_max_seats = int(tms)
+        except (TypeError, ValueError):
+            training_max_seats = None
     base.update({
         "fullDescription": (c.get("fullDescription") or c.get("description", "") or ""),
-        "difficulty": c.get("difficulty") or "Intermediate",
+        "difficulty": c.get("difficulty") or "all",
         "introVideoUrl": (c.get("introVideoUrl") or "") or "",
         "originalPrice": int(c.get("originalPrice") or 0),
         "trainerName": (c.get("trainerName") or "") or "",
@@ -132,6 +161,10 @@ def _course_to_public_detail(c, enrollment_count=0):
         "streams": c.get("streams") if isinstance(c.get("streams"), list) else [],
         "curriculum": _sanitize_curriculum_public(c.get("curriculum") or []),
         "batches": c.get("batches") if isinstance(c.get("batches"), list) else [],
+        "subjects": c.get("subjects") if isinstance(c.get("subjects"), list) else [],
+        "trainingStartDate": (c.get("trainingStartDate") or "") or "",
+        "trainingEndDate": (c.get("trainingEndDate") or "") or "",
+        "trainingMaxSeats": training_max_seats,
         "enrollmentCount": int(enrollment_count or 0),
         "updatedAt": _iso_utc(c.get("updatedAt")) or _iso_utc(c.get("createdAt")),
     })
@@ -175,6 +208,31 @@ def list_courses():
     return jsonify({"items": items, "page": page, "limit": limit, "total": total})
 
 
+@courses_bp.route("/media/<kind>/<path:fname>", methods=["GET"])
+def serve_course_media(kind, fname):
+    """Public binary for uploaded featured images, videos, and study materials (admin upload)."""
+    if kind not in ("featured", "intro", "lesson", "material"):
+        abort(404)
+    if kind == "material":
+        if not _STUDY_MATERIAL_NAME_RE.match(fname or ""):
+            abort(404)
+    elif not _COURSE_MEDIA_NAME_RE.match(fname or ""):
+        abort(404)
+    root = Path(current_app.instance_path) / "course_uploads" / kind
+    try:
+        root = root.resolve()
+    except OSError:
+        abort(404)
+    path = (root / fname).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    return send_from_directory(str(root), fname, conditional=True)
+
+
 @courses_bp.route("/<course_id>", methods=["GET"])
 def get_course(course_id):
     db = get_db()
@@ -211,6 +269,7 @@ def _course_to_content(c):
         "tag": c.get("tag", ""),
         "trainerName": c.get("trainerName", ""),
         "slug": (c.get("slug") or "") or "",
+        "introVideoUrl": (c.get("introVideoUrl") or "") or "",
         "whatYouWillLearn": c.get("whatYouWillLearn") if isinstance(c.get("whatYouWillLearn"), list) else [],
         "curriculum": c.get("curriculum", []),
         "classLinks": c.get("classLinks", []),

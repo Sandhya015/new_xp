@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getApiBase } from '@/config/api'
+import { absoluteApiUrl, getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
@@ -172,6 +172,17 @@ export const adminService = {
   async createCourse(payload: Record<string, unknown>) {
     const { data } = await api.post('/api/admin/courses', payload)
     return data
+  },
+
+  /**
+   * Featured (≤2MB), intro/lesson video (MP4/MOV/AVI), or study material (PDF/PPT/DOC/XLS/ZIP/TXT/CSV; max MB from server).
+   */
+  async uploadCourseMedia(file: File, kind: 'featured' | 'intro' | 'lesson' | 'material'): Promise<string> {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('kind', kind)
+    const { data } = await api.post<{ url: string }>('/api/admin/uploads/course-media', fd)
+    return absoluteApiUrl(data.url)
   },
 
   async getCourseEnrollments(courseId: string) {

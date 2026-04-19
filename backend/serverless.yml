@@ -43,6 +43,10 @@ provider:
     EMAIL_TRANSPORT: ${env:EMAIL_TRANSPORT, 'smtp'}
     SES_FROM_EMAIL: ${env:SES_FROM_EMAIL, ''}
     SES_REGION: ${env:SES_REGION, 'ap-south-1'}
+    # Admin POST /api/admin/uploads/course-media (optional overrides; defaults 80 in app config)
+    MAX_COURSE_INTRO_UPLOAD_MB: ${env:MAX_COURSE_INTRO_UPLOAD_MB, '80'}
+    MAX_COURSE_LESSON_UPLOAD_MB: ${env:MAX_COURSE_LESSON_UPLOAD_MB, '80'}
+    MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB: ${env:MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB, '50'}
   # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
   # vpc: ...
 

@@ -40,7 +40,6 @@ import { AdminDashboard } from './pages/admin/AdminDashboard'
 import { CourseManager } from './pages/admin/CourseManager'
 import { AddTraining } from './pages/admin/AddTraining'
 import { ManageTraining } from './pages/admin/ManageTraining'
-import { EditTraining } from './pages/admin/EditTraining'
 import { StudentList } from './pages/admin/StudentList'
 import { StudentDetail } from './pages/admin/StudentDetail'
 import { CertificateUpload } from './pages/admin/CertificateUpload'
@@ -96,7 +95,7 @@ function App() {
         <Route path="courses" element={<CourseManager />} />
         <Route path="courses/new" element={<AddTraining />} />
         <Route path="courses/:id/manage" element={<ManageTraining />} />
-        <Route path="courses/:id/edit" element={<EditTraining />} />
+        <Route path="courses/:id/edit" element={<AddTraining />} />
         <Route path="students" element={<StudentList />} />
         <Route path="students/:id" element={<StudentDetail />} />
         <Route path="certificates" element={<CertificateUpload />} />

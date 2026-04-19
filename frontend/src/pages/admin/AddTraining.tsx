@@ -1,8 +1,8 @@
 /**
- * Admin — Add New Training (AD-WF-03). 3-step: Basics → Curriculum → Additional (batches + audience copy).
+ * Admin — Add New Training (AD-WF-03). 3-step: Basics → Curriculum → Additional.
  */
-import { useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Save,
@@ -11,41 +11,58 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  Video,
-  FileText,
-  Search,
   GripVertical,
   MoreHorizontal,
   Library,
   ClipboardList,
+  ClipboardCheck,
   BookOpen,
   Pencil,
 } from 'lucide-react'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
+import {
+  BA_SUBJECTS,
+  BBA_SUBJECTS,
+  BCA_SUBJECTS,
+  BCOM_SUBJECTS,
+  BRANCH_OPTIONS,
+  BSC_SUBJECTS,
+  OTHER_BRANCH_VALUE,
+  OTHER_COURSE_TOKEN,
+  OTHER_UNIVERSITY_TOKEN,
+} from '@/constants/trainingBranchesAndSubjects'
+import { validateFeaturedTrainingImage } from '@/utils/featuredImageValidation'
 import { adminService } from '@/services/adminService'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
-import { QuizBuilderModal, type QuizTopicDraft, type QuizSettingsDraft } from '@/components/admin/QuizBuilderModal'
+import {
+  QuizBuilderModal,
+  type QuizTopicDraft,
+  type QuizSettingsDraft,
+  defaultQuizSettings,
+} from '@/components/admin/QuizBuilderModal'
+import {
+  AssignmentBuilderModal,
+  defaultAssignmentDraft,
+  type AssignmentTopicDraft,
+} from '@/components/admin/AssignmentBuilderModal'
 import {
   LessonBuilderModal,
   type LessonTopicDraft,
   type LessonVideoAttachMode,
 } from '@/components/admin/LessonBuilderModal'
+import { migrateQuizQuestion, questionSummaryLine, type QuizQuestionDraft } from '@/components/admin/quizQuestionTypes'
 import { plainTextFromHtml } from '@/utils/sanitizeHtml'
 import { useAuthStore } from '@/store/authStore'
 
-/** Topic type buttons order (stored values unchanged). */
-const TOPIC_TYPE_ORDER = ['Lecture', 'Quiz', 'Reading', 'Recording', 'Lab', 'Assignment', 'Interview'] as const
+/** Topic type buttons order (stored values unchanged; backend accepts legacy types). */
+const TOPIC_TYPE_ORDER = ['Lecture', 'Quiz', 'Assignment'] as const
 type TopicType = (typeof TOPIC_TYPE_ORDER)[number]
 
 /** Button labels aligned with Tutor-style wording; values stored unchanged. */
 function topicTypeButtonLabel(t: TopicType): string {
   if (t === 'Lecture') return 'Lesson'
   if (t === 'Quiz') return 'Quiz'
-  if (t === 'Assignment') return 'Assignment'
-  if (t === 'Interview') return 'Interview'
-  if (t === 'Lab') return 'Lab'
-  if (t === 'Reading') return 'Reading'
-  return 'Recording'
+  return 'Assignment'
 }
 
 interface CurriculumTopic {
@@ -58,10 +75,12 @@ interface CurriculumTopic {
   recordingNote: string
   /** New topic card: title + summary only until confirmed (Tutor-style). */
   isCurriculumDraft?: boolean
-  /** Quiz-only: question text + MCQ options + correct index */
-  quizQuestions?: Array<{ id: string; title: string; options: string[]; correctOptionIndex?: number }>
+  /** Quiz-only: typed questions (MCQ, T/F, short answer, fill-in-blank). */
+  quizQuestions?: QuizQuestionDraft[]
   /** Quiz-only: Tutor-style timing, attempts, layout, etc. */
   quizSettings?: QuizSettingsDraft
+  /** Assignment-only: submission rules and deadlines. */
+  assignment?: AssignmentTopicDraft
   /** Lecture-only: rich HTML from lesson builder */
   lessonContent?: string
   lessonVideoAttachMode?: LessonVideoAttachMode
@@ -88,23 +107,7 @@ interface CurriculumModule {
 function lessonVideoAttachModeFromTopic(t: CurriculumTopic): LessonVideoAttachMode {
   if (t.lessonVideoFile) return 'file'
   if (t.lessonVideoUrl?.trim()) return 'url'
-  if (t.lessonVideoRecordingRef) return 'recording'
   return 'none'
-}
-
-function recordingOptionsForLesson(mod: CurriculumModule, currentTopicId: string) {
-  const opts: { value: string; label: string }[] = []
-  if (mod.recordingFile) {
-    opts.push({ value: '__module__', label: 'Module recording (file on this module)' })
-  }
-  for (const top of mod.topics) {
-    if (top.id === currentTopicId) continue
-    if (top.type !== 'Recording') continue
-    if (top.recordingFile || top.recordingNote.trim() || top.title.trim()) {
-      opts.push({ value: top.id, label: top.title.trim() || 'Recording topic' })
-    }
-  }
-  return opts
 }
 
 /** Lines shown under a Lecture topic after the lesson builder has saved data. */
@@ -132,13 +135,6 @@ function buildLessonPreviewLines(topic: CurriculumTopic): string[] {
   if (mode === 'file' && topic.lessonVideoFile) {
     lines.push(`Video file: ${topic.lessonVideoFile.name}`)
   }
-  if (mode === 'recording' && topic.lessonVideoRecordingRef) {
-    lines.push(
-      topic.lessonVideoRecordingRef === '__module__'
-        ? 'Recording: linked to module recording'
-        : 'Recording: linked to another recording topic',
-    )
-  }
   if (topic.lessonFeaturedImageFile) {
     lines.push(`Featured image: ${topic.lessonFeaturedImageFile.name}`)
   }
@@ -152,21 +148,105 @@ function buildLessonPreviewLines(topic: CurriculumTopic): string[] {
 }
 
 const CATEGORIES = ['Technical', 'Non-Technical']
-const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
-const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
+const COURSE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'B.Tech', label: 'B.Tech' },
+  { value: 'Diploma', label: 'Diploma' },
+  { value: 'BA', label: 'BA' },
+  { value: 'BSc', label: 'BSc' },
+  { value: 'BCom', label: 'BCom' },
+  { value: 'BBA', label: 'BBA' },
+  { value: 'BCA', label: 'BCA' },
+  { value: OTHER_COURSE_TOKEN, label: 'Other' },
+]
 const MODES = ['Online', 'Offline', 'Hybrid']
-const DIFFICULTIES = ['Beginner', 'Intermediate', 'Advanced'] as const
+const DIFFICULTY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All Levels' },
+  { value: 'Beginner', label: 'Beginner' },
+  { value: 'Intermediate', label: 'Intermediate' },
+  { value: 'Advanced', label: 'Advanced' },
+]
 
-const MARKETING_CATEGORIES = [
-  'Business',
-  'Design',
-  'Development',
-  'Featured',
-  'Health & Fitness',
-  'Technical',
-  'Career readiness',
-  'Soft skills',
-] as const
+type SubjectKey = 'BSc' | 'BCom' | 'BA' | 'BBA' | 'BCA'
+const EMPTY_SUBJECT_PICKS: Record<SubjectKey, string[]> = {
+  BSc: [],
+  BCom: [],
+  BA: [],
+  BBA: [],
+  BCA: [],
+}
+
+const SUBJECT_LIST_BY_KEY: Record<SubjectKey, readonly string[]> = {
+  BSc: BSC_SUBJECTS,
+  BCom: BCOM_SUBJECTS,
+  BA: BA_SUBJECTS,
+  BBA: BBA_SUBJECTS,
+  BCA: BCA_SUBJECTS,
+}
+
+function hasOnlyOtherCourse(courses: string[]): boolean {
+  return courses.length === 1 && courses[0] === OTHER_COURSE_TOKEN
+}
+
+function needsBranchSection(courses: string[]): boolean {
+  if (hasOnlyOtherCourse(courses)) return false
+  return courses.some((c) => c === 'B.Tech' || c === 'Diploma')
+}
+
+function subjectKeysForCourses(courses: string[]): SubjectKey[] {
+  const keys: SubjectKey[] = []
+  if (courses.includes('BSc')) keys.push('BSc')
+  if (courses.includes('BCom')) keys.push('BCom')
+  if (courses.includes('BA')) keys.push('BA')
+  if (courses.includes('BBA')) keys.push('BBA')
+  if (courses.includes('BCA')) keys.push('BCA')
+  return keys
+}
+
+function needsSubjectSection(courses: string[]): boolean {
+  if (hasOnlyOtherCourse(courses)) return false
+  return subjectKeysForCourses(courses).length > 0
+}
+
+function anySubjectOtherPicked(picks: Record<SubjectKey, string[]>): boolean {
+  return (['BSc', 'BCom', 'BA', 'BBA', 'BCA'] as SubjectKey[]).some((k) => (picks[k] || []).includes('Other'))
+}
+
+function resolveUniversitiesPayload(unis: string[], other: string): string[] {
+  const base = unis.filter((u) => u !== OTHER_UNIVERSITY_TOKEN)
+  if (unis.includes(OTHER_UNIVERSITY_TOKEN) && other.trim()) base.push(other.trim())
+  return base
+}
+
+function resolveCoursesPayload(courses: string[], other: string): string[] {
+  const base = courses.filter((c) => c !== OTHER_COURSE_TOKEN)
+  if (courses.includes(OTHER_COURSE_TOKEN) && other.trim()) base.push(other.trim())
+  return base
+}
+
+function resolveBranchesPayload(branches: string[], other: string): string[] {
+  const base = branches.filter((b) => b !== OTHER_BRANCH_VALUE)
+  if (branches.includes(OTHER_BRANCH_VALUE) && other.trim()) base.push(other.trim())
+  return base
+}
+
+function flattenSubjectsPayload(
+  courses: string[],
+  picks: Record<SubjectKey, string[]>,
+  otherText: string,
+): string[] {
+  const out: string[] = []
+  for (const k of subjectKeysForCourses(courses)) {
+    for (const s of picks[k] || []) {
+      if (s === 'Other') {
+        const t = otherText.trim()
+        if (t) out.push(t)
+      } else if (s) {
+        out.push(s)
+      }
+    }
+  }
+  return out
+}
 
 function toScheduledIso(dateStr: string, timeStr: string): string | undefined {
   const d0 = dateStr.trim()
@@ -189,10 +269,266 @@ function slugifyTitle(t: string) {
     .slice(0, 80)
 }
 
+const UNIVERSITY_NAME_SET = new Set<string>(UNIVERSITIES_LIST.map((u) => u.name as string))
+const COURSE_VALUE_SET = new Set<string>(COURSE_OPTIONS.map((o) => o.value))
+const BRANCH_VALUE_SET = new Set<string>(BRANCH_OPTIONS as unknown as string[])
+
+function splitUniversitiesFromApi(uv: unknown): { list: string[]; other: string } {
+  const parts =
+    typeof uv === 'string'
+      ? uv.split(',').map((s) => s.trim()).filter(Boolean)
+      : Array.isArray(uv)
+        ? uv.map(String).map((s) => s.trim()).filter(Boolean)
+        : []
+  const picked: string[] = []
+  const custom: string[] = []
+  for (const u of parts) {
+    if (UNIVERSITY_NAME_SET.has(u)) picked.push(u)
+    else custom.push(u)
+  }
+  if (custom.length) return { list: [...picked, OTHER_UNIVERSITY_TOKEN], other: custom.join(', ') }
+  return { list: picked, other: '' }
+}
+
+function splitCoursesFromApi(cs: unknown): { list: string[]; other: string } {
+  const raw = Array.isArray(cs) ? cs.map(String).map((s) => s.trim()).filter(Boolean) : []
+  const picked: string[] = []
+  const custom: string[] = []
+  for (const x of raw) {
+    if (COURSE_VALUE_SET.has(x)) picked.push(x)
+    else custom.push(x)
+  }
+  if (custom.length) return { list: [...picked, OTHER_COURSE_TOKEN], other: custom.join(', ') }
+  return { list: picked, other: '' }
+}
+
+function splitBranchesFromApi(br: unknown): { list: string[]; other: string } {
+  const raw = Array.isArray(br) ? br.map(String).map((s) => s.trim()).filter(Boolean) : []
+  const picked: string[] = []
+  const custom: string[] = []
+  for (const x of raw) {
+    if (BRANCH_VALUE_SET.has(x)) picked.push(x)
+    else custom.push(x)
+  }
+  if (custom.length) return { list: [...picked, OTHER_BRANCH_VALUE], other: custom.join(', ') }
+  return { list: picked, other: '' }
+}
+
+function modeArrayFromApi(m: unknown): string[] {
+  if (Array.isArray(m)) return m.map(String).map((s) => s.trim()).filter(Boolean)
+  if (typeof m === 'string' && m.trim()) return m.split(',').map((s) => s.trim()).filter(Boolean)
+  return ['Online']
+}
+
+function categoryLabelFromApi(cat: unknown): string {
+  const v = String(cat ?? '').toLowerCase()
+  if (v === 'non-technical' || v === 'non_technical' || v === 'nontechnical') return 'Non-Technical'
+  return 'Technical'
+}
+
+function scheduledPartsFromApi(iso: unknown): { enabled: boolean; date: string; time: string } {
+  if (!iso || typeof iso !== 'string' || !iso.trim()) return { enabled: false, date: '', time: '09:00' }
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return { enabled: false, date: '', time: '09:00' }
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const da = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return { enabled: true, date: `${y}-${mo}-${da}`, time: `${hh}:${mm}` }
+}
+
+function mapApiSubjectsToPicks(
+  courses: string[],
+  apiSubjects: unknown,
+): { subjectPicks: Record<SubjectKey, string[]>; subjectOther: string } {
+  const picks: Record<SubjectKey, string[]> = { ...EMPTY_SUBJECT_PICKS }
+  const subs = Array.isArray(apiSubjects) ? apiSubjects.map(String).map((s) => s.trim()).filter(Boolean) : []
+  const keys = subjectKeysForCourses(courses)
+  const unmatched: string[] = []
+  for (const s of subs) {
+    let placed = false
+    for (const k of keys) {
+      const list = SUBJECT_LIST_BY_KEY[k] as readonly string[]
+      if (list.includes(s)) {
+        if (!picks[k].includes(s)) picks[k] = [...picks[k], s]
+        placed = true
+        break
+      }
+    }
+    if (!placed) unmatched.push(s)
+  }
+  if (unmatched.length && keys.length > 0) {
+    const k0 = keys[0]
+    picks[k0] = [...(picks[k0] || []), 'Other']
+    return { subjectPicks: picks, subjectOther: unmatched.join(', ') }
+  }
+  return { subjectPicks: picks, subjectOther: '' }
+}
+
+function asTopicType(raw: unknown): TopicType {
+  const t = String(raw ?? 'Lecture')
+  if (t === 'Quiz' || t === 'Assignment' || t === 'Lecture') return t
+  return 'Lecture'
+}
+
+function mapApiTopicToCurriculumTopic(raw: unknown, topicIndex: number): CurriculumTopic {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const id = typeof r.id === 'string' && r.id.trim() ? r.id : `topic_${topicIndex}_${Date.now()}`
+  const type = asTopicType(r.type)
+  const base: CurriculumTopic = {
+    id,
+    title: String(r.title ?? ''),
+    type,
+    details: String(r.details ?? ''),
+    duration: String(r.duration ?? ''),
+    recordingFile: null,
+    recordingNote: String(r.recordingNote ?? ''),
+    isCurriculumDraft: false,
+  }
+  if (type === 'Lecture') {
+    const modeRaw = String(r.lessonVideoAttachMode || 'none')
+    const mode: LessonVideoAttachMode =
+      modeRaw === 'file' || modeRaw === 'url' || modeRaw === 'none' ? modeRaw : 'none'
+    return {
+      ...base,
+      lessonContent: String(r.lessonContent ?? ''),
+      lessonVideoAttachMode: mode,
+      lessonVideoUrl: String(r.lessonVideoUrl ?? ''),
+      lessonVideoRecordingRef:
+        r.lessonVideoRecordingRef != null && String(r.lessonVideoRecordingRef).trim()
+          ? String(r.lessonVideoRecordingRef)
+          : null,
+      lessonVideoHours: String(r.lessonVideoHours ?? '0'),
+      lessonVideoMinutes: String(r.lessonVideoMinutes ?? '0'),
+      lessonVideoSeconds: String(r.lessonVideoSeconds ?? '0'),
+      lessonPreviewEnabled: Boolean(r.lessonPreviewEnabled),
+      lessonFeaturedImageFile: null,
+      lessonVideoFile: null,
+      lessonExerciseFile: null,
+    }
+  }
+  if (type === 'Quiz') {
+    const qqRaw = Array.isArray(r.quizQuestions) ? r.quizQuestions : []
+    const quizQuestions = qqRaw.map((q, i) => migrateQuizQuestion(q, i))
+    const qs = {
+      ...defaultQuizSettings(),
+      ...(typeof r.quizSettings === 'object' && r.quizSettings !== null ? (r.quizSettings as object) : {}),
+    }
+    return { ...base, quizQuestions, quizSettings: qs as QuizSettingsDraft }
+  }
+  if (type === 'Assignment') {
+    const assignment = {
+      ...defaultAssignmentDraft(),
+      ...(typeof r.assignment === 'object' && r.assignment !== null ? (r.assignment as Partial<AssignmentTopicDraft>) : {}),
+    }
+    return { ...base, assignment }
+  }
+  return base
+}
+
+function mapApiCurriculumToState(raw: unknown): CurriculumModule[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((mod, mi) => {
+    const m = mod && typeof mod === 'object' ? (mod as Record<string, unknown>) : {}
+    const id = typeof m.id === 'string' && m.id.trim() ? m.id : `mod_${mi}`
+    const topicsRaw = Array.isArray(m.topics) ? m.topics : []
+    let order = typeof m.order === 'number' ? m.order : mi
+    if (typeof m.order === 'string' && (m.order as string).trim()) {
+      const n = parseInt(String(m.order), 10)
+      if (!Number.isNaN(n)) order = n
+    }
+    return {
+      id,
+      title: String(m.title ?? ''),
+      order,
+      recordingFile: null,
+      topics: topicsRaw.map((t, ti) => mapApiTopicToCurriculumTopic(t, ti)),
+    }
+  })
+}
+
+function listLines(arr: unknown): string {
+  if (!Array.isArray(arr)) return ''
+  return (arr as string[]).map((x) => String(x).trim()).filter(Boolean).join('\n')
+}
+
+function mapApiCourseToWizardState(c: Record<string, unknown>) {
+  const uni = splitUniversitiesFromApi(c.universities)
+  const crs = splitCoursesFromApi(c.courses)
+  const br = splitBranchesFromApi(c.streams)
+  const sp = mapApiSubjectsToPicks(crs.list, c.subjects)
+  const sched = scheduledPartsFromApi(c.scheduledPublishAt)
+  const price = typeof c.price === 'number' ? c.price : parseInt(String(c.price ?? '0'), 10) || 0
+  const orig = typeof c.originalPrice === 'number' ? c.originalPrice : parseInt(String(c.originalPrice ?? '0'), 10) || 0
+  const du = String(c.durationUnit ?? 'weeks').toLowerCase()
+  const durationUnit = du === 'hours' ? 'hours' : 'weeks'
+  const tms = c.trainingMaxSeats
+  const trainingMaxSeatsStr =
+    tms != null && String(tms).trim() !== '' && !Number.isNaN(Number(tms)) ? String(Number(tms)) : ''
+  const tags = Array.isArray(c.trainingTags) ? (c.trainingTags as string[]).join(', ') : ''
+  const durStr = String(c.duration ?? '').trim()
+  const durMatch = durStr.match(/^(\d+)/)
+  const durationFromDurationField = durMatch ? durMatch[1] : ''
+
+  const basic = {
+    title: String(c.title ?? ''),
+    slug: String(c.slug ?? ''),
+    category: categoryLabelFromApi(c.category),
+    universities: uni.list,
+    courses: crs.list,
+    branches: br.list,
+    mode: modeArrayFromApi(c.mode),
+    durationValue: String(c.durationValue ?? '').trim() || durationFromDurationField,
+    durationUnit,
+    fee: price === 0 ? '' : String(price),
+    originalPrice: orig > 0 ? String(orig) : '',
+    pricingFree: price === 0,
+    shortDesc: String(c.shortDescription ?? ''),
+    fullDesc: String(c.fullDescription ?? c.description ?? ''),
+    trainerName: String(c.trainerName ?? ''),
+    difficulty: String(c.difficulty ?? 'all') || 'all',
+    featuredImageUrl: String(c.featuredImageUrl ?? ''),
+    introVideoUrl: String(c.introVideoUrl ?? ''),
+    introVideoFile: null as File | null,
+    thumbnail: null as File | null,
+    listingVisibility: (String(c.listingVisibility ?? 'public').toLowerCase() === 'unlisted' ? 'unlisted' : 'public') as
+      | 'public'
+      | 'unlisted',
+    scheduleEnabled: sched.enabled,
+    scheduleDate: sched.date,
+    scheduleTime: sched.time,
+    trainingTags: tags,
+  }
+
+  const additional = {
+    whatYouWillLearn: listLines(c.whatYouWillLearn),
+    targetAudience: String(c.targetAudience ?? ''),
+    materialsIncluded: listLines(c.materialsIncluded),
+    instructions: String(c.instructions ?? ''),
+    trainingStartDate: String(c.trainingStartDate ?? ''),
+    trainingEndDate: String(c.trainingEndDate ?? ''),
+    trainingMaxSeats: trainingMaxSeatsStr,
+  }
+
+  return {
+    basic,
+    universityOther: uni.other,
+    courseOther: crs.other,
+    branchOther: br.other,
+    subjectOther: sp.subjectOther,
+    subjectPicks: sp.subjectPicks,
+    additional,
+    curriculum: mapApiCurriculumToState(c.curriculum),
+  }
+}
+
 export function AddTraining() {
   const navigate = useNavigate()
+  const { id: editCourseId } = useParams<{ id?: string }>()
   const authUser = useAuthStore((s) => s.user)
   const slugTouched = useRef(false)
+  const editDraftActiveRef = useRef(false)
   const [step, setStep] = useState(1)
   const [error, setError] = useState<string | null>(null)
   const [basic, setBasic] = useState({
@@ -201,7 +537,7 @@ export function AddTraining() {
     category: '',
     universities: [] as string[],
     courses: [] as string[],
-    streams: [] as string[],
+    branches: [] as string[],
     mode: [] as string[],
     durationValue: '',
     durationUnit: 'weeks',
@@ -211,42 +547,82 @@ export function AddTraining() {
     shortDesc: '',
     fullDesc: '',
     trainerName: '',
-    difficulty: 'Intermediate',
+    difficulty: 'all',
     featuredImageUrl: '',
     introVideoUrl: '',
+    /** Optional MP4/MOV/AVI; uploaded on save (same API as intro `kind=intro`). If set, overrides pasted URL for storage. */
+    introVideoFile: null as File | null,
     thumbnail: null as File | null,
     listingVisibility: 'public' as 'public' | 'unlisted',
     scheduleEnabled: false,
     scheduleDate: '',
     scheduleTime: '',
-    marketingCategories: [] as string[],
-    marketingCategoryFilter: '',
     trainingTags: '',
   })
+  const [universityOther, setUniversityOther] = useState('')
+  const [courseOther, setCourseOther] = useState('')
+  const [branchOther, setBranchOther] = useState('')
+  const [subjectOther, setSubjectOther] = useState('')
+  const [subjectPicks, setSubjectPicks] = useState<Record<SubjectKey, string[]>>(() => ({ ...EMPTY_SUBJECT_PICKS }))
+  const [featuredImageError, setFeaturedImageError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!anySubjectOtherPicked(subjectPicks)) setSubjectOther('')
+  }, [subjectPicks])
   const [additional, setAdditional] = useState({
     whatYouWillLearn: '',
     targetAudience: '',
     materialsIncluded: '',
     instructions: '',
+    trainingStartDate: '',
+    trainingEndDate: '',
+    trainingMaxSeats: '',
   })
-  const [batches, setBatches] = useState<Array<{ name: string; startDate: string; endDate: string; maxSeats: string; mode: string }>>([
-    { name: '', startDate: '', endDate: '', maxSeats: '', mode: 'Online' },
-  ])
   const [curriculum, setCurriculum] = useState<CurriculumModule[]>([])
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
   const [quizEditor, setQuizEditor] = useState<{ moduleId: string; topicId: string } | null>(null)
   const [lessonEditor, setLessonEditor] = useState<{ moduleId: string; topicId: string } | null>(null)
+  const [assignmentEditor, setAssignmentEditor] = useState<{ moduleId: string; topicId: string } | null>(null)
+  const [hydrating, setHydrating] = useState(() => Boolean(editCourseId))
 
-  const addBatch = () => {
-    setBatches((b) => [...b, { name: '', startDate: '', endDate: '', maxSeats: '', mode: 'Online' }])
-  }
-  const removeBatch = (i: number) => {
-    if (batches.length > 1) setBatches((b) => b.filter((_, idx) => idx !== i))
-  }
-  const updateBatch = (i: number, field: string, value: string) => {
-    setBatches((b) => b.map((row, idx) => (idx === i ? { ...row, [field]: value } : row)))
-  }
+  useEffect(() => {
+    if (!editCourseId) {
+      setHydrating(false)
+      return
+    }
+    let cancelled = false
+    setHydrating(true)
+    setError(null)
+    adminService
+      .getCourse(editCourseId)
+      .then((raw) => {
+        if (cancelled) return
+        const c = raw as Record<string, unknown>
+        editDraftActiveRef.current = Boolean(c.active !== false)
+        const w = mapApiCourseToWizardState(c)
+        setBasic(w.basic)
+        setUniversityOther(w.universityOther)
+        setCourseOther(w.courseOther)
+        setBranchOther(w.branchOther)
+        setSubjectOther(w.subjectOther)
+        setSubjectPicks(w.subjectPicks)
+        setAdditional(w.additional)
+        setCurriculum(w.curriculum)
+        setExpandedModules(new Set(w.curriculum.map((m) => m.id)))
+        slugTouched.current = true
+        setStep(1)
+        setHydrating(false)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError('Failed to load training. Check the link or try again from the course list.')
+          setHydrating(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [editCourseId])
 
   const genId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
@@ -258,10 +634,6 @@ export function AddTraining() {
 
   const updateModule = (moduleId: string, field: 'title', value: string) => {
     setCurriculum((c) => c.map((m) => (m.id === moduleId ? { ...m, [field]: value } : m)))
-  }
-
-  const setModuleRecording = (moduleId: string, file: File | null) => {
-    setCurriculum((c) => c.map((m) => (m.id === moduleId ? { ...m, recordingFile: file } : m)))
   }
 
   const removeModule = (moduleId: string) => {
@@ -312,17 +684,10 @@ export function AddTraining() {
     )
   }
 
-  const setTopicRecordingFile = (moduleId: string, topicId: string, file: File | null) => {
-    setCurriculum((c) =>
-      c.map((m) =>
-        m.id === moduleId
-          ? { ...m, topics: m.topics.map((t) => (t.id === topicId ? { ...t, recordingFile: file } : t)) }
-          : m
-      )
-    )
-  }
-
   const removeTopic = (moduleId: string, topicId: string) => {
+    setQuizEditor((ed) => (ed?.moduleId === moduleId && ed?.topicId === topicId ? null : ed))
+    setLessonEditor((ed) => (ed?.moduleId === moduleId && ed?.topicId === topicId ? null : ed))
+    setAssignmentEditor((ed) => (ed?.moduleId === moduleId && ed?.topicId === topicId ? null : ed))
     setCurriculum((c) =>
       c.map((m) => (m.id === moduleId ? { ...m, topics: m.topics.filter((t) => t.id !== topicId) } : m))
     )
@@ -340,7 +705,10 @@ export function AddTraining() {
       .map((t) => t.trim())
       .filter(Boolean)
 
-  const buildPayload = (publish: boolean) => {
+  const buildPayload = (
+    publish: boolean,
+    media?: { featuredImageUrl?: string; introVideoUrl?: string },
+  ) => {
     const durationVal = basic.durationValue.trim()
     const durationStr = durationVal ? `${durationVal} ${basic.durationUnit}` : ''
     const priceNum = basic.pricingFree ? 0 : basic.fee ? parseInt(basic.fee, 10) : 0
@@ -379,6 +747,11 @@ export function AddTraining() {
               ...(t.quizSettings !== undefined ? { quizSettings: t.quizSettings } : {}),
             }
           : {}),
+        ...(t.type === 'Assignment'
+          ? {
+              assignment: { ...defaultAssignmentDraft(), ...(t.assignment ?? {}) },
+            }
+          : {}),
       })),
     }))
     const plainShort = plainTextFromHtml(basic.shortDesc)
@@ -391,10 +764,11 @@ export function AddTraining() {
       /** Catalog / cards expect plain text; short summary is authored in rich text but stored without tags. */
       shortDescription: plainShort,
       fullDescription: basic.fullDesc.trim(),
-      category: basic.category,
-      universities: basic.universities,
-      courses: basic.courses,
-      streams: basic.streams,
+      category: (basic.category || 'Technical').toLowerCase().replace(/\s+/g, '-'),
+      universities: resolveUniversitiesPayload(basic.universities, universityOther),
+      courses: resolveCoursesPayload(basic.courses, courseOther),
+      streams: resolveBranchesPayload(basic.branches, branchOther),
+      subjects: flattenSubjectsPayload(basic.courses, subjectPicks, subjectOther),
       mode: basic.mode,
       durationValue: basic.durationValue,
       durationUnit: basic.durationUnit,
@@ -404,28 +778,26 @@ export function AddTraining() {
       originalPrice: origNum > 0 ? origNum : undefined,
       trainerName: basic.trainerName.trim(),
       difficulty: basic.difficulty,
-      featuredImageUrl: basic.featuredImageUrl.trim() || undefined,
-      introVideoUrl: basic.introVideoUrl.trim() || undefined,
+      featuredImageUrl: (media?.featuredImageUrl ?? basic.featuredImageUrl).trim() || undefined,
+      introVideoUrl: (media?.introVideoUrl ?? basic.introVideoUrl).trim() || undefined,
       listingVisibility: basic.listingVisibility,
       scheduledPublishAt:
         basic.scheduleEnabled && basic.scheduleDate.trim()
           ? toScheduledIso(basic.scheduleDate, basic.scheduleTime)
           : undefined,
-      marketingCategories: basic.marketingCategories.length ? basic.marketingCategories : undefined,
       whatYouWillLearn: linesToList(additional.whatYouWillLearn),
       targetAudience: additional.targetAudience.trim(),
       materialsIncluded: linesToList(additional.materialsIncluded),
       instructions: additional.instructions.trim(),
       trainingTags: tagsToList(basic.trainingTags),
-      batches: batches.map((b) => ({
-        name: b.name,
-        startDate: b.startDate,
-        endDate: b.endDate,
-        maxSeats: b.maxSeats,
-        mode: b.mode,
-      })),
+      batches: [],
+      trainingStartDate: additional.trainingStartDate.trim() || undefined,
+      trainingEndDate: additional.trainingEndDate.trim() || undefined,
+      trainingMaxSeats: additional.trainingMaxSeats.trim()
+        ? parseInt(additional.trainingMaxSeats, 10)
+        : undefined,
       curriculum: curriculumSerial,
-      active: publish,
+      active: publish ? true : editCourseId ? editDraftActiveRef.current : false,
     }
   }
 
@@ -433,20 +805,45 @@ export function AddTraining() {
     if (!basic.title.trim()) return 'Training title is required.'
     if (!basic.category) return 'Category is required.'
     if (!basic.universities.length) return 'Select at least one university.'
+    if (basic.universities.includes(OTHER_UNIVERSITY_TOKEN) && !universityOther.trim()) {
+      return 'Specify university name when Other is selected.'
+    }
+    const universitiesR = resolveUniversitiesPayload(basic.universities, universityOther)
+    if (!universitiesR.length) return 'Select at least one university.'
     if (!basic.courses.length) return 'Select at least one applicable course.'
-    if ((basic.courses.includes('B.Tech') || basic.courses.includes('Diploma')) && !basic.streams.length) {
-      return 'Select at least one stream for B.Tech / Diploma.'
+    if (basic.courses.includes(OTHER_COURSE_TOKEN) && !courseOther.trim()) {
+      return 'Specify course name when Other is selected.'
+    }
+    const coursesR = resolveCoursesPayload(basic.courses, courseOther)
+    if (!coursesR.length) return 'Select at least one applicable course.'
+    if (needsBranchSection(basic.courses)) {
+      const br = resolveBranchesPayload(basic.branches, branchOther)
+      if (!br.length) return 'Select at least one applicable branch for B.Tech / Diploma.'
+      if (basic.branches.includes(OTHER_BRANCH_VALUE) && !branchOther.trim()) {
+        return 'Specify branch name when Others is selected.'
+      }
+    }
+    if (needsSubjectSection(basic.courses)) {
+      const subj = flattenSubjectsPayload(basic.courses, subjectPicks, subjectOther)
+      if (!subj.length) return 'Select at least one applicable subject.'
+      if (anySubjectOtherPicked(subjectPicks) && !subjectOther.trim()) {
+        return 'Specify subject name when Other is selected in subjects.'
+      }
     }
     if (!basic.mode.length) return 'Select at least one mode.'
     if (!basic.durationValue.trim() || parseInt(basic.durationValue, 10) < 1) return 'Duration value is required.'
+    if (!['weeks', 'hours'].includes(basic.durationUnit)) return 'Duration unit must be weeks or hours.'
     if (!basic.trainerName.trim()) return 'Trainer name is required.'
     if (!basic.pricingFree && (!basic.fee.trim() || parseInt(basic.fee, 10) < 0)) return 'Enter a valid training fee or mark as free.'
     const sd = plainTextFromHtml(basic.shortDesc)
     if (sd.length < 20 || sd.length > 300) return 'Short summary (plain text) must be 20–300 characters.'
     const fd = plainTextFromHtml(basic.fullDesc)
     if (fd.length < 100) return 'Full description (plain text) must be at least 100 characters.'
-    const badBatch = batches.find((b) => !b.name.trim() || !b.startDate || !b.endDate || !b.maxSeats.trim())
-    if (badBatch) return 'Each batch needs name, start date, end date, and max seats.'
+    const tsd = additional.trainingStartDate.trim()
+    const ted = additional.trainingEndDate.trim()
+    if (tsd && ted && ted < tsd) return 'End date must be after start date.'
+    const tms = additional.trainingMaxSeats.trim()
+    if (tms && (parseInt(tms, 10) < 1 || Number.isNaN(parseInt(tms, 10)))) return 'Max seats must be a positive number.'
     if (!curriculum.length) return 'Add at least one curriculum module before publishing.'
     if (curriculum.some((m) => m.topics.some((t) => t.isCurriculumDraft))) {
       return 'Finish new curriculum topics (click Ok on each title/summary card) or cancel them before publishing.'
@@ -454,6 +851,37 @@ export function AddTraining() {
     const badMod = curriculum.find((m) => !m.title.trim() || m.topics.some((t) => !t.title.trim()))
     if (badMod) return 'Each module needs a title; each topic needs a title.'
     return null
+  }
+
+  const resolveTrainingMedia = async (): Promise<
+    | { ok: true; featuredImageUrl: string; introVideoUrl: string }
+    | { ok: false; message: string }
+  > => {
+    let featuredUrl = basic.featuredImageUrl.trim()
+    let introUrl = basic.introVideoUrl.trim()
+    if (basic.thumbnail) {
+      const vr = await validateFeaturedTrainingImage(basic.thumbnail)
+      if (!vr.ok) return { ok: false, message: vr.message }
+      try {
+        featuredUrl = await adminService.uploadCourseMedia(basic.thumbnail, 'featured')
+      } catch {
+        return { ok: false, message: 'Featured image upload failed.' }
+      }
+    }
+    if (basic.introVideoFile) {
+      try {
+        introUrl = await adminService.uploadCourseMedia(basic.introVideoFile, 'intro')
+      } catch {
+        return { ok: false, message: 'Intro video upload failed. Use MP4, MOV, or AVI within the server size limit, or paste a YouTube link instead.' }
+      }
+    }
+    return { ok: true, featuredImageUrl: featuredUrl, introVideoUrl: introUrl }
+  }
+
+  const payloadForApi = (payload: ReturnType<typeof buildPayload>): Record<string, unknown> => {
+    const p = { ...(payload as unknown as Record<string, unknown>) }
+    if (editCourseId) delete p.batches
+    return p
   }
 
   const handleSaveDraft = async () => {
@@ -468,9 +896,24 @@ export function AddTraining() {
     setError(null)
     setSaving(true)
     try {
-      const payload = buildPayload(false)
-      await adminService.createCourse(payload)
-      navigate('/admin/courses', { replace: true })
+      const media = await resolveTrainingMedia()
+      if (!media.ok) {
+        setError(media.message)
+        return
+      }
+      const payload = payloadForApi(
+        buildPayload(false, {
+          featuredImageUrl: media.featuredImageUrl,
+          introVideoUrl: media.introVideoUrl,
+        }),
+      )
+      if (editCourseId) {
+        await adminService.updateCourse(editCourseId, payload)
+        navigate(`/admin/courses/${editCourseId}/manage`, { replace: true })
+      } else {
+        await adminService.createCourse(payload)
+        navigate('/admin/courses', { replace: true })
+      }
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'response' in e && e.response && typeof e.response === 'object' && 'data' in e.response
         ? String((e.response as { data?: { error?: string } }).data?.error ?? 'Failed to save draft')
@@ -490,9 +933,25 @@ export function AddTraining() {
     setError(null)
     setSaving(true)
     try {
-      const payload = buildPayload(true)
-      await adminService.createCourse(payload)
-      navigate('/admin/courses', { replace: true })
+      const media = await resolveTrainingMedia()
+      if (!media.ok) {
+        setError(media.message)
+        return
+      }
+      const payload = payloadForApi(
+        buildPayload(true, {
+          featuredImageUrl: media.featuredImageUrl,
+          introVideoUrl: media.introVideoUrl,
+        }),
+      )
+      if (editCourseId) {
+        await adminService.updateCourse(editCourseId, payload)
+        editDraftActiveRef.current = true
+        navigate(`/admin/courses/${editCourseId}/manage`, { replace: true })
+      } else {
+        await adminService.createCourse(payload)
+        navigate('/admin/courses', { replace: true })
+      }
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'response' in e && e.response && typeof e.response === 'object' && 'data' in e.response
         ? String((e.response as { data?: { error?: string } }).data?.error ?? 'Failed to publish training')
@@ -507,14 +966,28 @@ export function AddTraining() {
   const quizEditorTopic = quizEditorModule?.topics.find((t) => t.id === quizEditor?.topicId)
   const lessonEditorModule = lessonEditor ? curriculum.find((m) => m.id === lessonEditor.moduleId) : undefined
   const lessonEditorTopic = lessonEditorModule?.topics.find((t) => t.id === lessonEditor?.topicId)
+  const assignmentEditorModule = assignmentEditor
+    ? curriculum.find((m) => m.id === assignmentEditor.moduleId)
+    : undefined
+  const assignmentEditorTopic = assignmentEditorModule?.topics.find((t) => t.id === assignmentEditor?.topicId)
+  const shortSummaryPlainLength = plainTextFromHtml(basic.shortDesc).length
+
+  if (hydrating) {
+    return <div className="p-8 text-center text-slate-gray">Loading training…</div>
+  }
 
   return (
     <div className="mx-auto w-full max-w-[min(100%,88rem)] space-y-6 px-0 sm:px-1">
       <div className="flex items-center gap-4">
-        <Link to="/admin/courses" className="rounded-lg p-2 text-gray-600 hover:bg-gray-100">
+        <Link
+          to={editCourseId ? `/admin/courses/${editCourseId}/manage` : '/admin/courses'}
+          className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+        >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <h2 className="text-lg font-semibold text-brand-navy">Add New Training</h2>
+        <h2 className="text-lg font-semibold text-brand-navy">
+          {editCourseId ? 'Edit Training' : 'Add New Training'}
+        </h2>
       </div>
 
       {error && (
@@ -578,12 +1051,23 @@ export function AddTraining() {
               <RichTextEditor
                 id="training-short-html"
                 label="Short summary *"
-                hint="Shown on cards and the course hero. Use bold/lists for emphasis (20–300 characters of plain text)."
+                hint="Teaser for cards and hero only — not the full course write-up. After removing formatting, plain text must stay within the limit below."
                 value={basic.shortDesc}
                 onChange={(html) => setBasic((b) => ({ ...b, shortDesc: html }))}
                 placeholder="Brief summary for listings…"
                 minHeightClass="min-h-[100px]"
               />
+              <p
+                className={`text-xs ${shortSummaryPlainLength >= 20 && shortSummaryPlainLength <= 300 ? 'text-slate-600' : 'font-medium text-amber-800'}`}
+                aria-live="polite"
+              >
+                Plain text length: {shortSummaryPlainLength}/300 (publish requires 20–300).{' '}
+                {shortSummaryPlainLength > 300
+                  ? 'Shorten this field and move the long version into Full description below.'
+                  : shortSummaryPlainLength < 20
+                    ? 'Add a bit more for the minimum length.'
+                    : 'Within range for publish.'}
+              </p>
               <RichTextEditor
                 id="training-full-html"
                 label="Full description *"
@@ -601,8 +1085,8 @@ export function AddTraining() {
                     onChange={(e) => setBasic((b) => ({ ...b, difficulty: e.target.value }))}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   >
-                    {DIFFICULTIES.map((d) => (
-                      <option key={d} value={d}>{d}</option>
+                    {DIFFICULTY_OPTIONS.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
                     ))}
                   </select>
                 </div>
@@ -627,10 +1111,11 @@ export function AddTraining() {
                   <select
                     multiple
                     value={basic.universities}
-                    onChange={(e) => setBasic((b) => ({
-                      ...b,
-                      universities: Array.from(e.target.selectedOptions, (o) => o.value),
-                    }))}
+                    onChange={(e) => {
+                      const universities = Array.from(e.target.selectedOptions, (o) => o.value)
+                      setBasic((b) => ({ ...b, universities }))
+                      if (!universities.includes(OTHER_UNIVERSITY_TOKEN)) setUniversityOther('')
+                    }}
                     className="mt-1 w-full min-h-[100px] rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
                     title="Select one or more universities"
                   >
@@ -640,7 +1125,20 @@ export function AddTraining() {
                     {UNIVERSITIES_LIST.map((u) => (
                       <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>
                     ))}
+                    <option value={OTHER_UNIVERSITY_TOKEN}>Other (specify below)</option>
                   </select>
+                  {basic.universities.includes(OTHER_UNIVERSITY_TOKEN) ? (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-gray-600">Specify university name *</label>
+                      <input
+                        type="text"
+                        value={universityOther}
+                        onChange={(e) => setUniversityOther(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        placeholder="University or board name"
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Applicable Course(s) *</label>
@@ -648,43 +1146,104 @@ export function AddTraining() {
                   <select
                     multiple
                     value={basic.courses}
-                    onChange={(e) => setBasic((b) => ({
-                      ...b,
-                      courses: Array.from(e.target.selectedOptions, (o) => o.value),
-                    }))}
+                    onChange={(e) => {
+                      const courses = Array.from(e.target.selectedOptions, (o) => o.value)
+                      setBasic((b) => ({ ...b, courses, branches: [] }))
+                      setSubjectPicks({ ...EMPTY_SUBJECT_PICKS })
+                      setBranchOther('')
+                      setSubjectOther('')
+                      if (!courses.includes(OTHER_COURSE_TOKEN)) setCourseOther('')
+                    }}
                     className="mt-1 w-full min-h-[100px] rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
                     title="Select one or more courses"
                   >
                     <option disabled value="">
                       — Select one or more courses —
                     </option>
-                    {COURSES.map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                    {COURSE_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
                     ))}
                   </select>
+                  {basic.courses.includes(OTHER_COURSE_TOKEN) ? (
+                    <div className="mt-2">
+                      <label className="block text-xs font-medium text-gray-600">Specify course name *</label>
+                      <input
+                        type="text"
+                        value={courseOther}
+                        onChange={(e) => setCourseOther(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        placeholder="Course name"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
-              {(basic.courses.includes('B.Tech') || basic.courses.includes('Diploma')) && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Stream(s) *</label>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {STREAMS.map((s) => (
-                      <label key={s} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={basic.streams.includes(s)}
-                          onChange={(e) => setBasic((b) => ({
-                            ...b,
-                            streams: e.target.checked ? [...b.streams, s] : b.streams.filter((x) => x !== s),
-                          }))}
-                          className="rounded text-brand-accent"
-                        />
-                        <span className="text-sm">{s}</span>
-                      </label>
+              {needsBranchSection(basic.courses) ? (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">Applicable Branch(es) *</label>
+                  <p className="text-xs text-slate-500">Select one or more branches (official list).</p>
+                  <select
+                    multiple
+                    value={basic.branches}
+                    onChange={(e) => {
+                      const branches = Array.from(e.target.selectedOptions, (o) => o.value)
+                      setBasic((b) => ({ ...b, branches }))
+                      if (!branches.includes(OTHER_BRANCH_VALUE)) setBranchOther('')
+                    }}
+                    className="mt-1 w-full min-h-[120px] rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                    title="Branches"
+                  >
+                    {BRANCH_OPTIONS.map((b) => (
+                      <option key={b} value={b}>{b}</option>
                     ))}
-                  </div>
+                  </select>
+                  {basic.branches.includes(OTHER_BRANCH_VALUE) ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Specify branch name *</label>
+                      <input
+                        type="text"
+                        value={branchOther}
+                        onChange={(e) => setBranchOther(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  ) : null}
                 </div>
-              )}
+              ) : null}
+              {needsSubjectSection(basic.courses) ? (
+                <div className="space-y-4">
+                  <p className="text-sm font-medium text-gray-700">Applicable Subject(s) *</p>
+                  {subjectKeysForCourses(basic.courses).map((key) => (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-gray-600">{key}</label>
+                      <select
+                        multiple
+                        value={subjectPicks[key]}
+                        onChange={(e) => {
+                          const sel = Array.from(e.target.selectedOptions, (o) => o.value)
+                          setSubjectPicks((sp) => ({ ...sp, [key]: sel }))
+                        }}
+                        className="mt-1 w-full min-h-[88px] rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white"
+                      >
+                        {SUBJECT_LIST_BY_KEY[key].map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                  {anySubjectOtherPicked(subjectPicks) ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Specify subject name *</label>
+                      <input
+                        type="text"
+                        value={subjectOther}
+                        onChange={(e) => setSubjectOther(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div>
                 <label className="block text-sm font-medium text-gray-700">Mode(s) *</label>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -723,7 +1282,7 @@ export function AddTraining() {
                     className="mt-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   >
                     <option value="weeks">Weeks</option>
-                    <option value="days">Days</option>
+                    <option value="hours">Hours</option>
                   </select>
                 </div>
               </div>
@@ -787,7 +1346,9 @@ export function AddTraining() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Featured image</label>
-                <p className="mt-0.5 text-xs text-slate-500">URL or upload (JPEG, PNG; keep under ~2MB for fast loads).</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  16:9 required (min 1280×720; 1920×1080 recommended). JPEG or PNG, max 2MB. Optional URL, or upload below.
+                </p>
                 <input
                   type="url"
                   value={basic.featuredImageUrl}
@@ -797,24 +1358,58 @@ export function AddTraining() {
                 />
                 <input
                   type="file"
-                  accept=".jpg,.jpeg,.png,.webp,.gif"
-                  onChange={(e) => setBasic((b) => ({ ...b, thumbnail: e.target.files?.[0] ?? null }))}
+                  accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    setBasic((b) => ({ ...b, thumbnail: f }))
+                    setFeaturedImageError(null)
+                    if (!f) return
+                    void validateFeaturedTrainingImage(f).then((r) => {
+                      if (!r.ok) {
+                        setFeaturedImageError(r.message)
+                        setBasic((b) => ({ ...b, thumbnail: null }))
+                        e.target.value = ''
+                      }
+                    })
+                  }}
                   className="mt-2 w-full text-xs text-gray-600"
                 />
+                {featuredImageError ? (
+                  <p className="mt-1 text-xs text-red-600" role="alert">{featuredImageError}</p>
+                ) : null}
                 {basic.thumbnail ? (
                   <p className="mt-1 text-xs text-slate-600 truncate" title={basic.thumbnail.name}>{basic.thumbnail.name}</p>
                 ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Intro video</label>
-                <p className="mt-0.5 text-xs text-slate-500">Paste a YouTube / Vimeo URL for the course preview.</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  <strong>Option A — Link:</strong> Paste a <strong>YouTube</strong> or Vimeo URL (unchanged behaviour). The public course page embeds YouTube and shows &quot;Open on YouTube&quot; when applicable.
+                </p>
                 <input
                   type="url"
                   value={basic.introVideoUrl}
                   onChange={(e) => setBasic((b) => ({ ...b, introVideoUrl: e.target.value }))}
-                  placeholder="https://…"
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                  placeholder="https://www.youtube.com/watch?v=… or https://youtu.be/…"
+                  className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                 />
+                <p className="mt-3 text-xs text-slate-500">
+                  <strong>Option B — Upload from computer:</strong> MP4, MOV, or AVI. The file is uploaded when you click <strong>Save as Draft</strong> or <strong>Publish</strong> (same pattern as the featured image). If you choose a file, the saved course uses that hosted video URL for the intro; you can still keep a link above for reference, but the upload wins on save.
+                </p>
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.avi"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    setBasic((b) => ({ ...b, introVideoFile: f }))
+                  }}
+                  className="mt-1 w-full text-xs text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-gray-800 file:px-2 file:py-1.5 file:text-xs file:font-medium file:text-white"
+                />
+                {basic.introVideoFile ? (
+                  <p className="mt-1 text-xs text-slate-600 truncate" title={basic.introVideoFile.name}>
+                    Selected: {basic.introVideoFile.name}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <span className="block text-sm font-medium text-gray-700">Pricing</span>
@@ -864,43 +1459,6 @@ export function AddTraining() {
                 ) : null}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Marketing categories</label>
-                <div className="relative mt-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    value={basic.marketingCategoryFilter}
-                    onChange={(e) => setBasic((b) => ({ ...b, marketingCategoryFilter: e.target.value }))}
-                    placeholder="Search…"
-                    className="w-full rounded-lg border border-gray-300 bg-white py-1.5 pl-8 pr-2 text-sm"
-                  />
-                </div>
-                <div className="mt-2 max-h-36 space-y-1.5 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 text-sm">
-                  {MARKETING_CATEGORIES.filter(
-                    (c) =>
-                      !basic.marketingCategoryFilter.trim()
-                      || c.toLowerCase().includes(basic.marketingCategoryFilter.trim().toLowerCase()),
-                  ).map((c) => (
-                    <label key={c} className="flex cursor-pointer items-center gap-2 py-0.5">
-                      <input
-                        type="checkbox"
-                        checked={basic.marketingCategories.includes(c)}
-                        onChange={() =>
-                          setBasic((b) => ({
-                            ...b,
-                            marketingCategories: b.marketingCategories.includes(c)
-                              ? b.marketingCategories.filter((x) => x !== c)
-                              : [...b.marketingCategories, c],
-                          }))
-                        }
-                        className="rounded text-brand-accent"
-                      />
-                      <span>{c}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div>
                 <label className="block text-sm font-medium text-gray-700">Tags</label>
                 <p className="mt-0.5 text-xs text-slate-500">Comma-separated keywords.</p>
                 <input
@@ -912,12 +1470,14 @@ export function AddTraining() {
                 />
               </div>
               <div className="rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2 text-xs text-gray-600">
-                <span className="font-medium text-gray-800">Author</span>
+                <span className="font-medium text-gray-800">Author (internal)</span>
                 <p className="mt-1">
                   {authUser?.name || '—'}
                   {authUser?.email ? <span className="block text-slate-500">{authUser.email}</span> : null}
                 </p>
-                <p className="mt-1 text-slate-400">Saved on the course when you publish.</p>
+                <p className="mt-1 text-slate-500">
+                  Auto-filled from the logged-in admin when you create a training; editable by super admin. It is not updated automatically when another admin edits the course. Students see the <strong>Trainer Name</strong> field on the public page.
+                </p>
               </div>
             </aside>
           </div>
@@ -945,7 +1505,7 @@ export function AddTraining() {
         <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-4 sm:p-6 sm:space-y-5">
           <h3 className="font-semibold text-brand-navy">Step 2 — Curriculum</h3>
           <p className="text-sm text-slate-gray max-w-4xl">
-            Add modules, then use <strong className="text-gray-800">Add topic</strong> for a Tutor-style card (title, summary, Cancel / Ok). After Ok, choose lesson, quiz, lab, and other types. Recording topics and module recordings can be linked from the lesson video sidebar.
+            Add modules, then use <strong className="text-gray-800">Add topic</strong> for a card (title, summary, Cancel / Ok). After Ok, choose <strong>Lesson</strong>, <strong>Quiz</strong>, or <strong>Assignment</strong> only. Use the lesson builder for video, thumbnail, notes, and attachments.
           </p>
 
           <div className="space-y-4">
@@ -984,28 +1544,7 @@ export function AddTraining() {
                   </div>
                   {expandedModules.has(mod.id) && (
                     <div className="space-y-4 p-3 sm:p-5">
-                      {/* Module-level: choose recording from system */}
-                      <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 sm:p-4">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          <Video className="h-3.5 w-3.5 inline mr-1" /> Module recording (optional)
-                        </label>
-                        <p className="text-xs text-slate-500 mb-2">Choose a video or audio file for this module.</p>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="file"
-                            accept="video/*,audio/*,.mp4,.webm,.mp3,.wav,.m4a"
-                            onChange={(e) => setModuleRecording(mod.id, e.target.files?.[0] ?? null)}
-                            className="text-sm text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-brand-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white file:cursor-pointer hover:file:bg-primary-600"
-                          />
-                          {mod.recordingFile && (
-                            <span className="text-xs text-slate-600 truncate max-w-[200px]" title={mod.recordingFile.name}>
-                              {mod.recordingFile.name}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Topics — Tutor-style wide cards, type as button row (same stored types) */}
+                      {/* Topics — wide cards, lesson / quiz / assignment only */}
                       <div className="space-y-4">
                         {mod.topics.map((topic, topicIndex) => (
                           <div
@@ -1089,17 +1628,16 @@ export function AddTraining() {
                                           updateTopic(mod.id, topic.id, 'type', t)
                                           if (t === 'Quiz') {
                                             setLessonEditor(null)
+                                            setAssignmentEditor(null)
                                             setQuizEditor({ moduleId: mod.id, topicId: topic.id })
                                           } else if (t === 'Lecture') {
                                             setQuizEditor(null)
+                                            setAssignmentEditor(null)
                                             setLessonEditor({ moduleId: mod.id, topicId: topic.id })
                                           } else {
-                                            if (quizEditor?.moduleId === mod.id && quizEditor?.topicId === topic.id) {
-                                              setQuizEditor(null)
-                                            }
-                                            if (lessonEditor?.moduleId === mod.id && lessonEditor?.topicId === topic.id) {
-                                              setLessonEditor(null)
-                                            }
+                                            setQuizEditor(null)
+                                            setLessonEditor(null)
+                                            setAssignmentEditor({ moduleId: mod.id, topicId: topic.id })
                                           }
                                         }}
                                         className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
@@ -1145,6 +1683,7 @@ export function AddTraining() {
                                           type="button"
                                           onClick={() => {
                                             setQuizEditor(null)
+                                            setAssignmentEditor(null)
                                             setLessonEditor({ moduleId: mod.id, topicId: topic.id })
                                           }}
                                           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand-accent bg-white px-3 py-2 text-xs font-semibold text-brand-accent shadow-sm hover:bg-blue-50"
@@ -1168,6 +1707,7 @@ export function AddTraining() {
                                               type="button"
                                               onClick={() => {
                                                 setQuizEditor(null)
+                                                setAssignmentEditor(null)
                                                 setLessonEditor({ moduleId: mod.id, topicId: topic.id })
                                               }}
                                               className="inline-flex items-center gap-1 rounded-md border border-emerald-700/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100"
@@ -1186,6 +1726,7 @@ export function AddTraining() {
                                             type="button"
                                             onClick={() => {
                                               setQuizEditor(null)
+                                              setAssignmentEditor(null)
                                               setLessonEditor({ moduleId: mod.id, topicId: topic.id })
                                             }}
                                             className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
@@ -1205,13 +1746,14 @@ export function AddTraining() {
                                           <p className="text-xs text-gray-600">
                                             {(topic.quizQuestions?.length ?? 0) === 0
                                               ? 'No questions yet.'
-                                              : `${topic.quizQuestions?.length} question(s); each can mark one correct option.`}
+                                              : `${topic.quizQuestions?.length} question(s) — MCQ, true/false, short answer, or fill-in-the-blank.`}
                                           </p>
                                         </div>
                                         <button
                                           type="button"
                                           onClick={() => {
                                             setLessonEditor(null)
+                                            setAssignmentEditor(null)
                                             setQuizEditor({ moduleId: mod.id, topicId: topic.id })
                                           }}
                                           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-500/40 bg-white px-3 py-2 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-50"
@@ -1226,20 +1768,22 @@ export function AddTraining() {
                                             Questions in this quiz (preview)
                                           </p>
                                           <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-xs leading-relaxed text-violet-950">
-                                            {topic.quizQuestions!.map((q, qi) => (
-                                              <li key={q.id || qi}>
-                                                {(q.title || '').trim() || `Question ${qi + 1}`}
-                                                {typeof q.correctOptionIndex === 'number' && q.options?.length
-                                                  ? ` · ${q.options.length} options`
-                                                  : ''}
-                                              </li>
-                                            ))}
+                                            {topic.quizQuestions!.map((q, qi) => {
+                                              const qq = migrateQuizQuestion(q, qi)
+                                              return (
+                                                <li key={qq.id}>
+                                                  {(qq.title || '').trim() || `Question ${qi + 1}`}
+                                                  <span className="text-violet-800/90"> · {questionSummaryLine(qq)}</span>
+                                                </li>
+                                              )
+                                            })}
                                           </ol>
                                           <div className="mt-2 flex flex-wrap gap-2 border-t border-violet-200/60 pt-2">
                                             <button
                                               type="button"
                                               onClick={() => {
                                                 setLessonEditor(null)
+                                                setAssignmentEditor(null)
                                                 setQuizEditor({ moduleId: mod.id, topicId: topic.id })
                                               }}
                                               className="inline-flex items-center gap-1 rounded-md border border-violet-700/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100"
@@ -1258,6 +1802,7 @@ export function AddTraining() {
                                             type="button"
                                             onClick={() => {
                                               setLessonEditor(null)
+                                              setAssignmentEditor(null)
                                               setQuizEditor({ moduleId: mod.id, topicId: topic.id })
                                             }}
                                             className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
@@ -1269,36 +1814,77 @@ export function AddTraining() {
                                       )}
                                     </>
                                   ) : null}
+                                  {topic.type === 'Assignment' ? (
+                                    <>
+                                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-2.5">
+                                        <div className="min-w-0">
+                                          <p className="text-sm font-medium text-brand-navy">Assignment</p>
+                                          <p className="text-xs text-gray-600">
+                                            {topic.assignment?.title?.trim()
+                                              ? `${topic.assignment.title.trim()} · max ${topic.assignment.maxMarks || '—'} marks`
+                                              : 'Set instructions, submission types, size limit, and deadlines.'}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setQuizEditor(null)
+                                            setLessonEditor(null)
+                                            setAssignmentEditor({ moduleId: mod.id, topicId: topic.id })
+                                          }}
+                                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-600/35 bg-white px-3 py-2 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-100/80"
+                                        >
+                                          <ClipboardCheck className="h-3.5 w-3.5" />
+                                          Add / edit assignment
+                                        </button>
+                                      </div>
+                                      {topic.assignment?.instructions?.trim() ? (
+                                        <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5">
+                                          <p className="text-xs font-semibold uppercase tracking-wide text-amber-950">
+                                            Saved assignment (preview)
+                                          </p>
+                                          <p className="mt-1 line-clamp-4 text-xs leading-relaxed text-amber-950">
+                                            {topic.assignment.instructions.trim().length > 280
+                                              ? `${topic.assignment.instructions.trim().slice(0, 280)}…`
+                                              : topic.assignment.instructions.trim()}
+                                          </p>
+                                          <div className="mt-2 flex flex-wrap gap-2 border-t border-amber-200/60 pt-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setQuizEditor(null)
+                                                setLessonEditor(null)
+                                                setAssignmentEditor({ moduleId: mod.id, topicId: topic.id })
+                                              }}
+                                              className="inline-flex items-center gap-1 rounded-md border border-amber-800/20 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-100"
+                                            >
+                                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                              Edit assignment
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2.5">
+                                          <p className="text-xs text-slate-600">
+                                            No assignment details saved yet. Open the builder and click <strong>Save</strong>.
+                                          </p>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setQuizEditor(null)
+                                              setLessonEditor(null)
+                                              setAssignmentEditor({ moduleId: mod.id, topicId: topic.id })
+                                            }}
+                                            className="mt-2 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                                            Open assignment builder
+                                          </button>
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : null}
                                 </div>
-                                {topic.type === 'Recording' && (
-                                  <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-2 sm:p-4">
-                                    <p className="text-xs font-medium text-amber-800">Video / audio or note for this recording</p>
-                                    <div>
-                                      <label className="mb-1 block text-xs text-gray-600">Choose video or audio from system</label>
-                                      <input
-                                        type="file"
-                                        accept="video/*,audio/*,.mp4,.webm,.mp3,.wav,.m4a"
-                                        onChange={(e) => setTopicRecordingFile(mod.id, topic.id, e.target.files?.[0] ?? null)}
-                                        className="text-sm text-gray-600 file:mr-2 file:rounded file:border-0 file:bg-amber-500 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white file:cursor-pointer"
-                                      />
-                                      {topic.recordingFile ? (
-                                        <span className="ml-2 text-xs text-slate-600">{topic.recordingFile.name}</span>
-                                      ) : null}
-                                    </div>
-                                    <div>
-                                      <label className="mb-1 flex items-center gap-1 text-xs text-gray-600">
-                                        <FileText className="h-3.5 w-3.5" /> Note (optional)
-                                      </label>
-                                      <textarea
-                                        value={topic.recordingNote}
-                                        onChange={(e) => updateTopic(mod.id, topic.id, 'recordingNote', e.target.value)}
-                                        placeholder="Add a note or description for this recording..."
-                                        rows={2}
-                                        className="w-full resize-y rounded border border-gray-300 px-2 py-1.5 text-sm"
-                                      />
-                                    </div>
-                                  </div>
-                                )}
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-50 pt-3">
                                   <div className="flex items-center gap-2">
                                     <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Duration</label>
@@ -1373,69 +1959,45 @@ export function AddTraining() {
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
           <div>
             <h3 className="font-semibold text-brand-navy">Step 3 — Additional</h3>
-            <p className="text-sm text-slate-gray mt-1">Batches, learning outcomes, audience, materials, and instructions appear on the public course page.</p>
+            <p className="text-sm text-slate-gray mt-1">
+              Optional training schedule and seat cap appear on listings and the public course page. Learning outcomes, requirements, materials, and instructions are shown as separate sections for students.
+            </p>
           </div>
 
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-gray-800">Batches *</h4>
-            {batches.map((batch, i) => (
-              <div key={i} className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 p-4">
-                <div className="min-w-[120px] flex-1">
-                  <label className="block text-xs font-medium text-gray-600">Batch Name</label>
-                  <input
-                    value={batch.name}
-                    onChange={(e) => updateBatch(i, 'name', e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600">Start Date</label>
-                  <input
-                    type="date"
-                    value={batch.startDate}
-                    onChange={(e) => updateBatch(i, 'startDate', e.target.value)}
-                    className="mt-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600">End Date</label>
-                  <input
-                    type="date"
-                    value={batch.endDate}
-                    onChange={(e) => updateBatch(i, 'endDate', e.target.value)}
-                    className="mt-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div className="w-24">
-                  <label className="block text-xs font-medium text-gray-600">Max Seats</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={batch.maxSeats}
-                    onChange={(e) => updateBatch(i, 'maxSeats', e.target.value)}
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600">Mode</label>
-                  <select
-                    value={batch.mode}
-                    onChange={(e) => updateBatch(i, 'mode', e.target.value)}
-                    className="mt-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
-                  >
-                    {MODES.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                <button type="button" onClick={() => removeBatch(i)} className="rounded p-2 text-red-600 hover:bg-red-50">
-                  Remove
-                </button>
+          <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 space-y-4">
+            <h4 className="text-sm font-semibold text-gray-800">Training schedule (optional)</h4>
+            <div className="flex flex-wrap gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600">Training start date</label>
+                <input
+                  type="date"
+                  value={additional.trainingStartDate}
+                  onChange={(e) => setAdditional((a) => ({ ...a, trainingStartDate: e.target.value }))}
+                  className="mt-1 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                />
               </div>
-            ))}
-            <button type="button" onClick={addBatch} className="text-sm font-medium text-brand-accent hover:underline">
-              + Add Batch
-            </button>
+              <div>
+                <label className="block text-xs font-medium text-gray-600">Training end date</label>
+                <input
+                  type="date"
+                  value={additional.trainingEndDate}
+                  onChange={(e) => setAdditional((a) => ({ ...a, trainingEndDate: e.target.value }))}
+                  className="mt-1 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div className="w-32 sm:w-36">
+                <label className="block text-xs font-medium text-gray-600">Max seats</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={additional.trainingMaxSeats}
+                  onChange={(e) => setAdditional((a) => ({ ...a, trainingMaxSeats: e.target.value }))}
+                  placeholder="Unlimited"
+                  className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">Leave blank for evergreen access or no seat limit.</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1451,8 +2013,10 @@ export function AddTraining() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">Who is this course for?</label>
-              <p className="text-xs text-slate-500 mt-0.5">One bullet per line (shown as a list on the course page).</p>
+              <label className="block text-sm font-medium text-gray-700">Requirements / Who is this course for?</label>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Each line becomes a bullet under <strong>Requirements</strong> on the course page. Include eligibility, prerequisites, and who should take this course.
+              </p>
               <textarea
                 rows={3}
                 value={additional.targetAudience}
@@ -1462,7 +2026,7 @@ export function AddTraining() {
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700">Materials included</label>
-              <p className="text-xs text-slate-500 mt-0.5">One item per line.</p>
+              <p className="text-xs text-slate-500 mt-0.5">One item per line (shown under What&apos;s Included).</p>
               <textarea
                 rows={3}
                 value={additional.materialsIncluded}
@@ -1471,13 +2035,16 @@ export function AddTraining() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">Instructions</label>
+              <label className="block text-sm font-medium text-gray-700">Instructions &amp; requirements (student prep)</label>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Each line becomes a bullet under <strong>Instructions</strong> on the course page — e.g. software to install, hardware, things to prepare before the course starts.
+              </p>
               <textarea
-                rows={2}
+                rows={3}
                 value={additional.instructions}
                 onChange={(e) => setAdditional((a) => ({ ...a, instructions: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                placeholder="e.g. Laptop required, install Python 3.11+"
+                placeholder={'e.g. Install Python 3.11+\ne.g. Laptop with 8GB RAM'}
               />
             </div>
           </div>
@@ -1528,6 +2095,26 @@ export function AddTraining() {
         />
       ) : null}
 
+      {assignmentEditor && assignmentEditorModule && assignmentEditorTopic ? (
+        <AssignmentBuilderModal
+          open
+          moduleTitle={assignmentEditorModule.title}
+          topicLabel={assignmentEditorTopic.title}
+          initialTitle={assignmentEditorTopic.title}
+          initialSummary={assignmentEditorTopic.details}
+          initialAssignment={assignmentEditorTopic.assignment}
+          onClose={() => setAssignmentEditor(null)}
+          onSave={(draft) => {
+            patchTopic(assignmentEditor.moduleId, assignmentEditor.topicId, {
+              title: draft.title,
+              details: draft.summary,
+              assignment: draft.assignment,
+            })
+            setAssignmentEditor(null)
+          }}
+        />
+      ) : null}
+
       {lessonEditor && lessonEditorModule && lessonEditorTopic ? (
         <LessonBuilderModal
           open
@@ -1545,7 +2132,7 @@ export function AddTraining() {
           initialLessonFeaturedImageFile={lessonEditorTopic.lessonFeaturedImageFile ?? null}
           initialLessonVideoFile={lessonEditorTopic.lessonVideoFile ?? null}
           initialLessonExerciseFile={lessonEditorTopic.lessonExerciseFile ?? null}
-          recordingOptions={recordingOptionsForLesson(lessonEditorModule, lessonEditorTopic.id)}
+          recordingOptions={[]}
           onClose={() => setLessonEditor(null)}
           onSave={(draft: LessonTopicDraft) => {
             const mode = draft.lessonVideoAttachMode

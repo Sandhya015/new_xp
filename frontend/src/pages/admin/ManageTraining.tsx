@@ -1,7 +1,7 @@
 /**
  * Admin — Manage Existing Training (AD-WF-04). Tabs: Overview, Batches, Class Links, Materials, Assignments, Quizzes, Attendance, Announcements, Enrolled Students.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -18,6 +18,8 @@ import {
   Send,
   Trash2,
   Pencil,
+  Loader2,
+  Upload,
 } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
@@ -149,6 +151,10 @@ export function ManageTraining() {
     const quizzes = (course?.quizzes || []).filter((_, i) => i !== index)
     updateCourseSection('quizzes', quizzes)
   }
+  const updateQuiz = (index: number, q: { title: string; dueDate: string }) => {
+    const quizzes = (course?.quizzes || []).map((item, i) => (i === index ? { ...item, ...q } : item))
+    updateCourseSection('quizzes', quizzes)
+  }
 
   const addAnnouncement = (a: { title: string; message: string }) => {
     const announcements = [...(course?.announcements || []), { ...a, id: `an_${Date.now()}`, createdAt: new Date().toISOString() }]
@@ -271,7 +277,13 @@ export function ManageTraining() {
         )}
 
         {activeTab === 'quizzes' && (
-          <QuizzesTab quizzes={course.quizzes || []} onAdd={addQuiz} onRemove={removeQuiz} saving={saving} />
+          <QuizzesTab
+            quizzes={course.quizzes || []}
+            onAdd={addQuiz}
+            onUpdate={updateQuiz}
+            onRemove={removeQuiz}
+            saving={saving}
+          />
         )}
 
         {activeTab === 'attendance' && (
@@ -401,6 +413,18 @@ function ClassLinksTab({
   )
 }
 
+function inferMaterialTypeFromFilename(name: string): string {
+  const n = (name || '').toLowerCase()
+  if (n.endsWith('.pdf')) return 'PDF'
+  if (n.endsWith('.pptx') || n.endsWith('.ppt')) return 'PPT'
+  if (n.endsWith('.docx') || n.endsWith('.doc')) return 'DOC'
+  if (n.endsWith('.xlsx') || n.endsWith('.xls')) return 'XLS'
+  if (n.endsWith('.zip')) return 'ZIP'
+  if (n.endsWith('.csv')) return 'CSV'
+  if (n.endsWith('.txt')) return 'TXT'
+  return 'File'
+}
+
 function MaterialsTab({
   materials,
   onAdd,
@@ -416,31 +440,128 @@ function MaterialsTab({
   const [module, setModule] = useState('')
   const [type, setType] = useState('PDF')
   const [url, setUrl] = useState('')
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
+    if (!url.trim()) return
     onAdd({ title: title.trim(), module: module.trim(), type, url: url.trim() })
-    setTitle(''); setModule(''); setUrl('')
+    setTitle('')
+    setModule('')
+    setUrl('')
+    setType('PDF')
   }
+
+  const onPickFile = () => fileRef.current?.click()
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setUploadError(null)
+    setUploadBusy(true)
+    try {
+      const uploadedUrl = await adminService.uploadCourseMedia(file, 'material')
+      setUrl(uploadedUrl)
+      setType(inferMaterialTypeFromFilename(file.name))
+      if (!title.trim()) {
+        const base = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim()
+        if (base) setTitle(base.slice(0, 120))
+      }
+    } catch {
+      setUploadError('Upload failed. Check file type (PDF, Office, ZIP, TXT, CSV) and size limit.')
+    } finally {
+      setUploadBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 items-end">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-40" required />
-        <input value={module} onChange={(e) => setModule(e.target.value)} placeholder="Module" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-32" />
-        <select value={type} onChange={(e) => setType(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm">
-          <option>PDF</option><option>PPT</option><option>DOC</option><option>Video</option>
-        </select>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL or file path" className="rounded border border-gray-300 px-2 py-1.5 text-sm min-w-[220px]" />
-        <button type="submit" disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">Add</button>
+      <p className="text-sm text-slate-600">
+        Upload slides or handouts from your computer (stored like other course media), or paste an external HTTPS link.
+        Allowed: PDF, PPT/PPTX, DOC/DOCX, XLS/XLSX, ZIP, TXT, CSV — max size is set on the server (default 50MB).
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+        <div className="flex flex-wrap gap-2 items-end">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Title *"
+            className="rounded border border-gray-300 px-2 py-1.5 text-sm w-44 min-w-[10rem]"
+            required
+          />
+          <input
+            value={module}
+            onChange={(e) => setModule(e.target.value)}
+            placeholder="Module (optional)"
+            className="rounded border border-gray-300 px-2 py-1.5 text-sm w-36"
+          />
+          <select value={type} onChange={(e) => setType(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm">
+            <option>PDF</option>
+            <option>PPT</option>
+            <option>DOC</option>
+            <option>XLS</option>
+            <option>ZIP</option>
+            <option>TXT</option>
+            <option>CSV</option>
+            <option>File</option>
+            <option>Video</option>
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,.csv,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            onChange={(ev) => void onFileChange(ev)}
+          />
+          <button
+            type="button"
+            onClick={onPickFile}
+            disabled={saving || uploadBusy}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {uploadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {uploadBusy ? 'Uploading…' : 'Choose file from computer'}
+          </button>
+          <span className="text-xs text-slate-500">then review title and click Add to list</span>
+        </div>
+        {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
+        <div>
+          <label className="text-xs font-medium text-gray-600">Download URL (filled after upload, or paste external link)</label>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://… or API URL after upload"
+            className="mt-1 w-full max-w-xl rounded border border-gray-300 px-2 py-1.5 text-sm"
+          />
+        </div>
+        <button type="submit" disabled={saving || uploadBusy || !url.trim()} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          Add to study materials
+        </button>
       </form>
       {materials.length === 0 ? (
         <p className="text-sm text-slate-gray">No materials yet.</p>
       ) : (
         <ul className="space-y-2">
           {materials.map((m, i) => (
-            <li key={i} className="flex items-center justify-between rounded-lg border border-gray-200 p-2">
-              <span className="font-medium">{m.title}</span> <span className="text-slate-500 text-xs">{m.type} · {m.module}</span>
-              <button type="button" onClick={() => onRemove(i)} className="p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
+            <li key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-2">
+              <div className="min-w-0">
+                <span className="font-medium text-gray-900">{m.title}</span>
+                <span className="text-slate-500 text-xs"> · {m.type}{m.module ? ` · ${m.module}` : ''}</span>
+                {m.url ? (
+                  <p className="truncate text-[11px] text-slate-400 max-w-md" title={m.url}>
+                    {m.url}
+                  </p>
+                ) : null}
+              </div>
+              <button type="button" onClick={() => onRemove(i)} className="p-1 text-red-600 hover:bg-red-50 rounded shrink-0" aria-label="Remove material">
+                <Trash2 className="h-4 w-4" />
+              </button>
             </li>
           ))}
         </ul>
@@ -496,37 +617,107 @@ function AssignmentsTab({
 function QuizzesTab({
   quizzes,
   onAdd,
+  onUpdate,
   onRemove,
   saving,
 }: {
-  quizzes: Array<{ title: string; dueDate: string }>
+  quizzes: Array<{ id?: string; title: string; dueDate: string }>
   onAdd: (q: { title: string; dueDate: string }) => void
+  onUpdate: (index: number, q: { title: string; dueDate: string }) => void
   onRemove: (i: number) => void
   saving: boolean
 }) {
+  const [selection, setSelection] = useState<'new' | number>('new')
   const [title, setTitle] = useState('')
   const [dueDate, setDueDate] = useState('')
+
+  const applySelection = (sel: 'new' | number) => {
+    setSelection(sel)
+    if (sel === 'new') {
+      setTitle('')
+      setDueDate('')
+    } else if (quizzes[sel]) {
+      setTitle(quizzes[sel].title)
+      setDueDate(quizzes[sel].dueDate || '')
+    }
+  }
+
+  useEffect(() => {
+    if (selection === 'new') return
+    if (!quizzes[selection]) {
+      applySelection('new')
+      return
+    }
+    setTitle(quizzes[selection].title)
+    setDueDate(quizzes[selection].dueDate || '')
+  }, [quizzes, selection])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
-    onAdd({ title: title.trim(), dueDate })
-    setTitle(''); setDueDate('')
+    if (selection === 'new') {
+      onAdd({ title: title.trim(), dueDate })
+      setTitle('')
+      setDueDate('')
+    } else {
+      onUpdate(selection, { title: title.trim(), dueDate })
+    }
   }
+
+  const removeAt = (i: number) => {
+    onRemove(i)
+    if (selection === i) applySelection('new')
+    else if (typeof selection === 'number' && selection > i) setSelection(selection - 1)
+  }
+
   return (
     <div className="space-y-4">
-      <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 items-end">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Quiz title" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-48" required />
+      <div className="max-w-md space-y-1">
+        <label htmlFor="quiz-select" className="block text-sm font-medium text-gray-700">Select quiz</label>
+        <select
+          id="quiz-select"
+          value={selection === 'new' ? 'new' : String(selection)}
+          onChange={(e) => {
+            const v = e.target.value
+            applySelection(v === 'new' ? 'new' : parseInt(v, 10))
+          }}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+        >
+          <option value="new">Add new quiz…</option>
+          {quizzes.map((q, i) => (
+            <option key={q.id ?? `q_${i}`} value={String(i)}>{q.title || `Quiz ${i + 1}`}</option>
+          ))}
+        </select>
+        <p className="text-xs text-slate-500">Choose an existing quiz to edit its title and due date, or add a new one.</p>
+      </div>
+      <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 items-end max-w-xl">
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Quiz title" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-48 min-w-[12rem]" required />
         <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm" />
-        <button type="submit" disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">Add Quiz</button>
+        <button type="submit" disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">
+          {selection === 'new' ? 'Add Quiz' : 'Save changes'}
+        </button>
+        {selection !== 'new' && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => applySelection('new')}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        )}
       </form>
       {quizzes.length === 0 ? (
         <p className="text-sm text-slate-gray">No quizzes yet.</p>
       ) : (
         <ul className="space-y-2">
           {quizzes.map((q, i) => (
-            <li key={i} className="flex items-center justify-between rounded-lg border border-gray-200 p-2">
-              <span className="font-medium">{q.title}</span> {q.dueDate && <span className="text-slate-500 text-xs">Due {q.dueDate}</span>}
-              <button type="button" onClick={() => onRemove(i)} className="p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
+            <li key={q.id ?? `row_${i}`} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 p-2">
+              <div className="min-w-0">
+                <span className="font-medium">{q.title}</span>
+                {q.dueDate ? <span className="text-slate-500 text-xs ml-2">Due {q.dueDate}</span> : null}
+              </div>
+              <button type="button" onClick={() => removeAt(i)} className="shrink-0 p-1 text-red-600 hover:bg-red-50 rounded" title="Delete quiz"><Trash2 className="h-4 w-4" /></button>
             </li>
           ))}
         </ul>

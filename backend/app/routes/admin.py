@@ -1,8 +1,13 @@
 """
 Admin: dashboard, course CRUD, students, leads, payments, companies, internships, certificates. Admin JWT required.
 """
+import os
 import re
+import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
+
+from werkzeug.utils import secure_filename
 from bson import ObjectId
 from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
@@ -132,7 +137,7 @@ def _course_to_detail(c):
     out["shortDescription"] = c.get("shortDescription", "")
     out["fullDescription"] = c.get("fullDescription", "")
     out["trainerName"] = c.get("trainerName", "")
-    out["difficulty"] = c.get("difficulty", "") or "Intermediate"
+    out["difficulty"] = c.get("difficulty", "") or "all"
     out["featuredImageUrl"] = c.get("featuredImageUrl", "") or ""
     out["introVideoUrl"] = c.get("introVideoUrl", "") or ""
     out["originalPrice"] = int(c.get("originalPrice") or 0)
@@ -150,6 +155,16 @@ def _course_to_detail(c):
     out["durationUnit"] = c.get("durationUnit", "weeks")
     out["courses"] = c.get("courses", [])
     out["streams"] = c.get("streams", [])
+    out["subjects"] = c.get("subjects") if isinstance(c.get("subjects"), list) else []
+    out["trainingStartDate"] = (c.get("trainingStartDate") or "") or ""
+    out["trainingEndDate"] = (c.get("trainingEndDate") or "") or ""
+    tmx = c.get("trainingMaxSeats")
+    out["trainingMaxSeats"] = None
+    if tmx is not None and str(tmx).strip() != "":
+        try:
+            out["trainingMaxSeats"] = int(tmx)
+        except (TypeError, ValueError):
+            out["trainingMaxSeats"] = None
     out["batches"] = c.get("batches", [])
     out["curriculum"] = c.get("curriculum", [])
     out["classLinks"] = c.get("classLinks", [])
@@ -222,7 +237,7 @@ def courses():
         "active": data.get("active", True),
         "createdAt": datetime.utcnow(),
         "updatedAt": datetime.utcnow(),
-        "difficulty": (data.get("difficulty") or "Intermediate").strip() or "Intermediate",
+        "difficulty": (data.get("difficulty") or "all").strip() or "all",
         "featuredImageUrl": (data.get("featuredImageUrl") or "").strip(),
         "introVideoUrl": (data.get("introVideoUrl") or "").strip(),
         "originalPrice": original_price,
@@ -236,8 +251,6 @@ def courses():
     if lv not in ("public", "unlisted"):
         lv = "public"
     doc["listingVisibility"] = lv
-    if isinstance(data.get("marketingCategories"), list):
-        doc["marketingCategories"] = [str(x).strip() for x in data["marketingCategories"] if str(x).strip()]
     sched = (data.get("scheduledPublishAt") or "").strip()
     if sched:
         doc["scheduledPublishAt"] = sched
@@ -262,8 +275,22 @@ def courses():
         doc["courses"] = data["courses"]
     if isinstance(data.get("streams"), list):
         doc["streams"] = data["streams"]
+    if isinstance(data.get("subjects"), list):
+        doc["subjects"] = [str(x).strip() for x in data["subjects"] if str(x).strip()]
     if isinstance(data.get("batches"), list):
         doc["batches"] = data["batches"]
+    ts = (data.get("trainingStartDate") or "").strip()
+    if ts:
+        doc["trainingStartDate"] = ts
+    te = (data.get("trainingEndDate") or "").strip()
+    if te:
+        doc["trainingEndDate"] = te
+    tms = data.get("trainingMaxSeats")
+    if tms is not None and str(tms).strip() != "":
+        try:
+            doc["trainingMaxSeats"] = max(0, int(tms))
+        except (TypeError, ValueError):
+            pass
     if "curriculum" in data:
         norm, terr = normalize_curriculum(data.get("curriculum"))
         if terr:
@@ -504,7 +531,7 @@ def update_course(course_id):
                 return jsonify({"error": "Slug already in use"}), 400
             updates["slug"] = new_slug
     if "difficulty" in data:
-        updates["difficulty"] = (str(data.get("difficulty") or "Intermediate").strip() or "Intermediate")
+        updates["difficulty"] = (str(data.get("difficulty") or "all").strip() or "all")
     if "featuredImageUrl" in data:
         updates["featuredImageUrl"] = (str(data.get("featuredImageUrl") or "")).strip()
     if "introVideoUrl" in data:
@@ -539,6 +566,23 @@ def update_course(course_id):
         updates["courses"] = data["courses"]
     if "streams" in data and isinstance(data["streams"], list):
         updates["streams"] = data["streams"]
+    if "subjects" in data and isinstance(data.get("subjects"), list):
+        updates["subjects"] = [str(x).strip() for x in data["subjects"] if str(x).strip()]
+    if "trainingStartDate" in data:
+        ts = (str(data.get("trainingStartDate") or "")).strip()
+        updates["trainingStartDate"] = ts if ts else None
+    if "trainingEndDate" in data:
+        te = (str(data.get("trainingEndDate") or "")).strip()
+        updates["trainingEndDate"] = te if te else None
+    if "trainingMaxSeats" in data:
+        tms = data.get("trainingMaxSeats")
+        if tms is None or str(tms).strip() == "":
+            updates["trainingMaxSeats"] = None
+        else:
+            try:
+                updates["trainingMaxSeats"] = max(0, int(tms))
+            except (TypeError, ValueError):
+                updates["trainingMaxSeats"] = None
     if updates:
         updates["updatedAt"] = datetime.utcnow()
         coll.update_one({"_id": ObjectId(course_id)}, {"$set": updates})
@@ -1101,3 +1145,84 @@ def certificates_trainings():
     cursor = get_courses_collection().find({"active": True}).sort("title", 1)
     items = [{"id": str(c["_id"]), "title": c.get("title", "")} for c in cursor]
     return jsonify({"items": items})
+
+
+_MEDIA_UPLOAD_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(jpe?g|png|mp4|mov|avi)$",
+    re.IGNORECASE,
+)
+_STUDY_MATERIAL_UPLOAD_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(pdf|pptx?|docx?|xlsx?|zip|txt|csv)$",
+    re.IGNORECASE,
+)
+
+_STUDY_MATERIAL_EXTS = frozenset({".pdf", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".csv"})
+
+
+def _course_upload_root():
+    root = Path(current_app.instance_path) / "course_uploads"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+@admin_bp.route("/uploads/course-media", methods=["POST"])
+@jwt_required()
+def upload_course_media():
+    """Store featured image, intro/lesson video, or study-material document; returns API-relative URL path."""
+    err = _admin_required()
+    if err:
+        return err
+    if "file" not in request.files:
+        return jsonify({"error": "Missing file"}), 400
+    uf = request.files["file"]
+    if not uf or not uf.filename:
+        return jsonify({"error": "Empty file"}), 400
+    kind = (request.form.get("kind") or "").strip().lower()
+    if kind not in ("featured", "intro", "lesson", "material"):
+        return jsonify({"error": "Invalid kind; use featured, intro, lesson, or material"}), 400
+    raw_name = secure_filename(uf.filename) or "file.bin"
+    ext = Path(raw_name).suffix.lower()
+    if kind == "featured":
+        if ext not in (".jpg", ".jpeg", ".png"):
+            return jsonify({"error": "Featured image must be JPEG or PNG"}), 400
+        max_bytes = 2 * 1024 * 1024
+    elif kind == "material":
+        if ext not in _STUDY_MATERIAL_EXTS:
+            return jsonify(
+                {
+                    "error": "Study material must be PDF, PPT/PPTX, DOC/DOCX, XLS/XLSX, ZIP, TXT, or CSV",
+                }
+            ), 400
+        max_mb = int(current_app.config.get("MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB", 50))
+        max_bytes = max(1, max_mb) * 1024 * 1024
+    else:
+        if ext not in (".mp4", ".mov", ".avi"):
+            return jsonify({"error": "Video must be MP4, MOV, or AVI"}), 400
+        max_mb = int(
+            current_app.config.get(
+                "MAX_COURSE_LESSON_UPLOAD_MB" if kind == "lesson" else "MAX_COURSE_INTRO_UPLOAD_MB",
+                80,
+            )
+        )
+        max_bytes = max(1, max_mb) * 1024 * 1024
+    try:
+        uf.seek(0, os.SEEK_END)
+        sz = uf.tell()
+        uf.seek(0)
+    except OSError:
+        return jsonify({"error": "Could not read upload"}), 400
+    if sz > max_bytes:
+        return jsonify({"error": f"File too large (max {max_bytes // 1024 // 1024}MB for this field)"}), 400
+    if sz <= 0:
+        return jsonify({"error": "Empty file"}), 400
+    safe_ext = ".jpg" if ext == ".jpeg" else ext
+    fn = f"{uuid.uuid4().hex}_{uuid.uuid4().hex[:8]}{safe_ext}"
+    name_ok = _STUDY_MATERIAL_UPLOAD_NAME_RE.match(fn) if kind == "material" else _MEDIA_UPLOAD_NAME_RE.match(fn)
+    if not name_ok:
+        return jsonify({"error": "Invalid generated name"}), 500
+    dest_dir = _course_upload_root() / kind
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / fn
+    uf.save(str(dest))
+    url_path = f"/api/courses/media/{kind}/{fn}"
+    return jsonify({"url": url_path})

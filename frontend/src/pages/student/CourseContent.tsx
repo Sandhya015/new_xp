@@ -24,6 +24,8 @@ import { courseService, type CourseContent, type PythonQuizQuestion } from '@/se
 import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
 import { certificateService } from '@/services/certificateService'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
+import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
+import { absoluteApiUrl } from '@/config/api'
 
 const CERTIFICATE_PDF_DOWNLOAD_LIMIT = 2
 
@@ -38,11 +40,46 @@ const TABS = [
   { id: 'certificate', label: 'Certificate', icon: Award },
 ] as const
 
+function directVideoSrc(url: string): string | null {
+  const u = (url || '').trim()
+  if (!u) return null
+  if (/^https?:\/\//i.test(u) && /\.(mp4|webm|mov)(\?|$)/i.test(u)) return u
+  if (u.startsWith('/api/courses/media/')) return absoluteApiUrl(u)
+  return null
+}
+
+function materialDownloadHref(url: string): string {
+  const u = (url || '').trim()
+  if (!u) return '#'
+  if (/^https?:\/\//i.test(u)) return u
+  return absoluteApiUrl(u.startsWith('/') ? u : `/${u.replace(/^\/+/, '')}`)
+}
+
+type EnrolledCurriculumTopic = {
+  id?: string
+  title?: string
+  type?: string
+  duration?: string
+  details?: string
+  lockedUntilPayment?: boolean
+  lessonVideoUrl?: string
+  lessonContent?: string
+  lessonVideoAttachMode?: string
+}
+
 function completionQuizCopy(slug: string | undefined) {
-  if ((slug || '').toLowerCase() === 'demo-java-programming-seed') {
+  const s = (slug || '').toLowerCase()
+  if (s === 'demo-java-programming-seed') {
     return {
       title: 'Java completion quiz',
       passedTitle: 'You have passed the Java completion quiz.',
+      intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
+    }
+  }
+  if (s === 'aiml-foundations-seed') {
+    return {
+      title: 'AIML foundations quiz',
+      passedTitle: 'You have passed the AIML foundations quiz.',
       intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
     }
   }
@@ -354,6 +391,55 @@ export function CourseContent() {
         <p className="mt-1 text-sm text-slate-gray">Trainer: {course.trainerName}</p>
       )}
 
+      {(() => {
+        const intro = (course.introVideoUrl || '').trim()
+        if (!intro) return null
+        const yt = getYoutubeEmbedUrl(intro)
+        const watch = getYoutubeWatchUrl(intro)
+        const direct = directVideoSrc(intro)
+        return (
+          <div className="mt-6 rounded-xl border border-gray-200 bg-slate-900/5 p-4 sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Intro video</h2>
+            {yt ? (
+              <div className="mt-3 aspect-video w-full max-w-3xl overflow-hidden rounded-lg border border-gray-200 bg-black shadow-sm">
+                <iframe
+                  title="Course intro"
+                  src={yt}
+                  className="h-full w-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  referrerPolicy="strict-origin-when-cross-origin"
+                />
+              </div>
+            ) : direct ? (
+              <video
+                className="mt-3 w-full max-w-3xl rounded-lg border border-gray-200 bg-black"
+                controls
+                playsInline
+                preload="metadata"
+                src={direct}
+              >
+                <track kind="captions" />
+              </video>
+            ) : (
+              <p className="mt-2 text-sm text-gray-700">
+                Open the intro in a new tab:{' '}
+                <a href={intro} target="_blank" rel="noopener noreferrer" className="font-medium text-brand-accent underline">
+                  {intro.length > 80 ? `${intro.slice(0, 80)}…` : intro}
+                </a>
+              </p>
+            )}
+            {watch ? (
+              <p className="mt-2 text-xs text-slate-600">
+                <a href={watch} target="_blank" rel="noopener noreferrer" className="text-brand-accent hover:underline">
+                  Open on YouTube
+                </a>
+              </p>
+            ) : null}
+          </div>
+        )
+      })()}
+
       <div className="mt-6 flex flex-wrap gap-2 border-b border-gray-200">
         {TABS.map((tab) => (
           <button
@@ -431,14 +517,14 @@ export function CourseContent() {
         })()}
         {activeTab === 'curriculum' && (
           <div className="space-y-4">
-            {(!course.curriculum || course.curriculum.length === 0) ? (
+            {!course.curriculum || course.curriculum.length === 0 ? (
               <p className="text-slate-gray">No curriculum added yet.</p>
             ) : (
               (course.curriculum as Array<{
                 id?: string
                 title?: string
                 name?: string
-                topics?: Array<string | { id?: string; title?: string; type?: string; duration?: string; lockedUntilPayment?: boolean }>
+                topics?: Array<string | EnrolledCurriculumTopic>
               }>).map((mod, i) => {
                 const priceNum = (() => {
                   const p = course.price
@@ -455,31 +541,84 @@ export function CourseContent() {
                     {mod.topics && mod.topics.length > 0 && (
                       <ul className="mt-2 divide-y divide-gray-100 rounded-md border border-gray-100">
                         {mod.topics.map((t, j) => {
-                          const topic = typeof t === 'string' ? { title: t } : t
+                          const topic: EnrolledCurriculumTopic =
+                            typeof t === 'string' ? { title: t } : (t as EnrolledCurriculumTopic)
                           const title = topic.title || (typeof t === 'string' ? t : 'Topic')
                           const typ = topic.type ? ` · ${topic.type}` : ''
                           const dur = topic.duration ? ` · ${topic.duration}` : ''
                           const gated = !isFreeCourse && topic.lockedUntilPayment === true && !paymentUnlocked
+                          const videoUrl = (topic.lessonVideoUrl || '').trim()
+                          const ytEmbed = !gated && videoUrl ? getYoutubeEmbedUrl(videoUrl) : null
+                          const directVideo = !gated && videoUrl ? directVideoSrc(videoUrl) : null
+                          const notesHtml = (topic.lessonContent || '').trim() || (topic.details || '').trim()
+                          const isLecture = (topic.type || 'Lecture') === 'Lecture'
+                          const isQuiz = topic.type === 'Quiz'
                           return (
-                            <li key={topic.id || j} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm text-gray-700">
-                              <span className="min-w-0">
-                                <span className="font-medium text-gray-900">{title}</span>
-                                <span className="text-gray-500">{typ}</span>
-                                <span className="text-gray-400">{dur}</span>
-                              </span>
-                              <span className="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
-                                {gated ? (
-                                  <>
-                                    <Lock className="h-4 w-4 text-amber-600" aria-hidden />
-                                    <span>Complete payment to unlock</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Unlock className="h-4 w-4 text-emerald-600" aria-hidden />
-                                    <span>Unlocked</span>
-                                  </>
-                                )}
-                              </span>
+                            <li key={topic.id || j} className="px-3 py-3 text-sm text-gray-700">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="min-w-0">
+                                  <span className="font-medium text-gray-900">{title}</span>
+                                  <span className="text-gray-500">{typ}</span>
+                                  <span className="text-gray-400">{dur}</span>
+                                </span>
+                                <span className="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
+                                  {gated ? (
+                                    <>
+                                      <Lock className="h-4 w-4 text-amber-600" aria-hidden />
+                                      <span>Complete payment to unlock</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Unlock className="h-4 w-4 text-emerald-600" aria-hidden />
+                                      <span>Unlocked</span>
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+                              {!gated && isLecture && (ytEmbed || directVideo) ? (
+                                <div className="mt-3 aspect-video w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-black shadow-sm">
+                                  {ytEmbed ? (
+                                    <iframe
+                                      title={title}
+                                      src={ytEmbed}
+                                      className="h-full w-full"
+                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                      allowFullScreen
+                                      referrerPolicy="strict-origin-when-cross-origin"
+                                    />
+                                  ) : (
+                                    <video
+                                      className="h-full w-full"
+                                      controls
+                                      playsInline
+                                      preload="metadata"
+                                      src={directVideo || undefined}
+                                    >
+                                      <track kind="captions" />
+                                    </video>
+                                  )}
+                                </div>
+                              ) : null}
+                              {gated && isLecture && videoUrl ? (
+                                <p className="mt-2 text-xs text-amber-800">Lesson video is available after your enrollment shows a successful payment.</p>
+                              ) : null}
+                              {!gated && isLecture && notesHtml ? (
+                                <div
+                                  className="prose prose-sm prose-slate mt-3 max-w-none text-gray-700 [&_a]:text-brand-accent [&_p]:mt-2 [&_ul]:mt-2"
+                                  dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(notesHtml) }}
+                                />
+                              ) : null}
+                              {!gated && isQuiz ? (
+                                <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                                  This topic is a <strong>curriculum quiz</strong> (study checklist). For scored completion
+                                  and certificates (when enabled), use the <strong>Quizzes</strong> tab.
+                                </p>
+                              ) : null}
+                              {!gated && topic.type === 'Assignment' ? (
+                                <p className="mt-2 text-xs text-slate-600">
+                                  Assignment instructions appear here when your trainer publishes them in full.
+                                </p>
+                              ) : null}
                             </li>
                           )
                         })}
@@ -535,7 +674,7 @@ export function CourseContent() {
                   </div>
                   {m.url && (
                     <a
-                      href={m.url}
+                      href={materialDownloadHref(m.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"

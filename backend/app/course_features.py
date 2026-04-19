@@ -24,4 +24,6 @@ def course_has_completion_quiz(course: dict | None) -> bool:
     slug = (course.get("slug") or "").strip().lower()
     if slug == "demo-java-programming-seed":
         return True
+    if slug == "aiml-foundations-seed":
+        return True
     return False

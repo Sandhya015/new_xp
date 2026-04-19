@@ -36,12 +36,18 @@ QUIZ_SETTINGS_DEFAULTS: Dict[str, Any] = {
     "hideQuestionNumber": False,
     "shortAnswerCharLimit": "200",
     "essayCharLimit": "500",
+    "resultReveal": "immediate",
+    "quizDeadlineAt": "",
+    "allowReattempt": True,
+    "reattemptMax": "3",
 }
 
 ALLOWED_TIME_UNITS = frozenset({"Minutes", "Hours", "Seconds"})
 ALLOWED_FEEDBACK = frozenset({"retry", "reveal", "default"})
 ALLOWED_LAYOUT = frozenset({"single_question", "multiple"})
 ALLOWED_ORDER = frozenset({"sort", "random"})
+ALLOWED_RESULT_REVEAL = frozenset({"immediate", "after_deadline", "hidden"})
+QUIZ_Q_TYPES = frozenset({"mcq", "true_false", "short_answer", "fill_blank"})
 
 
 def _str(val: Any, default: str = "", max_len: Optional[int] = None) -> str:
@@ -98,7 +104,24 @@ def normalize_quiz_settings(raw: Any) -> Dict[str, Any]:
     out["hideQuestionNumber"] = _bool(raw.get("hideQuestionNumber"), out["hideQuestionNumber"])
     out["shortAnswerCharLimit"] = _optional_str(raw.get("shortAnswerCharLimit"), 8) or out["shortAnswerCharLimit"]
     out["essayCharLimit"] = _optional_str(raw.get("essayCharLimit"), 8) or out["essayCharLimit"]
+    rr = _optional_str(raw.get("resultReveal"), 24) or out["resultReveal"]
+    out["resultReveal"] = rr if rr in ALLOWED_RESULT_REVEAL else out["resultReveal"]
+    out["quizDeadlineAt"] = _optional_str(raw.get("quizDeadlineAt"), 64) or out["quizDeadlineAt"]
+    out["allowReattempt"] = _bool(raw.get("allowReattempt"), out["allowReattempt"])
+    out["reattemptMax"] = _optional_str(raw.get("reattemptMax"), 8) or out["reattemptMax"]
     return out
+
+
+def _quiz_marks(raw: Any) -> float:
+    try:
+        m = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    if m < 0:
+        return 0.0
+    if m > 1000:
+        return 1000.0
+    return m
 
 
 def normalize_quiz_question(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
@@ -108,21 +131,82 @@ def normalize_quiz_question(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
     if not qid:
         qid = f"q_{idx}"
     title = _optional_str(raw.get("title"), 10_000)
-    opts = raw.get("options")
-    if not isinstance(opts, list):
-        opts = ["", ""]
-    options: List[str] = []
-    for o in opts[:MAX_OPTIONS_PER_QUESTION]:
-        options.append(_optional_str(o, 5_000))
-    while len(options) < 2:
-        options.append("")
-    ci = raw.get("correctOptionIndex", 0)
-    try:
-        ci = int(ci)
-    except (TypeError, ValueError):
-        ci = 0
-    ci = max(0, min(ci, len(options) - 1))
-    return {"id": qid, "title": title, "options": options, "correctOptionIndex": ci}
+    qtype = _optional_str(raw.get("questionType"), 24).lower() or "mcq"
+    if qtype not in QUIZ_Q_TYPES:
+        qtype = "mcq"
+    marks = _quiz_marks(raw.get("marks"))
+    base: Dict[str, Any] = {"id": qid, "title": title, "questionType": qtype, "marks": marks}
+
+    if qtype == "mcq":
+        opts = raw.get("options")
+        if not isinstance(opts, list):
+            opts = ["", ""]
+        options: List[str] = []
+        for o in opts[:MAX_OPTIONS_PER_QUESTION]:
+            options.append(_optional_str(o, 5_000))
+        while len(options) < 2:
+            options.append("")
+        ci = raw.get("correctOptionIndex", 0)
+        try:
+            ci = int(ci)
+        except (TypeError, ValueError):
+            ci = 0
+        ci = max(0, min(ci, len(options) - 1))
+        base["options"] = options
+        base["correctOptionIndex"] = ci
+        return base
+
+    if qtype == "true_false":
+        base["tfCorrect"] = _bool(raw.get("tfCorrect"), True)
+        return base
+
+    if qtype == "short_answer":
+        base["modelAnswer"] = _optional_str(raw.get("modelAnswer"), 50_000)
+        return base
+
+    if qtype == "fill_blank":
+        blanks = raw.get("fillBlankAnswers")
+        answers: List[str] = []
+        if isinstance(blanks, list):
+            for b in blanks[:40]:
+                answers.append(_optional_str(b, 2_000))
+        base["fillBlankAnswers"] = answers
+        return base
+
+    return None
+
+
+def normalize_assignment(raw: Any) -> Dict[str, Any]:
+    """Assignment topic payload for curriculum (admin / student metadata)."""
+    if not isinstance(raw, dict):
+        return {
+            "title": "",
+            "instructions": "",
+            "maxMarks": "10",
+            "deadline": "",
+            "allowText": True,
+            "allowPdf": False,
+            "allowDoc": False,
+            "allowZip": False,
+            "maxFileSizeMb": "25",
+            "modelAnswer": "",
+            "allowResubmission": False,
+            "resubmissionDeadline": "",
+        }
+    return {
+        "title": _optional_str(raw.get("title"), MAX_TOPIC_TITLE_LEN),
+        "instructions": _optional_str(raw.get("instructions"), MAX_TOPIC_DETAILS_CHARS),
+        "maxMarks": _optional_str(raw.get("maxMarks"), 12) or "10",
+        "deadline": _optional_str(raw.get("deadline"), 64),
+        "allowText": _bool(raw.get("allowText"), True),
+        "allowPdf": _bool(raw.get("allowPdf"), False),
+        "allowDoc": _bool(raw.get("allowDoc"), False),
+        "allowZip": _bool(raw.get("allowZip"), False),
+        "maxFileSizeMb": _optional_str(raw.get("maxFileSizeMb"), 8) or "25",
+        "modelAnswer": _optional_str(raw.get("modelAnswer"), 20_000),
+        "allowResubmission": _bool(raw.get("allowResubmission"), False),
+        "resubmissionDeadline": _optional_str(raw.get("resubmissionDeadline"), 64),
+    }
 
 
 def normalize_topic(raw: Any, topic_index: int) -> Dict[str, Any]:
@@ -206,6 +290,9 @@ def normalize_topic(raw: Any, topic_index: int) -> Dict[str, Any]:
             base["quizQuestions"] = questions
         qs = raw.get("quizSettings")
         base["quizSettings"] = normalize_quiz_settings(qs)
+
+    if ttype == "Assignment":
+        base["assignment"] = normalize_assignment(raw.get("assignment"))
 
     # Optional: gate some topics until payment is recorded (orderId on enrollment). Student UI can read this.
     if "lockedUntilPayment" in raw:

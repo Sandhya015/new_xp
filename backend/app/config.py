@@ -5,6 +5,16 @@ import os
 from typing import List
 
 
+def _int_mb_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
 def _smtp_timeout_seconds() -> int:
     """SMTP socket timeout. On Lambda, keep well under API Gateway's 29s integration limit."""
     raw = os.environ.get("SMTP_TIMEOUT", "").strip()
@@ -42,6 +52,10 @@ class Config:
     SES_REGION = os.environ.get("SES_REGION", "").strip()
     # Only this email may use POST /api/auth/admin/login and receive admin_portal JWTs.
     ADMIN_PANEL_ALLOWED_EMAIL = (os.environ.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
+    # Admin course-media uploads (MP4/MOV/AVI); intro vs lesson can differ per stage.
+    MAX_COURSE_INTRO_UPLOAD_MB = _int_mb_env("MAX_COURSE_INTRO_UPLOAD_MB", 80)
+    MAX_COURSE_LESSON_UPLOAD_MB = _int_mb_env("MAX_COURSE_LESSON_UPLOAD_MB", 80)
+    MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB = _int_mb_env("MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB", 50)
 
 
 class DevelopmentConfig(Config):

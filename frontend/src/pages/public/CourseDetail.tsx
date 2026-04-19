@@ -27,6 +27,8 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
+import { absoluteApiUrl } from '@/config/api'
+import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
 
 type PublicTopic = {
   id: string
@@ -70,25 +72,9 @@ type PublicCourse = {
   curriculum?: PublicModule[]
   enrollmentCount?: number
   updatedAt?: string | null
-}
-
-function getYoutubeEmbedUrl(url: string): string | null {
-  const raw = (url || '').trim()
-  if (!raw) return null
-  try {
-    const u = new URL(raw)
-    if (u.hostname === 'youtu.be' || u.hostname.endsWith('.youtu.be')) {
-      const vid = u.pathname.replace(/^\//, '').split('/')[0]
-      return vid ? `https://www.youtube.com/embed/${vid}` : null
-    }
-    if (u.hostname.includes('youtube.com')) {
-      const vid = u.searchParams.get('v')
-      if (vid) return `https://www.youtube.com/embed/${vid}`
-    }
-  } catch {
-    return null
-  }
-  return null
+  trainingStartDate?: string
+  trainingEndDate?: string
+  trainingMaxSeats?: number | null
 }
 
 function linesFromText(s: string | undefined): string[] {
@@ -97,6 +83,20 @@ function linesFromText(s: string | undefined): string[] {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
+}
+
+function formatTrainingDate(ymd: string): string {
+  const raw = (ymd || '').trim()
+  if (!raw) return ''
+  const d = new Date(raw.includes('T') ? raw : `${raw}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return raw
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function difficultyLabel(raw: string | undefined): string {
+  const d = (raw || '').trim().toLowerCase()
+  if (d === 'all') return 'All Levels'
+  return (raw || '').trim() || 'Intermediate'
 }
 
 function formatUpdatedAt(iso: string | null | undefined): string {
@@ -179,8 +179,14 @@ export function CourseDetail() {
   }, [course?.id, token])
 
   const embedUrl = useMemo(() => (course?.introVideoUrl ? getYoutubeEmbedUrl(course.introVideoUrl) : null), [course?.introVideoUrl])
+  const youtubeWatchUrl = useMemo(
+    () => (course?.introVideoUrl ? getYoutubeWatchUrl(course.introVideoUrl) : null),
+    [course?.introVideoUrl],
+  )
 
   const audienceLines = useMemo(() => linesFromText(course?.targetAudience), [course?.targetAudience])
+
+  const instructionLines = useMemo(() => linesFromText(course?.instructions), [course?.instructions])
 
   const toggleModule = (mid: string) => {
     setOpenModules((prev) => {
@@ -235,8 +241,14 @@ export function CourseDetail() {
   const aboutClamped = aboutPlainLen > 420 && !aboutExpanded
   const listPrice = course.originalPrice && course.originalPrice > course.price ? course.originalPrice : null
   const enrolled = typeof course.enrollmentCount === 'number' ? course.enrollmentCount : 0
-  const instructorName = (course.authorName || course.trainerName || '').trim()
+  const instructorName = (course.trainerName || '').trim()
   const initial = instructorName ? instructorName.charAt(0).toUpperCase() : 'E'
+  const maxSeats =
+    course.trainingMaxSeats != null && Number.isFinite(Number(course.trainingMaxSeats))
+      ? Number(course.trainingMaxSeats)
+      : null
+  const seatsLeft = maxSeats != null && maxSeats > 0 ? Math.max(0, maxSeats - enrolled) : null
+  const enrollmentFull = seatsLeft !== null && seatsLeft <= 0 && userIsEnrolled !== true
 
   const tabBar = (
     <div className="flex gap-8 border-b border-gray-200">
@@ -370,7 +382,7 @@ export function CourseDetail() {
               {course.featuredImageUrl ? (
                 <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
                   <img
-                    src={course.featuredImageUrl}
+                    src={absoluteApiUrl(course.featuredImageUrl)}
                     alt=""
                     className="aspect-[21/9] w-full object-cover sm:aspect-video"
                   />
@@ -416,7 +428,7 @@ export function CourseDetail() {
                 ) : (
                   <button
                     type="button"
-                    disabled={busy || (Boolean(token) && userIsEnrolled === null)}
+                    disabled={busy || (Boolean(token) && userIsEnrolled === null) || enrollmentFull}
                     onClick={() => {
                       clearError()
                       void startCheckout({
@@ -428,11 +440,13 @@ export function CourseDetail() {
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60 min-h-[44px]"
                   >
                     {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {Boolean(token) && userIsEnrolled === null
-                      ? 'Checking enrollment…'
-                      : course.price > 0
-                        ? 'Add to cart'
-                        : 'Enroll free'}
+                    {enrollmentFull
+                      ? 'Fully booked'
+                      : Boolean(token) && userIsEnrolled === null
+                        ? 'Checking enrollment…'
+                        : course.price > 0
+                          ? 'Add to cart'
+                          : 'Enroll free'}
                   </button>
                 )}
 
@@ -441,7 +455,7 @@ export function CourseDetail() {
                     <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
                     <span>
                       <span className="font-medium text-gray-900">Level</span>
-                      <span className="text-gray-600"> · {course.difficulty || 'Intermediate'}</span>
+                      <span className="text-gray-600"> · {difficultyLabel(course.difficulty)}</span>
                     </span>
                   </li>
                   <li className="flex items-start gap-3">
@@ -461,6 +475,36 @@ export function CourseDetail() {
                       <span className="text-gray-600"> · {course.duration || '—'}</span>
                     </span>
                   </li>
+                  {course.trainingStartDate?.trim() || course.trainingEndDate?.trim() ? (
+                    <li className="flex items-start gap-3">
+                      <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                      <span>
+                        <span className="font-medium text-gray-900">Schedule</span>
+                        <span className="text-gray-600">
+                          {' '}
+                          ·
+                          {course.trainingStartDate?.trim()
+                            ? ` Starts ${formatTrainingDate(course.trainingStartDate)}`
+                            : ''}
+                          {course.trainingEndDate?.trim()
+                            ? `${course.trainingStartDate?.trim() ? ' ·' : ''} Ends ${formatTrainingDate(course.trainingEndDate)}`
+                            : ''}
+                        </span>
+                      </span>
+                    </li>
+                  ) : null}
+                  {seatsLeft !== null ? (
+                    <li className="flex items-start gap-3">
+                      <Users className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                      <span>
+                        <span className="font-medium text-gray-900">Seats</span>
+                        <span className="text-gray-600">
+                          {' '}
+                          · {seatsLeft} of {maxSeats} available
+                        </span>
+                      </span>
+                    </li>
+                  ) : null}
                   <li className="flex items-start gap-3">
                     <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden />
                     <span>
@@ -485,7 +529,7 @@ export function CourseDetail() {
 
                 {course.materialsIncluded && course.materialsIncluded.length > 0 ? (
                   <div className="mt-5 border-t border-gray-100 pt-5">
-                    <h3 className="text-sm font-bold text-gray-900">Material includes</h3>
+                    <h3 className="text-sm font-bold text-gray-900">What&apos;s included</h3>
                     <ul className="mt-2 list-disc space-y-1.5 pl-4 text-sm text-gray-600">
                       {course.materialsIncluded.map((m, i) => (
                         <li key={i}>{m}</li>
@@ -519,13 +563,36 @@ export function CourseDetail() {
               {tabBar}
               <div className="mt-6 space-y-10">
                 {embedUrl ? (
+                  <div>
+                    <div className="aspect-video w-full overflow-hidden rounded-xl border border-gray-200 bg-black">
+                      <iframe
+                        title="Course intro"
+                        src={embedUrl}
+                        className="h-full w-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                    {youtubeWatchUrl ? (
+                      <p className="mt-2 text-sm">
+                        <a
+                          href={youtubeWatchUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-brand-accent hover:underline"
+                        >
+                          Open on YouTube
+                        </a>
+                        <span className="text-gray-500"> — opens in a new tab</span>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : course.introVideoUrl?.trim() ? (
                   <div className="aspect-video w-full overflow-hidden rounded-xl border border-gray-200 bg-black">
-                    <iframe
-                      title="Course intro"
-                      src={embedUrl}
+                    <video
+                      controls
                       className="h-full w-full"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
+                      src={absoluteApiUrl(course.introVideoUrl.trim())}
                     />
                   </div>
                 ) : null}
@@ -590,23 +657,24 @@ export function CourseDetail() {
                       {audienceLines.map((line, i) => (
                         <li key={i}>{line}</li>
                       ))}
-                      {course.instructions ? (
-                        <li className="whitespace-pre-wrap">{course.instructions}</li>
-                      ) : null}
-                    </ul>
-                  </section>
-                ) : course.instructions ? (
-                  <section>
-                    <h2 className="text-xl font-bold text-gray-900">Requirements</h2>
-                    <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
-                      <li className="whitespace-pre-wrap">{course.instructions}</li>
                     </ul>
                   </section>
                 ) : null}
 
-                {course.materialsIncluded && course.materialsIncluded.length > 0 && !audienceLines.length ? (
+                {instructionLines.length > 0 ? (
                   <section>
-                    <h2 className="text-xl font-bold text-gray-900">Materials included</h2>
+                    <h2 className="text-xl font-bold text-gray-900">Instructions</h2>
+                    <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
+                      {instructionLines.map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {course.materialsIncluded && course.materialsIncluded.length > 0 ? (
+                  <section>
+                    <h2 className="text-xl font-bold text-gray-900">What&apos;s included</h2>
                     <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">
                       {course.materialsIncluded.map((m, i) => (
                         <li key={i}>{m}</li>
@@ -623,12 +691,6 @@ export function CourseDetail() {
                       </span>
                     ))}
                   </div>
-                ) : null}
-
-                {course.authorName ? (
-                  <p className="text-sm text-gray-500">
-                    <span className="font-medium text-gray-700">Author:</span> {course.authorName}
-                  </p>
                 ) : null}
 
                 {curriculumBlock}
