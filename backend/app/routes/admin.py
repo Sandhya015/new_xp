@@ -12,6 +12,7 @@ from bson import ObjectId
 from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
+from app.routes.enrollments import _serialize_submission
 from app.services.curriculum import normalize_curriculum
 from app.db import (
     get_db,
@@ -637,6 +638,7 @@ def course_enrollments(course_id):
     for e in cursor:
         uid = e.get("userId")
         u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(uid) else None
+        subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
         items.append({
             "id": str(e["_id"]),
             "userId": e.get("userId", ""),
@@ -651,6 +653,7 @@ def course_enrollments(course_id):
             "enrolledAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else "",
             "batch": e.get("batch", ""),
             "orderId": e.get("orderId", ""),
+            "assignmentSubmissions": [_serialize_submission(x) for x in subs if isinstance(x, dict)],
         })
     return jsonify({"items": items})
 

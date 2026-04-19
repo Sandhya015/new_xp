@@ -2,7 +2,7 @@
  * Student Dashboard — View Enrolled Course Content (SD-WF-10).
  * Tabs: Overview, Curriculum, Class Links, Study Materials, Assignments, Quizzes, Announcements, Certificate.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   BookOpen,
@@ -21,7 +21,11 @@ import {
   Unlock,
 } from 'lucide-react'
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
-import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
+import {
+  enrollmentService,
+  type AssignmentSubmissionItem,
+  type EnrollmentItem,
+} from '@/services/enrollmentService'
 import { certificateService } from '@/services/certificateService'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
 import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
@@ -279,6 +283,141 @@ function PythonCourseQuizBlock({
       >
         {submitting ? 'Submitting…' : 'Submit quiz'}
       </button>
+    </div>
+  )
+}
+
+function assignmentStableId(a: { id?: string }, index: number): string {
+  return a.id?.trim() ? String(a.id) : `idx_${index}`
+}
+
+function AssignmentTurnInCard({
+  courseId,
+  assignmentId,
+  title,
+  dueDate,
+  description,
+  existing,
+  onUpdated,
+}: {
+  courseId: string
+  assignmentId: string
+  title: string
+  dueDate?: string
+  description?: string
+  existing?: AssignmentSubmissionItem
+  onUpdated: () => void | Promise<void>
+}) {
+  const [note, setNote] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!note.trim() && !file) {
+      setMsg({ type: 'err', text: 'Add a note and/or choose a file to upload.' })
+      return
+    }
+    setBusy(true)
+    setMsg(null)
+    try {
+      await enrollmentService.submitAssignment(courseId, {
+        assignmentId,
+        note: note.trim() || undefined,
+        file,
+      })
+      setNote('')
+      setFile(null)
+      setMsg({ type: 'ok', text: 'Your submission was saved.' })
+      await onUpdated()
+    } catch (err: unknown) {
+      const raw =
+        err && typeof err === 'object' && 'response' in err && err.response && typeof err.response === 'object'
+          && 'data' in err.response
+          ? String((err.response as { data?: { error?: string } }).data?.error ?? 'Upload failed')
+          : 'Upload failed'
+      setMsg({ type: 'err', text: raw })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const downloadMine = async () => {
+    const fn = existing?.fileStorageName?.trim()
+    if (!fn) return
+    try {
+      const blob = await enrollmentService.downloadSubmissionFile(fn)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = existing?.originalFileName?.trim() || 'submission'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setMsg({ type: 'err', text: 'Could not download your file. Try again.' })
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-100 p-3">
+      <p className="font-medium text-gray-800">{title}</p>
+      {dueDate ? <p className="text-xs text-slate-gray">Due: {dueDate}</p> : null}
+      {description ? <p className="mt-1 text-sm text-gray-600">{description}</p> : null}
+      {existing?.submittedAt ? (
+        <p className="mt-2 text-xs font-medium text-emerald-800">
+          Submitted {existing.submittedAt.replace('T', ' ').replace('Z', ' UTC')}
+        </p>
+      ) : null}
+      {existing?.text ? (
+        <p className="mt-1 text-sm text-gray-700 whitespace-pre-wrap border border-gray-100 rounded-md bg-gray-50 p-2">
+          {existing.text}
+        </p>
+      ) : null}
+      {existing?.fileStorageName ? (
+        <button
+          type="button"
+          onClick={() => void downloadMine()}
+          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          <Download className="h-4 w-4" /> Download your file
+        </button>
+      ) : null}
+      <form onSubmit={(e) => void submit(e)} className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+        <label className="block text-xs font-medium text-gray-600">Add or replace submission</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Short note or answer text (optional if you attach a file)"
+          rows={3}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+        />
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,.zip,.jpg,.jpeg,.png,.txt,application/pdf,application/zip,image/*"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="block w-full text-xs text-gray-600"
+        />
+        {file ? <p className="text-xs text-slate-600 truncate">Selected: {file.name}</p> : null}
+        {msg ? (
+          <p className={`text-xs ${msg.type === 'ok' ? 'text-emerald-700' : 'text-red-600'}`} role="status">
+            {msg.text}
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+        >
+          {busy ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Uploading…
+            </span>
+          ) : (
+            'Submit'
+          )}
+        </button>
+      </form>
     </div>
   )
 }
@@ -692,16 +831,22 @@ export function CourseContent() {
             {(!course.assignments || course.assignments.length === 0) ? (
               <p className="text-slate-gray">No assignments yet.</p>
             ) : (
-              course.assignments.map((a, i) => (
-                <div key={i} className="rounded-lg border border-gray-100 p-3">
-                  <p className="font-medium text-gray-800">{a.title}</p>
-                  {a.dueDate && <p className="text-xs text-slate-gray">Due: {a.dueDate}</p>}
-                  {a.description && <p className="mt-1 text-sm text-gray-600">{a.description}</p>}
-                  <button type="button" className="mt-2 rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
-                    Upload Submission
-                  </button>
-                </div>
-              ))
+              course.assignments.map((a, i) => {
+                const aid = assignmentStableId(a, i)
+                const existing = enrollment?.assignmentSubmissions?.find((s) => s.assignmentId === aid)
+                return (
+                  <AssignmentTurnInCard
+                    key={aid}
+                    courseId={courseId!}
+                    assignmentId={aid}
+                    title={a.title || `Assignment ${i + 1}`}
+                    dueDate={a.dueDate}
+                    description={a.description}
+                    existing={existing}
+                    onUpdated={() => void refreshEnrollment()}
+                  />
+                )
+              })
             )}
           </div>
         )}

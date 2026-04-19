@@ -50,7 +50,7 @@ export type CourseContent = {
   curriculum?: unknown[]
   classLinks?: Array<{ title?: string; date?: string; time?: string; platform?: string; link?: string; batch?: string }>
   studyMaterials?: Array<{ title?: string; module?: string; type?: string; url?: string }>
-  assignments?: Array<{ title?: string; dueDate?: string; description?: string }>
+  assignments?: Array<{ id?: string; title?: string; dueDate?: string; description?: string }>
   quizzes?: Array<{ title?: string; dueDate?: string }>
   announcements?: Array<{ title?: string; message?: string; createdAt?: string }>
 }

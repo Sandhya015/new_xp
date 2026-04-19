@@ -9,6 +9,17 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+export type AssignmentSubmissionItem = {
+  assignmentId: string
+  assignmentTitle?: string
+  text?: string
+  fileUrl?: string
+  originalFileName?: string
+  mimeType?: string
+  fileStorageName?: string
+  submittedAt?: string
+}
+
 export type EnrollmentItem = {
   id: string
   courseId: string
@@ -27,6 +38,7 @@ export type EnrollmentItem = {
   certificatePdfDownloadCount?: number
   certificatePdfDownloadsRemaining?: number
   pythonQuizAvailable?: boolean
+  assignmentSubmissions?: AssignmentSubmissionItem[]
 }
 
 export const enrollmentService = {
@@ -43,6 +55,28 @@ export const enrollmentService = {
     const { data } = await api.post<{ id: string; message?: string }>('/api/enrollments', payload)
     return data
   },
+  async downloadSubmissionFile(fileStorageName: string): Promise<Blob> {
+    const { data } = await api.get(`/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`, {
+      responseType: 'blob',
+    })
+    return data as Blob
+  },
+
+  async submitAssignment(
+    courseId: string,
+    payload: { assignmentId: string; note?: string; file?: File | null },
+  ): Promise<EnrollmentItem> {
+    const fd = new FormData()
+    fd.append('assignmentId', payload.assignmentId)
+    if (payload.note?.trim()) fd.append('note', payload.note.trim())
+    if (payload.file) fd.append('file', payload.file)
+    const { data } = await api.post<EnrollmentItem>(
+      `/api/enrollments/by-course/${courseId}/assignment-submissions`,
+      fd,
+    )
+    return data
+  },
+
   async submitPythonQuiz(
     courseId: string,
     answers: number[],

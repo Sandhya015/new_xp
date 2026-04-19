@@ -186,22 +186,42 @@ export const adminService = {
   },
 
   async getCourseEnrollments(courseId: string) {
-    const { data } = await api.get<{ items: Array<{
-      id: string
-      userId: string
-      name: string
-      email: string
-      mobile: string
-      university: string
-      collegeName: string
-      course: string
-      stream: string
-      semester: string
-      enrolledAt: string
-      batch: string
-      orderId: string
-    }> }>(`/api/admin/courses/${courseId}/enrollments`)
+    const { data } = await api.get<{
+      items: Array<{
+        id: string
+        userId: string
+        name: string
+        email: string
+        mobile: string
+        university: string
+        collegeName: string
+        course: string
+        stream: string
+        semester: string
+        enrolledAt: string
+        batch: string
+        orderId: string
+        assignmentSubmissions?: Array<{
+          assignmentId: string
+          assignmentTitle?: string
+          text?: string
+          fileUrl?: string
+          originalFileName?: string
+          mimeType?: string
+          fileStorageName?: string
+          submittedAt?: string
+        }>
+      }>
+    }>(`/api/admin/courses/${courseId}/enrollments`)
     return data
+  },
+
+  /** Authenticated download (admin JWT). Student app uses the same path with student JWT. */
+  async downloadAssignmentSubmissionFile(fileStorageName: string): Promise<Blob> {
+    const { data } = await api.get(`/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`, {
+      responseType: 'blob',
+    })
+    return data as Blob
   },
 
   async getCompanies(params?: { status?: string }) {

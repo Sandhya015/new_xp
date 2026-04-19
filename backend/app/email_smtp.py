@@ -159,19 +159,10 @@ def send_student_welcome(config: Mapping[str, Any], student_name: str, to_email:
 def send_enrollment_confirmation(
     config: Mapping[str, Any], student_name: str, to_email: str, course_title: str
 ) -> bool:
-    name = student_name or "there"
-    safe_title = course_title or "your course"
-    subject = f"You are enrolled — {safe_title}"
-    html = f"""
-    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
-    <p>Hi {name},</p>
-    <p>You have <strong>successfully enrolled</strong> in <strong>{safe_title}</strong>.</p>
-    <p>Open <strong>My Enrolled Courses</strong> in your XpertIntern dashboard to access materials, class links, and quizzes.</p>
-    <p>We wish you a productive journey — <strong>happy learning!</strong></p>
-    <p>— Team XpertIntern</p>
-    </body></html>
-    """
-    return send_email(config, to_email, subject, html)
+    from app.email_templates import enrollment_confirmation_email_bodies
+
+    subject, html_body, text_body = enrollment_confirmation_email_bodies(student_name, course_title)
+    return send_email(config, to_email, subject, html_body, text_body=text_body)
 
 
 def send_payment_success_email(

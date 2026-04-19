@@ -109,6 +109,50 @@ def welcome_email_bodies(student_name: str) -> Tuple[str, str, str]:
     return subject, html_body, plain
 
 
+def enrollment_confirmation_email_bodies(student_name: str, course_title: str) -> Tuple[str, str, str]:
+    """Subject, HTML, plain text after a student enrolls in a course (matches welcome_email style)."""
+    safe_name = html.escape(student_name or "there", quote=False)
+    safe_course = html.escape(course_title or "your course", quote=False)
+    base = _public_app_url()
+    my_courses = html.escape(f"{base}/dashboard/my-courses", quote=True)
+    subject_plain = (course_title or "your course").replace("\n", " ").strip() or "your course"
+    subject = f"You are enrolled — {subject_plain[:200]}"
+    inner = f"""
+<p style="margin:0 0 16px;font-size:18px;font-weight:600;color:#0f172a;">Hi {safe_name},</p>
+<p style="margin:0 0 16px;">You have <strong>successfully enrolled</strong> in <strong>{safe_course}</strong> on <strong>XpertIntern</strong>.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:20px 0;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:16px 18px;">
+    <p style="margin:0 0 10px;font-size:13px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">What to do next</p>
+    <ul style="margin:0;padding-left:20px;color:#334155;">
+      <li style="margin:6px 0;">Open <strong>My Enrolled Courses</strong> to access curriculum, class links, study materials, and assignments</li>
+      <li style="margin:6px 0;">Submit assignments and complete quizzes from your course page</li>
+      <li style="margin:6px 0;">Watch for announcements from your trainer in the same course view</li>
+    </ul>
+  </td></tr>
+</table>
+<p style="margin:0 0 20px;">We wish you a focused, productive learning journey.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0">
+  <tr>
+    <td style="border-radius:8px;background:#2563eb;">
+      <a href="{my_courses}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Go to My Enrolled Courses</a>
+    </td>
+  </tr>
+</table>
+<p style="margin:24px 0 0;font-size:14px;color:#475569;">Happy learning,<br/><strong style="color:#0f172a;">Team XpertIntern</strong></p>
+"""
+    html_body = _wrap_brand(inner, f"You are now enrolled in {subject_plain}.")
+    plain = (
+        f"Hi {student_name or 'there'},\n\n"
+        f"You have successfully enrolled in {course_title or 'your course'} on XpertIntern.\n\n"
+        "Open My Enrolled Courses in your dashboard to access materials, class links, assignments, and quizzes.\n\n"
+        f"{base}/dashboard/my-courses\n\n"
+        "Questions? Reply to this email or use Help & Support after you sign in.\n\n"
+        "— Team XpertIntern\n"
+        f"{base}\n"
+    )
+    return subject, html_body, plain
+
+
 def registration_otp_bodies(student_name: str, otp: str) -> Tuple[str, str, str]:
     """Subject (includes OTP per product spec), HTML, plain text."""
     safe_name = html.escape(student_name or "there", quote=False)

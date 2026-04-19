@@ -104,7 +104,11 @@ def schedule_enrollment_email(app: Flask, user_id: str, course_id: str) -> None:
         else:
             logger.warning("Enrollment confirmation not sent to %s (SMTP disabled or failed)", email)
 
-    _dispatch_email_job(app, job)
+    # Lambda: background threads often never run; match welcome-email behaviour.
+    if welcome_email_uses_request_thread():
+        _run_in_app_context(app, job)
+    else:
+        _dispatch_email_job(app, job)
 
 
 def schedule_payment_success_email(
