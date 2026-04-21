@@ -24,6 +24,8 @@ provider:
             - ses:SendEmail
             - ses:SendRawEmail
           Resource: "*"
+        # Object reads/writes on bucket/* — GetObject on a missing key also requires
+        # s3:ListBucket on the bucket ARN, otherwise S3 returns AccessDenied (not NoSuchKey).
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -36,6 +38,13 @@ provider:
                     - CourseMediaBucket
                     - Arn
                 - "/*"
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+          Resource:
+            Fn::GetAtt:
+              - CourseMediaBucket
+              - Arn
   environment:
     FLASK_ENV: ${self:provider.stage}
     MONGODB_URI: ${env:MONGODB_URI, ''}
