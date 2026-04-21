@@ -36,6 +36,7 @@ import {
   validateFeaturedTrainingImageQuick,
 } from '@/utils/featuredImageValidation'
 import { adminService } from '@/services/adminService'
+import { invalidateCoursesListCache } from '@/services/courseService'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
 import {
   QuizBuilderModal,
@@ -781,8 +782,10 @@ export function AddTraining() {
       originalPrice: origNum > 0 ? origNum : undefined,
       trainerName: basic.trainerName.trim(),
       difficulty: basic.difficulty,
-      featuredImageUrl: (media?.featuredImageUrl ?? basic.featuredImageUrl).trim() || undefined,
-      introVideoUrl: (media?.introVideoUrl ?? basic.introVideoUrl).trim() || undefined,
+      // Always send strings (never `undefined`): axios/JSON drops undefined keys, so PATCH would skip
+      // featuredImageUrl and Mongo would keep an old/broken cover after upload.
+      featuredImageUrl: (media?.featuredImageUrl ?? basic.featuredImageUrl).trim(),
+      introVideoUrl: (media?.introVideoUrl ?? basic.introVideoUrl).trim(),
       listingVisibility: basic.listingVisibility,
       scheduledPublishAt:
         basic.scheduleEnabled && basic.scheduleDate.trim()
@@ -912,9 +915,11 @@ export function AddTraining() {
       )
       if (editCourseId) {
         await adminService.updateCourse(editCourseId, payload)
+        invalidateCoursesListCache()
         navigate(`/admin/courses/${editCourseId}/manage`, { replace: true })
       } else {
         await adminService.createCourse(payload)
+        invalidateCoursesListCache()
         navigate('/admin/courses', { replace: true })
       }
     } catch (e: unknown) {
@@ -950,9 +955,11 @@ export function AddTraining() {
       if (editCourseId) {
         await adminService.updateCourse(editCourseId, payload)
         editDraftActiveRef.current = true
+        invalidateCoursesListCache()
         navigate(`/admin/courses/${editCourseId}/manage`, { replace: true })
       } else {
         await adminService.createCourse(payload)
+        invalidateCoursesListCache()
         navigate('/admin/courses', { replace: true })
       }
     } catch (e: unknown) {
@@ -992,6 +999,33 @@ export function AddTraining() {
           {editCourseId ? 'Edit Training' : 'Add New Training'}
         </h2>
       </div>
+
+      {editCourseId ? (
+        <div className="sticky top-0 z-30 flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-emerald-50/90 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-800 sm:max-w-[55%]">
+            <span className="font-semibold text-brand-navy">Save changes</span> stores updates to the server, including a newly chosen{' '}
+            <strong>cover image</strong> (upload runs on save). Use this from any step so you do not have to scroll back to Step 1.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSaveDraft()}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" /> Save changes
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePublish()}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" /> Publish
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
@@ -1350,7 +1384,8 @@ export function AddTraining() {
               <div>
                 <label className="block text-sm font-medium text-gray-700">Featured image</label>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9 and optimize to about 1920×1080 (under 2MB). Optional URL, or upload below.
+                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9 and optimize to about 1920×1080 (under 2MB). Optional URL, or upload below. The file is sent to the server when you click{' '}
+                  <strong>Save changes</strong> (top bar) or <strong>Save as Draft</strong> / <strong>Publish</strong> at the bottom.
                 </p>
                 <input
                   type="url"
