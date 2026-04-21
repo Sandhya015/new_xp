@@ -8,10 +8,13 @@ from bson import ObjectId
 from flask import Blueprint, request, jsonify, abort, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from pathlib import Path
+
 from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_courses_collection, get_enrollments_collection
 from app.services.course_media_storage import (
     course_media_object_exists,
+    load_featured_servable_body,
     make_course_media_response,
     object_key,
     uses_s3,
@@ -216,6 +219,17 @@ def list_courses():
 def _course_media_not_found_json(kind: str, fname: str, reason: str) -> tuple:
     """Explicit 404 JSON so operators do not confuse missing S3 objects with a broken route."""
     key = object_key(kind, fname)
+    if reason == "invalid_featured_payload":
+        hint = (
+            "An object exists at this key but the bytes are not a valid JPEG/PNG (corrupt or legacy bad upload). "
+            "Delete the object in S3 or choose the image file again in Admin and Save so a fresh file is uploaded."
+        )
+    else:
+        hint = (
+            "Nothing is stored at this path. Upload again from Admin while your browser uses this same API "
+            "(same VITE_API_URL / stage). If you upload only against local Flask without "
+            "COURSE_MEDIA_S3_BUCKET, files stay on your laptop and never reach S3."
+        )
     return (
         jsonify(
             {
@@ -225,15 +239,27 @@ def _course_media_not_found_json(kind: str, fname: str, reason: str) -> tuple:
                 "file": fname,
                 "objectKey": key,
                 "storage": "s3" if uses_s3() else "local",
-                "hint": (
-                    "Nothing is stored at this path. Upload again from Admin while the browser uses this same API "
-                    "(same VITE_API_URL / stage). If you upload only against local Flask without "
-                    "COURSE_MEDIA_S3_BUCKET, files stay on your laptop and never reach S3."
-                ),
+                "hint": hint,
             }
         ),
         404,
     )
+
+
+def _featured_media_ok_headers():
+    return {
+        "Cache-Control": "public, max-age=600",
+        "Content-Disposition": "inline",
+    }
+
+
+def _featured_mimetype(fname: str) -> str:
+    ext = Path(str(fname or "")).suffix.lower()
+    if ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    if ext == ".png":
+        return "image/png"
+    return "application/octet-stream"
 
 
 @courses_bp.route("/media/<kind>/<path:fname>", methods=["GET", "HEAD"])
@@ -252,6 +278,24 @@ def serve_course_media(kind, fname):
         if request.method == "HEAD":
             return Response(status=404)
         return _course_media_not_found_json(kind, fname or "", "invalid_filename")
+    # Featured: HEAD must match GET (S3 key can exist but payload may be corrupt/non-raster).
+    if kind == "featured":
+        try:
+            body, status = load_featured_servable_body(fname)
+        except Exception:
+            abort(502)
+        if request.method == "HEAD":
+            return Response(status=200 if status == "ok" else 404)
+        if status == "ok":
+            return Response(
+                body,
+                mimetype=_featured_mimetype(fname),
+                headers=_featured_media_ok_headers(),
+            )
+        if status == "invalid":
+            return _course_media_not_found_json(kind, fname or "", "invalid_featured_payload")
+        return _course_media_not_found_json(kind, fname or "", "object_not_found")
+
     if request.method == "HEAD":
         try:
             exists = course_media_object_exists(kind, fname)

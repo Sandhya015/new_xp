@@ -142,7 +142,8 @@ def parse_stored_course_media_url(url: str) -> Optional[tuple[str, str]]:
 
 def course_media_object_exists(kind: str, fname: str) -> bool:
     """
-    True if the object is present in S3 or on local course_uploads (no body read).
+    True if media can be served. For featured images this reads the object and
+    verifies valid JPEG/PNG bytes (matches GET). For other kinds, S3 head or file exists only.
     Used for HEAD /api/courses/media/... and admin validation.
     """
     if kind not in ("featured", "intro", "lesson", "material"):
@@ -153,6 +154,10 @@ def course_media_object_exists(kind: str, fname: str) -> bool:
     elif not _COURSE_MEDIA_NAME_RE.match(fname or ""):
         return False
     key = object_key(kind, fname)
+    # Featured images: HEAD must match GET (object may exist in S3 but be corrupt/non-JPEG).
+    if kind == "featured":
+        _, status = load_featured_servable_body(fname)
+        return status == "ok"
     if uses_s3():
         try:
             _s3().head_object(Bucket=_bucket(), Key=key)
@@ -230,6 +235,68 @@ def featured_image_bytes_are_raster(body: bytes) -> bool:
     if b.startswith(b"\xff\xd8\xff") or b.startswith(_PNG_MAGIC):
         return True
     return False
+
+
+def load_featured_servable_body(fname: str) -> tuple[Optional[bytes], str]:
+    """
+    Load featured image from S3 or local disk; normalize; validate JPEG/PNG.
+
+    Returns (bytes, 'ok') to serve.
+    Returns (None, 'missing') if the object/file is absent or empty.
+    Returns (None, 'invalid') if bytes exist but are not valid raster image data after normalization.
+    """
+    if not _COURSE_MEDIA_NAME_RE.match(fname or ""):
+        return None, "missing"
+    key = object_key("featured", fname)
+    if uses_s3():
+        client = _s3()
+        try:
+            obj = client.get_object(Bucket=_bucket(), Key=key)
+        except Exception as e:
+            if _s3_not_found(e):
+                return None, "missing"
+            current_app.logger.exception("S3 get_object (featured load) failed: %s", e)
+            abort(502)
+        try:
+            raw = obj["Body"].read()
+        finally:
+            close = getattr(obj["Body"], "close", None)
+            if callable(close):
+                close()
+        if not raw:
+            return None, "missing"
+        body = normalize_featured_image_body(raw)
+        if not body:
+            return None, "invalid"
+        if not featured_image_bytes_are_raster(body):
+            current_app.logger.warning(
+                "Featured object %s/%s is not a valid JPEG/PNG after normalization; "
+                "re-upload the cover image from the admin panel.",
+                _bucket(),
+                key,
+            )
+            return None, "invalid"
+        return body, "ok"
+
+    root = Path(current_app.instance_path) / "course_uploads" / "featured"
+    try:
+        root = root.resolve()
+    except OSError:
+        return None, "missing"
+    path = (root / fname).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None, "missing"
+    if not path.is_file():
+        return None, "missing"
+    body = normalize_featured_image_body(path.read_bytes())
+    if not featured_image_bytes_are_raster(body):
+        current_app.logger.warning(
+            "Featured file on disk is not valid JPEG/PNG after normalization: %s", path
+        )
+        return None, "invalid"
+    return body, "ok"
 
 
 def _decode_ascii_base64_to_image(body: bytes) -> Optional[bytes]:
@@ -324,50 +391,14 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     """
     Build Flask response for GET /api/courses/media/<kind>/<fname>.
     Returns None if the object does not exist (caller should abort(404)).
+    Featured images are handled in routes/courses.py via load_featured_servable_body.
     """
+    if kind == "featured":
+        return None
+
     if uses_s3():
         key = object_key(kind, fname)
         client = _s3()
-
-        # Featured images are capped small at upload; stream bytes so browsers never
-        # depend on cross-origin redirects or presigned URL quirks for <img src>.
-        if kind == "featured":
-            try:
-                obj = client.get_object(Bucket=_bucket(), Key=key)
-            except Exception as e:
-                if _s3_not_found(e):
-                    return None
-                current_app.logger.exception("S3 get_object (featured) failed: %s", e)
-                abort(502)
-            try:
-                raw = obj["Body"].read()
-            finally:
-                close = getattr(obj["Body"], "close", None)
-                if callable(close):
-                    close()
-            body = normalize_featured_image_body(raw)
-            if not body:
-                return None
-            # Filename is authoritative: matches API Gateway binaryMediaTypes and avoids
-            # broken previews when S3 metadata is missing or application/octet-stream.
-            ctype = _content_type_for_course_media(kind, fname)
-            if not featured_image_bytes_are_raster(body):
-                current_app.logger.warning(
-                    "Featured object %s/%s is not a valid JPEG/PNG after normalization; "
-                    "re-upload the cover image from the admin panel.",
-                    _bucket(),
-                    key,
-                )
-                return None
-
-            return Response(
-                body,
-                mimetype=ctype,
-                headers={
-                    "Cache-Control": "public, max-age=600",
-                    "Content-Disposition": "inline",
-                },
-            )
 
         try:
             client.head_object(Bucket=_bucket(), Key=key)
@@ -395,20 +426,4 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
         return None
     if not path.is_file():
         return None
-    if kind == "featured":
-        body = normalize_featured_image_body(path.read_bytes())
-        if not featured_image_bytes_are_raster(body):
-            current_app.logger.warning(
-                "Featured file on disk is not valid JPEG/PNG after normalization: %s", path
-            )
-            return None
-        ctype = _content_type_for_course_media(kind, fname)
-        return Response(
-            body,
-            mimetype=ctype,
-            headers={
-                "Cache-Control": "public, max-age=600",
-                "Content-Disposition": "inline",
-            },
-        )
     return send_from_directory(str(root), fname, conditional=True)

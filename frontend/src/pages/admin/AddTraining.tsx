@@ -1064,33 +1064,6 @@ export function AddTraining() {
         </h2>
       </div>
 
-      {editCourseId ? (
-        <div className="sticky top-0 z-30 flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-emerald-50/90 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-slate-800 sm:max-w-[55%]">
-            <span className="font-semibold text-brand-navy">Save changes</span> stores updates to the server, including a newly chosen{' '}
-            <strong>cover image</strong> (upload runs on save). Use this from any step so you do not have to scroll back to Step 1.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void handleSaveDraft()}
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60"
-            >
-              <Save className="h-4 w-4" /> Save changes
-            </button>
-            <button
-              type="button"
-              onClick={() => void handlePublish()}
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60"
-            >
-              <Send className="h-4 w-4" /> Publish
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
           {error}
@@ -1102,33 +1075,50 @@ export function AddTraining() {
           className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
           role="status"
         >
-          <p className="font-semibold text-amber-900">Course media is stored on this machine only</p>
-          <p className="mt-1 leading-relaxed text-amber-900/90">
-            This API saves uploads under local disk, so cover images and videos work at{' '}
-            <span className="font-mono text-xs">localhost:5000</span> but the live site loads the same paths from the
-            cloud API (S3). Either set <span className="font-mono text-xs">COURSE_MEDIA_S3_BUCKET</span> in{' '}
-            <span className="font-mono text-xs">backend/.env</span> to your dev bucket (see{' '}
-            <span className="font-mono text-xs">backend/.env.example</span>), or open the admin panel with{' '}
-            <span className="font-mono text-xs">VITE_API_URL</span> pointing at the deployed API and upload the cover
-            there.
+          <p className="font-medium text-amber-900">Media uploads are stored on this computer only</p>
+          <p className="mt-1 text-amber-900/90">
+            Images and videos may not appear on the live site until you use the same admin against your hosted API, or
+            configure cloud storage for local development.
           </p>
         </div>
       ) : null}
 
-      {/* Step indicator */}
-      <div className="flex gap-2">
-        {[1, 2, 3].map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStep(s)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium ${
-              step === s ? 'bg-brand-accent text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            {s === 1 ? 'Basics' : s === 2 ? 'Curriculum' : 'Additional'}
-          </button>
-        ))}
+      {/* Step tabs + edit actions */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex flex-wrap gap-2">
+          {[1, 2, 3].map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStep(s)}
+              className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                step === s ? 'bg-brand-accent text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {s === 1 ? 'Basics' : s === 2 ? 'Curriculum' : 'Additional'}
+            </button>
+          ))}
+        </div>
+        {editCourseId ? (
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:pl-4">
+            <button
+              type="button"
+              onClick={() => void handleSaveDraft()}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" /> Save changes
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePublish()}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" /> Publish
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {step === 1 && (
@@ -1170,7 +1160,7 @@ export function AddTraining() {
               <RichTextEditor
                 id="training-short-html"
                 label="Short summary *"
-                hint="Teaser for cards and hero only — not the full course write-up. After removing formatting, plain text must stay within the limit below."
+                hint="Shown on listings and cards (max 300 characters of plain text)."
                 value={basic.shortDesc}
                 onChange={(html) => setBasic((b) => ({ ...b, shortDesc: html }))}
                 placeholder="Brief summary for listings…"
@@ -1190,7 +1180,7 @@ export function AddTraining() {
               <RichTextEditor
                 id="training-full-html"
                 label="Full description *"
-                hint="Main course page content. Rich text is stored as HTML (min 100 characters of plain text)."
+                hint="Main description on the public course page (min 100 characters of plain text)."
                 value={basic.fullDesc}
                 onChange={(html) => setBasic((b) => ({ ...b, fullDesc: html }))}
                 placeholder="Detailed course description…"
@@ -1465,10 +1455,8 @@ export function AddTraining() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Featured image</label>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9, optimize to about 1920×1080 (under 2MB), and store the cover as <strong>JPEG</strong> — the saved path ends in{' '}
-                  <code className="rounded bg-slate-100 px-0.5">.jpg</code> even if you picked a PNG (transparency is flattened). Optional URL, or upload below. The file is sent to the server when you click{' '}
-                  <strong>Save changes</strong> (top bar) or <strong>Save as Draft</strong> / <strong>Publish</strong> at the bottom.
+                <p className="mt-0.5 text-xs text-slate-600">
+                  Optional cover for the public course page. Paste an image URL, or choose a file — images are cropped to a wide format and optimised when you save.
                 </p>
                 <input
                   type="text"
@@ -1477,14 +1465,9 @@ export function AddTraining() {
                   spellCheck={false}
                   value={basic.featuredImageUrl}
                   onChange={(e) => setBasic((b) => ({ ...b, featuredImageUrl: e.target.value }))}
-                  placeholder="https://… or leave empty and upload below"
+                  placeholder="Image URL (https://…) or upload below"
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
                 />
-                <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                  This field uses <strong className="text-slate-700">plain text</strong> (not browser &quot;URL&quot; validation) so our saved path{' '}
-                  <code className="rounded bg-slate-100 px-0.5">/api/courses/media/featured/…</code> is not cut off. For an external image, paste a full{' '}
-                  <code className="rounded bg-slate-100 px-0.5">https://…</code> link.
-                </p>
                 {featuredHostedBasename ? (
                   <p className="mt-1 text-xs text-emerald-800">
                     <span className="font-medium text-slate-700">Saved on server (file name):</span>{' '}
@@ -1504,8 +1487,7 @@ export function AddTraining() {
                     ) : null}
                     {!String(featuredHostedBasename).match(/\.(jpe?g|png)$/i) ? (
                       <span className="mt-1 block text-amber-800">
-                        This file name looks incomplete (missing <code className="rounded bg-amber-100 px-0.5">.jpg</code> /{' '}
-                        <code className="rounded bg-amber-100 px-0.5">.png</code>). Re-upload the cover and click <strong>Save changes</strong>.
+                        This path looks incomplete. Re-upload the cover image and save again.
                       </span>
                     ) : null}
                   </p>
@@ -1532,17 +1514,15 @@ export function AddTraining() {
                 ) : null}
                 {basic.thumbnail ? (
                   <p className="mt-1 text-xs text-slate-600 truncate" title={basic.thumbnail.name}>
-                    <span className="font-medium text-slate-700">Selected file:</span> {basic.thumbnail.name}
-                    <span className="mt-0.5 block font-normal text-slate-500">
-                      After save, the hosted file is JPEG (<code className="rounded bg-slate-100 px-0.5">.jpg</code>); use Preview image to confirm it opens.
-                    </span>
+                    <span className="font-medium text-slate-700">Selected:</span> {basic.thumbnail.name}
+                    <span className="mt-0.5 block font-normal text-slate-500">Save the training, then use Preview image to confirm.</span>
                   </p>
                 ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Intro video</label>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  <strong>Option A — Link:</strong> Paste a <strong>YouTube</strong> or Vimeo URL (unchanged behaviour). The public course page embeds YouTube and shows &quot;Open on YouTube&quot; when applicable.
+                <p className="mt-0.5 text-xs text-slate-600">
+                  Add a YouTube or Vimeo link, or upload a video file (saved when you save the training). If both are set, the uploaded file is used.
                 </p>
                 <input
                   type="url"
@@ -1551,9 +1531,6 @@ export function AddTraining() {
                   placeholder="https://www.youtube.com/watch?v=… or https://youtu.be/…"
                   className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
                 />
-                <p className="mt-3 text-xs text-slate-500">
-                  <strong>Option B — Upload from computer:</strong> MP4, MOV, or AVI. The file is uploaded when you click <strong>Save as Draft</strong> or <strong>Publish</strong> (same pattern as the featured image). If you choose a file, the saved course uses that hosted video URL for the intro; you can still keep a link above for reference, but the upload wins on save.
-                </p>
                 <input
                   type="file"
                   accept="video/mp4,video/quicktime,video/x-msvideo,.mp4,.mov,.avi"
