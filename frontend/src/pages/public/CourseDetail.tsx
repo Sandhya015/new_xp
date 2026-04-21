@@ -135,12 +135,14 @@ export function CourseDetail() {
   const [aboutExpanded, setAboutExpanded] = useState(false)
   const [shareHint, setShareHint] = useState<string | null>(null)
   const [userIsEnrolled, setUserIsEnrolled] = useState<boolean | null>(null)
+  const [trainingCoverFailed, setTrainingCoverFailed] = useState(false)
   const { token } = useAuth()
   const { startCheckout, busy, error: payError, clearError } = useRazorpayCheckout()
 
   useEffect(() => {
     if (!id) return
     let cancelled = false
+    setTrainingCoverFailed(false)
     courseService
       .getById(id)
       .then((data) => {
@@ -177,6 +179,16 @@ export function CourseDetail() {
       cancelled = true
     }
   }, [course?.id, token])
+
+  const trainingCoverSrc = useMemo(() => {
+    const u = (course?.featuredImageUrl || '').trim()
+    if (!u) return ''
+    const abs = absoluteApiUrl(u)
+    const v = (course?.updatedAt || '').trim()
+    if (!v) return abs
+    const sep = abs.includes('?') ? '&' : '?'
+    return `${abs}${sep}cb=${encodeURIComponent(v)}`
+  }, [course?.featuredImageUrl, course?.updatedAt])
 
   const embedUrl = useMemo(() => (course?.introVideoUrl ? getYoutubeEmbedUrl(course.introVideoUrl) : null), [course?.introVideoUrl])
   const youtubeWatchUrl = useMemo(
@@ -380,13 +392,23 @@ export function CourseDetail() {
               {shareHint ? <p className="mt-2 text-xs font-medium text-emerald-600">{shareHint}</p> : null}
 
               {course.featuredImageUrl ? (
-                <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
-                  <img
-                    src={absoluteApiUrl(course.featuredImageUrl)}
-                    alt=""
-                    className="aspect-[21/9] w-full object-cover sm:aspect-video"
-                  />
-                </div>
+                trainingCoverFailed ? (
+                  <div className="mt-6 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gradient-to-br from-slate-100 to-slate-200 text-gray-400">
+                    <BookOpen className="h-14 w-14" strokeWidth={1} />
+                  </div>
+                ) : (
+                  <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
+                    <img
+                      src={trainingCoverSrc}
+                      alt=""
+                      className="aspect-[21/9] w-full object-cover sm:aspect-video"
+                      loading="eager"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      onError={() => setTrainingCoverFailed(true)}
+                    />
+                  </div>
+                )
               ) : (
                 <div className="mt-6 flex aspect-video w-full items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gradient-to-br from-slate-100 to-slate-200 text-gray-400">
                   <BookOpen className="h-14 w-14" strokeWidth={1} />

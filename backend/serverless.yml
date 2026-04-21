@@ -9,6 +9,13 @@ provider:
   runtime: python3.11
   region: ap-south-1
   stage: ${opt:stage, 'dev'}
+  # Required so Lambda proxy returns for course cover images (JPEG/PNG) are decoded from
+  # base64 by API Gateway; otherwise browsers receive corrupted bytes and show a broken image.
+  apiGateway:
+    binaryMediaTypes:
+      - image/jpeg
+      - image/jpg
+      - image/png
   iam:
     role:
       statements:
