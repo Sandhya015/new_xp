@@ -35,6 +35,31 @@ def uses_s3() -> bool:
     return bool(_bucket())
 
 
+def _content_type_for_course_media(kind: str, fname: str) -> str:
+    """
+    Stable Content-Type from the stored file name.
+
+    S3 PutObject sometimes ends up with application/octet-stream; API Gateway only
+    base64-decodes responses whose Content-Type matches configured binaryMediaTypes,
+    so featured images must be image/jpeg or image/png here.
+    """
+    ext = Path(fname).suffix.lower()
+    if kind == "featured":
+        if ext in (".jpg", ".jpeg"):
+            return "image/jpeg"
+        if ext == ".png":
+            return "image/png"
+    if kind in ("intro", "lesson"):
+        if ext == ".mp4":
+            return "video/mp4"
+        if ext == ".mov":
+            return "video/quicktime"
+        if ext == ".avi":
+            return "video/x-msvideo"
+    guessed = mimetypes.guess_type(fname)[0]
+    return guessed or "application/octet-stream"
+
+
 def _s3():
     import boto3
 
@@ -48,7 +73,7 @@ def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
         body = uf.read()
         if not body:
             raise ValueError("empty upload")
-        ctype = mimetypes.guess_type(fn)[0] or "application/octet-stream"
+        ctype = _content_type_for_course_media(kind, fn)
         try:
             _s3().put_object(Bucket=_bucket(), Key=object_key(kind, fn), Body=body, ContentType=ctype)
         except Exception as e:
@@ -91,7 +116,9 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
                 current_app.logger.exception("S3 get_object (featured) failed: %s", e)
                 abort(502)
             stream = obj["Body"]
-            ctype = obj.get("ContentType") or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+            # Filename is authoritative: matches API Gateway binaryMediaTypes and avoids
+            # broken previews when S3 metadata is missing or application/octet-stream.
+            ctype = _content_type_for_course_media(kind, fname)
 
             def generate():
                 try:
@@ -138,4 +165,11 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
         return None
     if not path.is_file():
         return None
+    if kind == "featured":
+        return send_from_directory(
+            str(root),
+            fname,
+            conditional=True,
+            mimetype=_content_type_for_course_media(kind, fname),
+        )
     return send_from_directory(str(root), fname, conditional=True)

@@ -1402,7 +1402,8 @@ export function AddTraining() {
               <div>
                 <label className="block text-sm font-medium text-gray-700">Featured image</label>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9 and optimize to about 1920×1080 (under 2MB). Optional URL, or upload below. The file is sent to the server when you click{' '}
+                  JPEG or PNG, up to 12MB. On save we center-crop to 16:9, optimize to about 1920×1080 (under 2MB), and store the cover as <strong>JPEG</strong> — the saved path ends in{' '}
+                  <code className="rounded bg-slate-100 px-0.5">.jpg</code> even if you picked a PNG (transparency is flattened). Optional URL, or upload below. The file is sent to the server when you click{' '}
                   <strong>Save changes</strong> (top bar) or <strong>Save as Draft</strong> / <strong>Publish</strong> at the bottom.
                 </p>
                 <input
@@ -1468,6 +1469,9 @@ export function AddTraining() {
                 {basic.thumbnail ? (
                   <p className="mt-1 text-xs text-slate-600 truncate" title={basic.thumbnail.name}>
                     <span className="font-medium text-slate-700">Selected file:</span> {basic.thumbnail.name}
+                    <span className="mt-0.5 block font-normal text-slate-500">
+                      After save, the hosted file is JPEG (<code className="rounded bg-slate-100 px-0.5">.jpg</code>); use Preview image to confirm it opens.
+                    </span>
                   </p>
                 ) : null}
               </div>

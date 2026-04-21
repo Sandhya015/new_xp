@@ -1,6 +1,7 @@
 /**
  * Featured training images: accept JPEG/PNG uploads, normalize to 16:9 for storage/display.
- * Center-covers to 16:9, scales to up to 1920×1080 (smaller if needed to stay under 2MB), outputs JPEG.
+ * Center-covers to 16:9, scales to up to 1920×1080 (smaller if needed to stay under 2MB).
+ * Output is always JPEG (`.jpg` on the server) so PNG uploads get a `.jpg` URL — expected.
  */
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024
