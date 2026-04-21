@@ -17,6 +17,7 @@ import re
 import string
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from flask import Response, abort, current_app, redirect, send_from_directory
 from werkzeug.datastructures import FileStorage
@@ -71,6 +72,107 @@ def _s3():
 
     region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "ap-south-1").strip()
     return boto3.client("s3", region_name=region)
+
+
+def _s3_error_meta(exc: BaseException) -> tuple[str, int]:
+    """
+    Boto errors are normally botocore.exceptions.ClientError, but avoid
+    isinstance(ClientError) — duplicate botocore copies (Lambda zip + layer)
+    can make that check fail and turn a normal NoSuchKey into abort(502).
+    """
+    resp = getattr(exc, "response", None)
+    if not isinstance(resp, dict):
+        return "", 0
+    err = resp.get("Error") or {}
+    code = str(err.get("Code") or "")
+    try:
+        http = int((resp.get("ResponseMetadata") or {}).get("HTTPStatusCode") or 0)
+    except (TypeError, ValueError):
+        http = 0
+    return code, http
+
+
+def _s3_not_found(exc: BaseException) -> bool:
+    code, http = _s3_error_meta(exc)
+    if code in ("404", "NoSuchKey", "NotFound"):
+        return True
+    return http == 404
+
+
+_COURSE_MEDIA_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(jpe?g|png|mp4|mov|avi)$",
+    re.IGNORECASE,
+)
+_STUDY_MATERIAL_NAME_RE = re.compile(
+    r"^[a-f0-9]{32}_[a-f0-9]{8}\.(pdf|pptx?|docx?|xlsx?|zip|txt|csv)$",
+    re.IGNORECASE,
+)
+
+
+def parse_stored_course_media_url(url: str) -> Optional[tuple[str, str]]:
+    """
+    If url is our hosted /api/courses/media/{kind}/{fname} (relative or full API URL), return (kind, fname).
+    External links (YouTube, CDN) return None.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    path = raw
+    if raw.startswith("http://") or raw.startswith("https://"):
+        try:
+            path = urlparse(raw).path or ""
+        except Exception:
+            return None
+    marker = "/api/courses/media/"
+    idx = path.find(marker)
+    if idx < 0:
+        return None
+    rest = path[idx + len(marker) :].strip("/")
+    if "/" not in rest:
+        return None
+    kind, fname = rest.split("/", 1)
+    kind = kind.strip().lower()
+    fname = fname.strip()
+    if not kind or not fname or "/" in fname:
+        return None
+    if kind not in ("featured", "intro", "lesson", "material"):
+        return None
+    return (kind, fname)
+
+
+def course_media_object_exists(kind: str, fname: str) -> bool:
+    """
+    True if the object is present in S3 or on local course_uploads (no body read).
+    Used for HEAD /api/courses/media/... and admin validation.
+    """
+    if kind not in ("featured", "intro", "lesson", "material"):
+        return False
+    if kind == "material":
+        if not _STUDY_MATERIAL_NAME_RE.match(fname or ""):
+            return False
+    elif not _COURSE_MEDIA_NAME_RE.match(fname or ""):
+        return False
+    key = object_key(kind, fname)
+    if uses_s3():
+        try:
+            _s3().head_object(Bucket=_bucket(), Key=key)
+            return True
+        except Exception as e:
+            if _s3_not_found(e):
+                return False
+            current_app.logger.exception("S3 head_object (exists check) failed: %s", e)
+            raise
+    root = Path(current_app.instance_path) / "course_uploads" / kind
+    try:
+        root = root.resolve()
+    except OSError:
+        return False
+    path = (root / fname).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return path.is_file()
 
 
 _B64_WHITESPACE = re.compile(rb"\s+")
@@ -201,29 +303,6 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     if uses_s3():
         key = object_key(kind, fname)
         client = _s3()
-
-        def _s3_error_meta(exc: BaseException) -> tuple[str, int]:
-            """
-            Boto errors are normally botocore.exceptions.ClientError, but avoid
-            isinstance(ClientError) — duplicate botocore copies (Lambda zip + layer)
-            can make that check fail and turn a normal NoSuchKey into abort(502).
-            """
-            resp = getattr(exc, "response", None)
-            if not isinstance(resp, dict):
-                return "", 0
-            err = resp.get("Error") or {}
-            code = str(err.get("Code") or "")
-            try:
-                http = int((resp.get("ResponseMetadata") or {}).get("HTTPStatusCode") or 0)
-            except (TypeError, ValueError):
-                http = 0
-            return code, http
-
-        def _s3_not_found(exc: BaseException) -> bool:
-            code, http = _s3_error_meta(exc)
-            if code in ("404", "NoSuchKey", "NotFound"):
-                return True
-            return http == 404
 
         # Featured images are capped small at upload; stream bytes so browsers never
         # depend on cross-origin redirects or presigned URL quirks for <img src>.

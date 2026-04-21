@@ -13,7 +13,11 @@ from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.routes.enrollments import _serialize_submission
-from app.services.course_media_storage import save_uploaded_file
+from app.services.course_media_storage import (
+    course_media_object_exists,
+    parse_stored_course_media_url,
+    save_uploaded_file,
+)
 from app.services.curriculum import normalize_curriculum
 from app.db import (
     get_db,
@@ -298,6 +302,12 @@ def courses():
         if terr:
             return jsonify({"error": terr}), 400
         doc["curriculum"] = norm
+    for _field in ("featuredImageUrl", "introVideoUrl"):
+        _u = (doc.get(_field) or "").strip()
+        if _u:
+            _bad = _hosted_course_media_missing_response(_u)
+            if _bad:
+                return _bad
     result = coll.insert_one(doc)
     doc["_id"] = result.inserted_id
     return jsonify(_course_to_item(doc)), 201
@@ -454,6 +464,37 @@ def dashboard():
     return jsonify({"kpis": kpis, "pendingItems": pending_items, "recentActivity": recent})
 
 
+def _hosted_course_media_missing_response(url: str):
+    """
+    If url points at our /api/courses/media/... storage, require the object to exist.
+    Prevents saving DB rows whose cover was uploaded only to another environment (e.g. local disk).
+    """
+    ref = parse_stored_course_media_url(url)
+    if not ref:
+        return None
+    kind, fname = ref
+    try:
+        if course_media_object_exists(kind, fname):
+            return None
+    except Exception:
+        current_app.logger.exception("hosted course media existence check failed")
+        return jsonify({"error": "Could not verify course media storage"}), 503
+    return (
+        jsonify(
+            {
+                "error": (
+                    "Course media file not found for the URL you saved. Choose the file again in Admin "
+                    "(upload) while using this same API, or use a full https:// image or video link."
+                ),
+                "code": "course_media_missing",
+                "kind": kind,
+                "file": fname,
+            }
+        ),
+        400,
+    )
+
+
 # ----- Course by ID -----
 @admin_bp.route("/courses/<course_id>", methods=["GET"])
 @jwt_required()
@@ -535,9 +576,17 @@ def update_course(course_id):
     if "difficulty" in data:
         updates["difficulty"] = (str(data.get("difficulty") or "all").strip() or "all")
     if "featuredImageUrl" in data:
-        updates["featuredImageUrl"] = (str(data.get("featuredImageUrl") or "")).strip()
+        fi = (str(data.get("featuredImageUrl") or "")).strip()
+        bad = _hosted_course_media_missing_response(fi)
+        if bad:
+            return bad
+        updates["featuredImageUrl"] = fi
     if "introVideoUrl" in data:
-        updates["introVideoUrl"] = (str(data.get("introVideoUrl") or "")).strip()
+        iv = (str(data.get("introVideoUrl") or "")).strip()
+        bad_iv = _hosted_course_media_missing_response(iv)
+        if bad_iv:
+            return bad_iv
+        updates["introVideoUrl"] = iv
     if "originalPrice" in data:
         try:
             updates["originalPrice"] = int(data.get("originalPrice") or 0)

@@ -5,12 +5,17 @@ import re
 from datetime import datetime
 
 from bson import ObjectId
-from flask import Blueprint, request, jsonify, abort
+from flask import Blueprint, request, jsonify, abort, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_courses_collection, get_enrollments_collection
-from app.services.course_media_storage import make_course_media_response
+from app.services.course_media_storage import (
+    course_media_object_exists,
+    make_course_media_response,
+    object_key,
+    uses_s3,
+)
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
@@ -208,19 +213,54 @@ def list_courses():
     return jsonify({"items": items, "page": page, "limit": limit, "total": total})
 
 
-@courses_bp.route("/media/<kind>/<path:fname>", methods=["GET"])
+def _course_media_not_found_json(kind: str, fname: str, reason: str) -> tuple:
+    """Explicit 404 JSON so operators do not confuse missing S3 objects with a broken route."""
+    key = object_key(kind, fname)
+    return (
+        jsonify(
+            {
+                "error": "Course media not found",
+                "code": reason,
+                "kind": kind,
+                "file": fname,
+                "objectKey": key,
+                "storage": "s3" if uses_s3() else "local",
+                "hint": (
+                    "Nothing is stored at this path. Upload again from Admin while the browser uses this same API "
+                    "(same VITE_API_URL / stage). If you upload only against local Flask without "
+                    "COURSE_MEDIA_S3_BUCKET, files stay on your laptop and never reach S3."
+                ),
+            }
+        ),
+        404,
+    )
+
+
+@courses_bp.route("/media/<kind>/<path:fname>", methods=["GET", "HEAD"])
 def serve_course_media(kind, fname):
     """Public binary for uploaded featured images, videos, and study materials (admin upload)."""
     if kind not in ("featured", "intro", "lesson", "material"):
-        abort(404)
+        if request.method == "HEAD":
+            return Response(status=404)
+        return _course_media_not_found_json(kind or "", fname or "", "invalid_kind")
     if kind == "material":
         if not _STUDY_MATERIAL_NAME_RE.match(fname or ""):
-            abort(404)
+            if request.method == "HEAD":
+                return Response(status=404)
+            return _course_media_not_found_json(kind, fname or "", "invalid_filename")
     elif not _COURSE_MEDIA_NAME_RE.match(fname or ""):
-        abort(404)
+        if request.method == "HEAD":
+            return Response(status=404)
+        return _course_media_not_found_json(kind, fname or "", "invalid_filename")
+    if request.method == "HEAD":
+        try:
+            exists = course_media_object_exists(kind, fname)
+        except Exception:
+            abort(502)
+        return Response(status=200 if exists else 404)
     resp = make_course_media_response(kind, fname)
     if resp is None:
-        abort(404)
+        return _course_media_not_found_json(kind, fname or "", "object_not_found")
     return resp
 
 

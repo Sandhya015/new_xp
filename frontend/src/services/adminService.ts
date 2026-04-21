@@ -199,6 +199,22 @@ export const adminService = {
     return path.startsWith('/') ? path : `/${path.replace(/^\/+/, '')}`
   },
 
+  /**
+   * True if this API already has the file for a stored /api/courses/media/... path (HEAD).
+   * Used before save when no new file was chosen, so we do not persist a cover that exists only on another API (e.g. local Flask).
+   */
+  async verifyHostedCourseMediaExists(relativePath: string): Promise<boolean> {
+    const p = (relativePath || '').trim()
+    if (!p.startsWith('/api/courses/media/')) return true
+    try {
+      await api.head(p)
+      return true
+    } catch (e: unknown) {
+      if (axios.isAxiosError(e) && e.response?.status === 404) return false
+      throw e
+    }
+  },
+
   async getCourseEnrollments(courseId: string) {
     const { data } = await api.get<{
       items: Array<{
