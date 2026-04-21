@@ -6,12 +6,36 @@
 const DEPLOYED_API_URL = 'https://kbp3dx8ic4.execute-api.ap-south-1.amazonaws.com/dev'
 const LOCAL_API_URL = 'http://localhost:5000'
 
-/** Resolve a path like `/api/courses/media/...` or a same-origin API URL for use in `<img src>` / `<video src>`. */
+function isLoopbackHost(hostname: string): boolean {
+  const h = (hostname || '').toLowerCase()
+  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
+}
+
+/**
+ * Resolve `/api/...` or full URLs for `<img src>` / `<video src>`.
+ * Full URLs pointing at a dev API (localhost) are re-mapped to the current `getApiBase()` so
+ * production pages never embed mixed-content localhost links from older saves.
+ */
 export function absoluteApiUrl(pathOrUrl: string): string {
   const raw = (pathOrUrl || '').trim()
   if (!raw) return ''
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
   const base = getApiBase().replace(/\/$/, '')
+
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      const u = new URL(raw)
+      if (isLoopbackHost(u.hostname)) {
+        const path = `${u.pathname || ''}${u.search || ''}${u.hash || ''}`
+        if (path.startsWith('/api/')) {
+          return `${base}${path}`
+        }
+      }
+    } catch {
+      /* ignore parse errors */
+    }
+    return raw
+  }
+
   if (raw.startsWith('/')) return `${base}${raw}`
   return `${base}/${raw}`
 }
