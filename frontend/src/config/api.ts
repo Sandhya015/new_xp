@@ -11,6 +11,11 @@ function isLoopbackHost(hostname: string): boolean {
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]'
 }
 
+function isAwsExecuteApiHost(hostname: string): boolean {
+  const h = (hostname || '').toLowerCase()
+  return h.endsWith('.amazonaws.com') && h.includes('execute-api')
+}
+
 /**
  * Resolve `/api/...` or full URLs for `<img src>` / `<video src>`.
  * Full URLs pointing at a dev API (localhost) are re-mapped to the current `getApiBase()` so
@@ -27,6 +32,15 @@ export function absoluteApiUrl(pathOrUrl: string): string {
       if (isLoopbackHost(u.hostname)) {
         const path = `${u.pathname || ''}${u.search || ''}${u.hash || ''}`
         if (path.startsWith('/api/')) {
+          return `${base}${path}`
+        }
+      }
+      // Old saves may embed a full API Gateway URL for course media; always use the
+      // currently configured API base so dev/stage/prod renames do not break <img src>.
+      if (isAwsExecuteApiHost(u.hostname)) {
+        const idx = u.pathname.indexOf('/api/courses/media/')
+        if (idx >= 0) {
+          const path = `${u.pathname.slice(idx)}${u.search || ''}${u.hash || ''}`
           return `${base}${path}`
         }
       }

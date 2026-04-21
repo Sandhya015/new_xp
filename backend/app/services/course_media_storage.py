@@ -3,8 +3,9 @@ Course media (featured images, intro/lesson video, study materials).
 
 On AWS Lambda the deployment package is read-only; local disk under Flask
 instance_path is not writable and /tmp is not shared across invocations.
-When COURSE_MEDIA_S3_BUCKET is set, uploads and GETs use S3 (GET redirects to
-a short-lived presigned URL so large videos are not proxied through API Gateway).
+When COURSE_MEDIA_S3_BUCKET is set, uploads go to S3. Small featured images are
+streamed through this API (reliable for <img src>); larger intro/lesson/material
+files redirect to a short-lived presigned S3 URL to avoid API Gateway size limits.
 """
 from __future__ import annotations
 
@@ -67,17 +68,55 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     Returns None if the object does not exist (caller should abort(404)).
     """
     if uses_s3():
+        from botocore.exceptions import ClientError
+
         key = object_key(kind, fname)
         client = _s3()
+
+        def _s3_not_found(exc: BaseException) -> bool:
+            return isinstance(exc, ClientError) and (exc.response.get("Error") or {}).get("Code", "") in (
+                "404",
+                "NoSuchKey",
+                "NotFound",
+            )
+
+        # Featured images are capped small at upload; stream bytes so browsers never
+        # depend on cross-origin redirects or presigned URL quirks for <img src>.
+        if kind == "featured":
+            try:
+                obj = client.get_object(Bucket=_bucket(), Key=key)
+            except Exception as e:
+                if _s3_not_found(e):
+                    return None
+                current_app.logger.exception("S3 get_object (featured) failed: %s", e)
+                abort(502)
+            stream = obj["Body"]
+            ctype = obj.get("ContentType") or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+
+            def generate():
+                try:
+                    for chunk in stream.iter_chunks(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                finally:
+                    close = getattr(stream, "close", None)
+                    if callable(close):
+                        close()
+
+            return Response(
+                generate(),
+                mimetype=ctype,
+                headers={
+                    "Cache-Control": "public, max-age=600",
+                    "Content-Disposition": "inline",
+                },
+            )
+
         try:
             client.head_object(Bucket=_bucket(), Key=key)
         except Exception as e:
-            from botocore.exceptions import ClientError
-
-            if isinstance(e, ClientError):
-                code = (e.response.get("Error") or {}).get("Code", "")
-                if code in ("404", "NoSuchKey", "NotFound"):
-                    return None
+            if _s3_not_found(e):
+                return None
             current_app.logger.exception("S3 head_object failed: %s", e)
             abort(502)
         url = client.generate_presigned_url(
