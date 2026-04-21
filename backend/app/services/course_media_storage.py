@@ -3,19 +3,25 @@ Course media (featured images, intro/lesson video, study materials).
 
 On AWS Lambda the deployment package is read-only; local disk under Flask
 instance_path is not writable and /tmp is not shared across invocations.
-When COURSE_MEDIA_S3_BUCKET is set, uploads go to S3. Small featured images are
-streamed through this API (reliable for <img src>); larger intro/lesson/material
-files redirect to a short-lived presigned S3 URL to avoid API Gateway size limits.
+When COURSE_MEDIA_S3_BUCKET is set, uploads go to S3. Featured images are read in
+full (≤2MB), normalized to raw JPEG/PNG bytes, then returned through this API;
+larger intro/lesson/material files redirect to a short-lived presigned S3 URL.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import mimetypes
 import os
+import re
+import string
 from pathlib import Path
 from typing import Optional
 
 from flask import Response, abort, current_app, redirect, send_from_directory
 from werkzeug.datastructures import FileStorage
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _bucket() -> str:
@@ -67,12 +73,106 @@ def _s3():
     return boto3.client("s3", region_name=region)
 
 
+_B64_WHITESPACE = re.compile(rb"\s+")
+_B64_ALPHABET = frozenset(string.ascii_letters.encode() + string.digits.encode() + b"+/")
+
+
+def _strip_data_url_to_bytes(body: bytes) -> Optional[bytes]:
+    """
+    If body looks like data:image/(jpeg|jpg|png);base64,..., return decoded bytes.
+    Otherwise return None.
+    """
+    s = body.lstrip()
+    if not s.startswith(b"data:"):
+        return None
+    head, sep, rest = s.partition(b",")
+    if not sep or not rest:
+        return None
+    meta = head.decode("ascii", errors="ignore").lower()
+    if "base64" not in meta:
+        return None
+    if "image/jpeg" not in meta and "image/jpg" not in meta and "image/png" not in meta:
+        return None
+    try:
+        return base64.b64decode(rest, validate=False)
+    except binascii.Error:
+        return None
+
+
+def _looks_like_ascii_base64(payload: bytes) -> bool:
+    """True if payload is mostly standard base64 characters (handles newlines)."""
+    if len(payload) < 24:
+        return False
+    compact = _B64_WHITESPACE.sub(b"", payload)
+    if len(compact) < 24:
+        return False
+    bad = 0
+    for i, c in enumerate(compact):
+        if c in _B64_ALPHABET:
+            continue
+        if c == 61 and all(x == 61 for x in compact[i:]):  # padding '=' only at end
+            break
+        bad += 1
+        if bad > max(8, len(compact) // 10000):
+            return False
+    return True
+
+
+def _decode_ascii_base64_to_image(body: bytes) -> Optional[bytes]:
+    """If body is ASCII base64 of a JPEG/PNG, return decoded bytes; else None."""
+    if not _looks_like_ascii_base64(body):
+        return None
+    compact = _B64_WHITESPACE.sub(b"", body.strip())
+    pad = (-len(compact)) % 4
+    if pad:
+        compact += b"=" * pad
+    try:
+        raw = base64.b64decode(compact, validate=True)
+    except binascii.Error:
+        try:
+            raw = base64.b64decode(compact, validate=False)
+        except binascii.Error:
+            return None
+    if len(raw) < 12:
+        return None
+    if raw.startswith(b"\xff\xd8\xff"):
+        return raw
+    if raw.startswith(_PNG_MAGIC):
+        return raw
+    return None
+
+
+def normalize_featured_image_body(body: bytes) -> bytes:
+    """
+    Coerce featured image uploads / S3 objects to raw JPEG or PNG bytes.
+
+    Some clients stored base64 text (or a data: URL) in S3 while Content-Type was
+    image/jpeg; browsers then cannot render the object. Decoding here fixes new
+    saves and legacy GETs when the payload is still valid base64 of an image.
+    """
+    if not body:
+        return body
+    if body.startswith(b"\xef\xbb\xbf"):
+        body = body[3:]
+    from_data = _strip_data_url_to_bytes(body)
+    if from_data is not None:
+        return from_data
+    if body.startswith(b"\xff\xd8\xff") or body.startswith(_PNG_MAGIC):
+        return body
+    decoded = _decode_ascii_base64_to_image(body)
+    if decoded is not None:
+        return decoded
+    return body
+
+
 def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
     """Persist werkzeug FileStorage to S3 or local instance_path/course_uploads."""
     if uses_s3():
         body = uf.read()
         if not body:
             raise ValueError("empty upload")
+        if kind == "featured":
+            body = normalize_featured_image_body(body)
         ctype = _content_type_for_course_media(kind, fn)
         try:
             _s3().put_object(Bucket=_bucket(), Key=object_key(kind, fn), Body=body, ContentType=ctype)
@@ -84,6 +184,12 @@ def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
     root.mkdir(parents=True, exist_ok=True)
     dest = root / fn
     uf.seek(0)
+    if kind == "featured":
+        body = uf.read()
+        if not body:
+            raise ValueError("empty upload")
+        dest.write_bytes(normalize_featured_image_body(body))
+        return
     uf.save(str(dest))
 
 
@@ -115,23 +221,28 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
                     return None
                 current_app.logger.exception("S3 get_object (featured) failed: %s", e)
                 abort(502)
-            stream = obj["Body"]
+            try:
+                raw = obj["Body"].read()
+            finally:
+                close = getattr(obj["Body"], "close", None)
+                if callable(close):
+                    close()
+            body = normalize_featured_image_body(raw)
+            if not body:
+                return None
             # Filename is authoritative: matches API Gateway binaryMediaTypes and avoids
             # broken previews when S3 metadata is missing or application/octet-stream.
             ctype = _content_type_for_course_media(kind, fname)
-
-            def generate():
-                try:
-                    for chunk in stream.iter_chunks(chunk_size=65536):
-                        if chunk:
-                            yield chunk
-                finally:
-                    close = getattr(stream, "close", None)
-                    if callable(close):
-                        close()
+            if not (body.startswith(b"\xff\xd8\xff") or body.startswith(_PNG_MAGIC)):
+                current_app.logger.warning(
+                    "Featured object %s/%s is not a valid JPEG/PNG after normalization; "
+                    "re-upload the cover image from the admin panel.",
+                    _bucket(),
+                    key,
+                )
 
             return Response(
-                generate(),
+                body,
                 mimetype=ctype,
                 headers={
                     "Cache-Control": "public, max-age=600",
@@ -166,10 +277,14 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     if not path.is_file():
         return None
     if kind == "featured":
-        return send_from_directory(
-            str(root),
-            fname,
-            conditional=True,
-            mimetype=_content_type_for_course_media(kind, fname),
+        body = normalize_featured_image_body(path.read_bytes())
+        ctype = _content_type_for_course_media(kind, fname)
+        return Response(
+            body,
+            mimetype=ctype,
+            headers={
+                "Cache-Control": "public, max-age=600",
+                "Content-Disposition": "inline",
+            },
         )
     return send_from_directory(str(root), fname, conditional=True)
