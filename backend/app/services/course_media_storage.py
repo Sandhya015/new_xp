@@ -220,6 +220,18 @@ def _looks_like_ascii_base64(payload: bytes) -> bool:
     return True
 
 
+def featured_image_bytes_are_raster(body: bytes) -> bool:
+    """True if bytes look like raw JPEG or PNG (after any leading BOM stripped)."""
+    if not body or len(body) < 12:
+        return False
+    b = body
+    if b.startswith(b"\xef\xbb\xbf"):
+        b = b[3:]
+    if b.startswith(b"\xff\xd8\xff") or b.startswith(_PNG_MAGIC):
+        return True
+    return False
+
+
 def _decode_ascii_base64_to_image(body: bytes) -> Optional[bytes]:
     """If body is ASCII base64 of a JPEG/PNG, return decoded bytes; else None."""
     if not _looks_like_ascii_base64(body):
@@ -251,11 +263,15 @@ def normalize_featured_image_body(body: bytes) -> bytes:
     Some clients stored base64 text (or a data: URL) in S3 while Content-Type was
     image/jpeg; browsers then cannot render the object. Decoding here fixes new
     saves and legacy GETs when the payload is still valid base64 of an image.
+    Leading UTF-8 BOM and ascii whitespace are stripped (common when text tools
+    touched binary).
     """
     if not body:
         return body
+    body = body.lstrip(b" \t\r\n")
     if body.startswith(b"\xef\xbb\xbf"):
         body = body[3:]
+    body = body.lstrip(b" \t\r\n")
     from_data = _strip_data_url_to_bytes(body)
     if from_data is not None:
         return from_data
@@ -275,6 +291,10 @@ def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
             raise ValueError("empty upload")
         if kind == "featured":
             body = normalize_featured_image_body(body)
+            if not featured_image_bytes_are_raster(body):
+                raise ValueError(
+                    "Featured image is not valid JPEG/PNG bytes after processing. Choose a real .jpg or .png file."
+                )
         ctype = _content_type_for_course_media(kind, fn)
         try:
             _s3().put_object(Bucket=_bucket(), Key=object_key(kind, fn), Body=body, ContentType=ctype)
@@ -290,7 +310,12 @@ def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
         body = uf.read()
         if not body:
             raise ValueError("empty upload")
-        dest.write_bytes(normalize_featured_image_body(body))
+        body = normalize_featured_image_body(body)
+        if not featured_image_bytes_are_raster(body):
+            raise ValueError(
+                "Featured image is not valid JPEG/PNG bytes after processing. Choose a real .jpg or .png file."
+            )
+        dest.write_bytes(body)
         return
     uf.save(str(dest))
 
@@ -326,13 +351,14 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
             # Filename is authoritative: matches API Gateway binaryMediaTypes and avoids
             # broken previews when S3 metadata is missing or application/octet-stream.
             ctype = _content_type_for_course_media(kind, fname)
-            if not (body.startswith(b"\xff\xd8\xff") or body.startswith(_PNG_MAGIC)):
+            if not featured_image_bytes_are_raster(body):
                 current_app.logger.warning(
                     "Featured object %s/%s is not a valid JPEG/PNG after normalization; "
                     "re-upload the cover image from the admin panel.",
                     _bucket(),
                     key,
                 )
+                return None
 
             return Response(
                 body,
@@ -371,6 +397,11 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
         return None
     if kind == "featured":
         body = normalize_featured_image_body(path.read_bytes())
+        if not featured_image_bytes_are_raster(body):
+            current_app.logger.warning(
+                "Featured file on disk is not valid JPEG/PNG after normalization: %s", path
+            )
+            return None
         ctype = _content_type_for_course_media(kind, fname)
         return Response(
             body,
