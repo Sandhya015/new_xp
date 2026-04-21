@@ -56,6 +56,9 @@ class Config:
     MAX_COURSE_INTRO_UPLOAD_MB = _int_mb_env("MAX_COURSE_INTRO_UPLOAD_MB", 80)
     MAX_COURSE_LESSON_UPLOAD_MB = _int_mb_env("MAX_COURSE_LESSON_UPLOAD_MB", 80)
     MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB = _int_mb_env("MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB", 50)
+    # Lambda: set to managed bucket (see serverless.yml). Empty = local instance_path/course_uploads.
+    COURSE_MEDIA_S3_BUCKET = os.environ.get("COURSE_MEDIA_S3_BUCKET", "").strip()
+    COURSE_MEDIA_S3_PREFIX = (os.environ.get("COURSE_MEDIA_S3_PREFIX") or "course-media").strip().strip("/") or "course-media"
 
 
 class DevelopmentConfig(Config):

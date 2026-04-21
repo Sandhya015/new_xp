@@ -1,0 +1,102 @@
+"""
+Course media (featured images, intro/lesson video, study materials).
+
+On AWS Lambda the deployment package is read-only; local disk under Flask
+instance_path is not writable and /tmp is not shared across invocations.
+When COURSE_MEDIA_S3_BUCKET is set, uploads and GETs use S3 (GET redirects to
+a short-lived presigned URL so large videos are not proxied through API Gateway).
+"""
+from __future__ import annotations
+
+import mimetypes
+import os
+from pathlib import Path
+from typing import Optional
+
+from flask import Response, abort, current_app, redirect, send_from_directory
+from werkzeug.datastructures import FileStorage
+
+
+def _bucket() -> str:
+    return (current_app.config.get("COURSE_MEDIA_S3_BUCKET") or "").strip()
+
+
+def _prefix() -> str:
+    raw = (current_app.config.get("COURSE_MEDIA_S3_PREFIX") or "course-media").strip().strip("/")
+    return raw or "course-media"
+
+
+def object_key(kind: str, fn: str) -> str:
+    return f"{_prefix()}/{kind}/{fn}"
+
+
+def uses_s3() -> bool:
+    return bool(_bucket())
+
+
+def _s3():
+    import boto3
+
+    region = (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "ap-south-1").strip()
+    return boto3.client("s3", region_name=region)
+
+
+def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
+    """Persist werkzeug FileStorage to S3 or local instance_path/course_uploads."""
+    if uses_s3():
+        body = uf.read()
+        if not body:
+            raise ValueError("empty upload")
+        ctype = mimetypes.guess_type(fn)[0] or "application/octet-stream"
+        try:
+            _s3().put_object(Bucket=_bucket(), Key=object_key(kind, fn), Body=body, ContentType=ctype)
+        except Exception as e:
+            current_app.logger.exception("S3 put_object failed: %s", e)
+            raise
+        return
+    root = Path(current_app.instance_path) / "course_uploads" / kind
+    root.mkdir(parents=True, exist_ok=True)
+    dest = root / fn
+    uf.seek(0)
+    uf.save(str(dest))
+
+
+def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
+    """
+    Build Flask response for GET /api/courses/media/<kind>/<fname>.
+    Returns None if the object does not exist (caller should abort(404)).
+    """
+    if uses_s3():
+        key = object_key(kind, fname)
+        client = _s3()
+        try:
+            client.head_object(Bucket=_bucket(), Key=key)
+        except Exception as e:
+            from botocore.exceptions import ClientError
+
+            if isinstance(e, ClientError):
+                code = (e.response.get("Error") or {}).get("Code", "")
+                if code in ("404", "NoSuchKey", "NotFound"):
+                    return None
+            current_app.logger.exception("S3 head_object failed: %s", e)
+            abort(502)
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": _bucket(), "Key": key},
+            ExpiresIn=3600,
+        )
+        return redirect(url, code=302)
+
+    root = Path(current_app.instance_path) / "course_uploads" / kind
+    try:
+        root = root.resolve()
+    except OSError:
+        return None
+    path = (root / fname).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    if not path.is_file():
+        return None
+    return send_from_directory(str(root), fname, conditional=True)

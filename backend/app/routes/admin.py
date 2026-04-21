@@ -13,6 +13,7 @@ from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.routes.enrollments import _serialize_submission
+from app.services.course_media_storage import save_uploaded_file
 from app.services.curriculum import normalize_curriculum
 from app.db import (
     get_db,
@@ -1162,12 +1163,6 @@ _STUDY_MATERIAL_UPLOAD_NAME_RE = re.compile(
 _STUDY_MATERIAL_EXTS = frozenset({".pdf", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt", ".csv"})
 
 
-def _course_upload_root():
-    root = Path(current_app.instance_path) / "course_uploads"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 @admin_bp.route("/uploads/course-media", methods=["POST"])
 @jwt_required()
 def upload_course_media():
@@ -1223,9 +1218,15 @@ def upload_course_media():
     name_ok = _STUDY_MATERIAL_UPLOAD_NAME_RE.match(fn) if kind == "material" else _MEDIA_UPLOAD_NAME_RE.match(fn)
     if not name_ok:
         return jsonify({"error": "Invalid generated name"}), 500
-    dest_dir = _course_upload_root() / kind
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / fn
-    uf.save(str(dest))
+    try:
+        save_uploaded_file(kind, fn, uf)
+    except ValueError as e:
+        return jsonify({"error": str(e) or "Invalid upload"}), 400
+    except OSError as e:
+        current_app.logger.exception("course-media save failed: %s", e)
+        return jsonify({"error": "Could not store file (check server storage configuration)"}), 503
+    except Exception as e:
+        current_app.logger.exception("course-media save failed: %s", e)
+        return jsonify({"error": "Could not store file"}), 502
     url_path = f"/api/courses/media/{kind}/{fn}"
     return jsonify({"url": url_path})

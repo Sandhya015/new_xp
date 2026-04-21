@@ -17,6 +17,18 @@ provider:
             - ses:SendEmail
             - ses:SendRawEmail
           Resource: "*"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:HeadObject
+          Resource:
+            Fn::Join:
+              - ""
+              - - "Fn::GetAtt":
+                    - CourseMediaBucket
+                    - Arn
+                - "/*"
   environment:
     FLASK_ENV: ${self:provider.stage}
     MONGODB_URI: ${env:MONGODB_URI, ''}
@@ -47,6 +59,10 @@ provider:
     MAX_COURSE_INTRO_UPLOAD_MB: ${env:MAX_COURSE_INTRO_UPLOAD_MB, '80'}
     MAX_COURSE_LESSON_UPLOAD_MB: ${env:MAX_COURSE_LESSON_UPLOAD_MB, '80'}
     MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB: ${env:MAX_COURSE_STUDY_MATERIAL_UPLOAD_MB, '50'}
+    # Managed per-stage bucket (see resources); course media uploads + public GET (presigned redirect).
+    COURSE_MEDIA_S3_BUCKET:
+      Ref: CourseMediaBucket
+    COURSE_MEDIA_S3_PREFIX: course-media
   # Optional: restrict to your VPC or keep default (no VPC = simpler, MongoDB Atlas works)
   # vpc: ...
 
@@ -139,6 +155,18 @@ functions:
 # Add CORS headers to error responses (4XX/5XX) so browser doesn't block on error
 resources:
   Resources:
+    CourseMediaBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
     GatewayResponseDefault4XX:
       Type: AWS::ApiGateway::GatewayResponse
       Properties:

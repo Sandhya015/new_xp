@@ -3,14 +3,14 @@ Courses: list (paginated), get by id, get content for enrolled student. Public +
 """
 import re
 from datetime import datetime
-from pathlib import Path
 
 from bson import ObjectId
-from flask import Blueprint, request, jsonify, abort, send_from_directory, current_app
+from flask import Blueprint, request, jsonify, abort
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_courses_collection, get_enrollments_collection
+from app.services.course_media_storage import make_course_media_response
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
 
@@ -218,19 +218,10 @@ def serve_course_media(kind, fname):
             abort(404)
     elif not _COURSE_MEDIA_NAME_RE.match(fname or ""):
         abort(404)
-    root = Path(current_app.instance_path) / "course_uploads" / kind
-    try:
-        root = root.resolve()
-    except OSError:
+    resp = make_course_media_response(kind, fname)
+    if resp is None:
         abort(404)
-    path = (root / fname).resolve()
-    try:
-        path.relative_to(root)
-    except ValueError:
-        abort(404)
-    if not path.is_file():
-        abort(404)
-    return send_from_directory(str(root), fname, conditional=True)
+    return resp
 
 
 @courses_bp.route("/<course_id>", methods=["GET"])
