@@ -24,22 +24,32 @@ def _load_wsgi():
         traceback.print_exc()
 
 
-def _gateway_response(status_code: int, body: dict, origin: str = ""):
-    """API Gateway Lambda proxy response with CORS."""
-    allowed = (
+def _origin_allowed_cors(origin: str) -> bool:
+    o = (origin or "").strip()
+    if not o:
+        return False
+    if o in (
         "https://www.xpertintern.com",
         "https://xpertintern.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-    )
+    ):
+        return True
+    lo = o.rstrip("/").lower()
+    host = lo.split("//", 1)[-1].split("/", 1)[0]
+    return host.endswith(".vercel.app") or host.endswith(".amplifyapp.com")
+
+
+def _gateway_response(status_code: int, body: dict, origin: str = ""):
+    """API Gateway Lambda proxy response with CORS."""
     headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     }
-    if origin and origin in allowed:
-        headers["Access-Control-Allow-Origin"] = origin
+    if origin and _origin_allowed_cors(origin):
+        headers["Access-Control-Allow-Origin"] = origin.strip()
     else:
         headers["Access-Control-Allow-Origin"] = "https://www.xpertintern.com"
     return {
@@ -76,11 +86,8 @@ def handler(event, context):
         if "headers" not in result:
             result["headers"] = {}
         result.setdefault("headers", {})
-        if "Access-Control-Allow-Origin" not in result["headers"] and origin:
-            allowed = ("https://www.xpertintern.com", "https://xpertintern.com",
-                       "http://localhost:5173", "http://127.0.0.1:5173")
-            if origin in allowed:
-                result["headers"]["Access-Control-Allow-Origin"] = origin
+        if "Access-Control-Allow-Origin" not in result["headers"] and origin and _origin_allowed_cors(origin):
+            result["headers"]["Access-Control-Allow-Origin"] = origin.strip()
         result["headers"]["Access-Control-Allow-Credentials"] = "true"
         return result
     except Exception as e:

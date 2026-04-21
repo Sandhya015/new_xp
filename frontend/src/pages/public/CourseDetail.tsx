@@ -404,7 +404,7 @@ export function CourseDetail() {
                       className="aspect-[21/9] w-full object-cover sm:aspect-video"
                       loading="eager"
                       decoding="async"
-                      referrerPolicy="no-referrer"
+                      referrerPolicy="strict-origin-when-cross-origin"
                       onError={() => setTrainingCoverFailed(true)}
                     />
                   </div>

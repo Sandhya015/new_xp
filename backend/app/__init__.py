@@ -50,16 +50,19 @@ def create_app(config_class=None):
     app.config["CORS_ORIGINS_LIST"] = origins
 
     _vercel_origin_re = re.compile(r"^https://[\w.-]+\.vercel\.app$", re.IGNORECASE)
+    _amplify_origin_re = re.compile(r"^https://[\w.-]+\.amplifyapp\.com$", re.IGNORECASE)
 
     def _cors_origin_allowed(origin: str) -> bool:
         if not origin:
             return False
         if origin in app.config["CORS_ORIGINS_LIST"]:
             return True
-        if _vercel_origin_re.match(origin.strip()):
+        o = origin.strip()
+        if _vercel_origin_re.match(o) or _amplify_origin_re.match(o):
             return True
         try:
-            if (urlparse(origin).hostname or "").endswith(".vercel.app"):
+            host = (urlparse(origin).hostname or "").lower()
+            if host.endswith(".vercel.app") or host.endswith(".amplifyapp.com"):
                 return True
         except Exception:
             pass
@@ -67,6 +70,7 @@ def create_app(config_class=None):
 
     cors_origins_for_flask = list(origins)
     cors_origins_for_flask.append(_vercel_origin_re)
+    cors_origins_for_flask.append(_amplify_origin_re)
 
     CORS(
         app,
