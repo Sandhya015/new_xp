@@ -37,6 +37,7 @@ import {
 } from '@/utils/featuredImageValidation'
 import { adminService } from '@/services/adminService'
 import { invalidateCoursesListCache } from '@/services/courseService'
+import { absoluteApiUrl } from '@/config/api'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
 import {
   QuizBuilderModal,
@@ -67,6 +68,15 @@ function topicTypeButtonLabel(t: TopicType): string {
   if (t === 'Lecture') return 'Lesson'
   if (t === 'Quiz') return 'Quiz'
   return 'Assignment'
+}
+
+/** Basename for hosted cover (`/api/courses/media/featured/<file>`). Not for external URLs. */
+function featuredImageStoredBasename(pathOrUrl: string): string {
+  const s = (pathOrUrl || '').trim()
+  const marker = '/api/courses/media/featured/'
+  const i = s.indexOf(marker)
+  if (i < 0) return ''
+  return (s.slice(i + marker.length).split(/[?#]/)[0] ?? '').trim()
 }
 
 interface CurriculumTopic {
@@ -981,6 +991,14 @@ export function AddTraining() {
     : undefined
   const assignmentEditorTopic = assignmentEditorModule?.topics.find((t) => t.id === assignmentEditor?.topicId)
   const shortSummaryPlainLength = plainTextFromHtml(basic.shortDesc).length
+  const rawFeaturedImageUrl = basic.featuredImageUrl.trim()
+  const featuredHostedBasename = featuredImageStoredBasename(rawFeaturedImageUrl)
+  const featuredPreviewHref =
+    featuredHostedBasename && rawFeaturedImageUrl.startsWith('/')
+      ? absoluteApiUrl(rawFeaturedImageUrl)
+      : rawFeaturedImageUrl.startsWith('http')
+        ? rawFeaturedImageUrl
+        : ''
 
   if (hydrating) {
     return <div className="p-8 text-center text-slate-gray">Loading training…</div>
@@ -1388,12 +1406,45 @@ export function AddTraining() {
                   <strong>Save changes</strong> (top bar) or <strong>Save as Draft</strong> / <strong>Publish</strong> at the bottom.
                 </p>
                 <input
-                  type="url"
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
                   value={basic.featuredImageUrl}
                   onChange={(e) => setBasic((b) => ({ ...b, featuredImageUrl: e.target.value }))}
-                  placeholder="https://…"
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                  placeholder="https://… or leave empty and upload below"
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm"
                 />
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  This field uses <strong className="text-slate-700">plain text</strong> (not browser &quot;URL&quot; validation) so our saved path{' '}
+                  <code className="rounded bg-slate-100 px-0.5">/api/courses/media/featured/…</code> is not cut off. For an external image, paste a full{' '}
+                  <code className="rounded bg-slate-100 px-0.5">https://…</code> link.
+                </p>
+                {featuredHostedBasename ? (
+                  <p className="mt-1 text-xs text-emerald-800">
+                    <span className="font-medium text-slate-700">Saved on server (file name):</span>{' '}
+                    <span className="break-all font-mono text-[11px]">{featuredHostedBasename}</span>
+                    {featuredPreviewHref ? (
+                      <>
+                        {' · '}
+                        <a
+                          href={featuredPreviewHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-brand-accent underline hover:text-primary-600"
+                        >
+                          Preview image
+                        </a>
+                      </>
+                    ) : null}
+                    {!String(featuredHostedBasename).match(/\.(jpe?g|png)$/i) ? (
+                      <span className="mt-1 block text-amber-800">
+                        This file name looks incomplete (missing <code className="rounded bg-amber-100 px-0.5">.jpg</code> /{' '}
+                        <code className="rounded bg-amber-100 px-0.5">.png</code>). Re-upload the cover and click <strong>Save changes</strong>.
+                      </span>
+                    ) : null}
+                  </p>
+                ) : null}
                 <input
                   type="file"
                   accept=".jpg,.jpeg,.png,image/jpeg,image/png"
@@ -1415,7 +1466,9 @@ export function AddTraining() {
                   <p className="mt-1 text-xs text-red-600" role="alert">{featuredImageError}</p>
                 ) : null}
                 {basic.thumbnail ? (
-                  <p className="mt-1 text-xs text-slate-600 truncate" title={basic.thumbnail.name}>{basic.thumbnail.name}</p>
+                  <p className="mt-1 text-xs text-slate-600 truncate" title={basic.thumbnail.name}>
+                    <span className="font-medium text-slate-700">Selected file:</span> {basic.thumbnail.name}
+                  </p>
                 ) : null}
               </div>
               <div>
