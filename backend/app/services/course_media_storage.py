@@ -387,14 +387,56 @@ def save_uploaded_file(kind: str, fn: str, uf: FileStorage) -> None:
     uf.save(str(dest))
 
 
+def featured_s3_object_head_exists(fname: str) -> bool:
+    """
+    True if an object exists at the featured S3 key (does not validate JPEG/PNG bytes).
+
+    Public GET uses presigned S3 redirects; HEAD uses this so validators avoid full reads.
+    Admin checks still use course_media_object_exists / load_featured_servable_body for strict validation.
+    """
+    if not _COURSE_MEDIA_NAME_RE.match(fname or ""):
+        return False
+    if not uses_s3():
+        return False
+    key = object_key("featured", fname)
+    try:
+        _s3().head_object(Bucket=_bucket(), Key=key)
+        return True
+    except Exception as e:
+        if _s3_not_found(e):
+            return False
+        raise
+
+
 def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     """
     Build Flask response for GET /api/courses/media/<kind>/<fname>.
-    Returns None if the object does not exist (caller should abort(404)).
-    Featured images are handled in routes/courses.py via load_featured_servable_body.
+    Returns None if the object does not exist (caller should return 404 JSON).
+
+    On S3, featured images redirect to a presigned GetObject URL (same pattern as intro/lesson)
+    so bytes are not proxied through API Gateway/Lambda, avoiding binary handling edge cases.
+    Local featured images are still served from disk in routes/courses.py via load_featured_servable_body.
     """
     if kind == "featured":
-        return None
+        if not uses_s3():
+            return None
+        key = object_key(kind, fname)
+        client = _s3()
+        try:
+            client.head_object(Bucket=_bucket(), Key=key)
+        except Exception as e:
+            if _s3_not_found(e):
+                return None
+            current_app.logger.exception("S3 head_object failed (featured): %s", e)
+            abort(502)
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": _bucket(), "Key": key},
+            ExpiresIn=3600,
+        )
+        r = redirect(url, code=302)
+        r.headers["Cache-Control"] = "public, max-age=300"
+        return r
 
     if uses_s3():
         key = object_key(kind, fname)

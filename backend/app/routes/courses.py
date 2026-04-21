@@ -14,6 +14,7 @@ from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_courses_collection, get_enrollments_collection
 from app.services.course_media_storage import (
     course_media_object_exists,
+    featured_s3_object_head_exists,
     load_featured_servable_body,
     make_course_media_response,
     object_key,
@@ -278,8 +279,20 @@ def serve_course_media(kind, fname):
         if request.method == "HEAD":
             return Response(status=404)
         return _course_media_not_found_json(kind, fname or "", "invalid_filename")
-    # Featured: HEAD must match GET (S3 key can exist but payload may be corrupt/non-raster).
+    # Featured: on S3, GET redirects to presigned URL (browser loads S3 directly). Local disk still
+    # streams through Flask with full JPEG/PNG validation. HEAD on S3 uses HeadObject only.
     if kind == "featured":
+        if uses_s3():
+            if request.method == "HEAD":
+                try:
+                    ok = featured_s3_object_head_exists(fname)
+                except Exception:
+                    abort(502)
+                return Response(status=200 if ok else 404)
+            resp = make_course_media_response("featured", fname)
+            if resp is not None:
+                return resp
+            return _course_media_not_found_json(kind, fname or "", "object_not_found")
         try:
             body, status = load_featured_servable_body(fname)
         except Exception:
