@@ -199,17 +199,31 @@ def make_course_media_response(kind: str, fname: str) -> Optional[Response]:
     Returns None if the object does not exist (caller should abort(404)).
     """
     if uses_s3():
-        from botocore.exceptions import ClientError
-
         key = object_key(kind, fname)
         client = _s3()
 
+        def _s3_error_meta(exc: BaseException) -> tuple[str, int]:
+            """
+            Boto errors are normally botocore.exceptions.ClientError, but avoid
+            isinstance(ClientError) — duplicate botocore copies (Lambda zip + layer)
+            can make that check fail and turn a normal NoSuchKey into abort(502).
+            """
+            resp = getattr(exc, "response", None)
+            if not isinstance(resp, dict):
+                return "", 0
+            err = resp.get("Error") or {}
+            code = str(err.get("Code") or "")
+            try:
+                http = int((resp.get("ResponseMetadata") or {}).get("HTTPStatusCode") or 0)
+            except (TypeError, ValueError):
+                http = 0
+            return code, http
+
         def _s3_not_found(exc: BaseException) -> bool:
-            return isinstance(exc, ClientError) and (exc.response.get("Error") or {}).get("Code", "") in (
-                "404",
-                "NoSuchKey",
-                "NotFound",
-            )
+            code, http = _s3_error_meta(exc)
+            if code in ("404", "NoSuchKey", "NotFound"):
+                return True
+            return http == 404
 
         # Featured images are capped small at upload; stream bytes so browsers never
         # depend on cross-origin redirects or presigned URL quirks for <img src>.

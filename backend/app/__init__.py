@@ -5,9 +5,10 @@ Structure per XpertIntern Tech Stack Guide.
 import re
 from urllib.parse import urlparse
 
-from flask import Flask, request
+from flask import Flask, jsonify, make_response, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from werkzeug.exceptions import HTTPException
 
 from app.db import init_db
 
@@ -141,27 +142,42 @@ def create_app(config_class=None):
     def index():
         return {"service": "xpertintern-api", "version": "0.1.0", "docs": "/api/health"}
 
+    def _cors_headers_for_error(origin: str) -> dict:
+        allow_origin = origin if origin and _cors_origin_allowed(origin) else ""
+        h = {
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        }
+        if allow_origin:
+            h["Access-Control-Allow-Origin"] = allow_origin
+        return h
+
     @app.errorhandler(Exception)
     def _handle_error(e):
         """Catch all unhandled exceptions so Lambda returns 500 + JSON (and CORS) instead of 502."""
-        from flask import make_response
         import traceback
+
+        if isinstance(e, HTTPException):
+            origin = request.headers.get("Origin", "")
+            body = {"error": e.name, "description": e.description}
+            if app.config.get("DEBUG"):
+                body["detail"] = str(e)
+            r = make_response(jsonify(body), e.code)
+            for k, v in _cors_headers_for_error(origin).items():
+                r.headers[k] = v
+            return r
         if hasattr(app, "logger"):
             app.logger.exception("Unhandled error: %s", e)
         else:
             traceback.print_exc()
         origin = request.headers.get("Origin", "")
-        allow_origin = origin if origin in app.config.get("CORS_ORIGINS_LIST", []) else ""
         body = {"error": "An unexpected error occurred. Please try again."}
         if app.config.get("DEBUG"):
             body["detail"] = str(e)
-        r = make_response(body, 500)
-        r.headers["Content-Type"] = "application/json"
-        if allow_origin:
-            r.headers["Access-Control-Allow-Origin"] = allow_origin
-        r.headers["Access-Control-Allow-Credentials"] = "true"
-        r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        r.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        r = make_response(jsonify(body), 500)
+        for k, v in _cors_headers_for_error(origin).items():
+            r.headers[k] = v
         return r
 
     import logging as _logging
