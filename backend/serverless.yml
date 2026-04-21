@@ -13,6 +13,9 @@ provider:
   # base64 by API Gateway; otherwise browsers receive corrupted bytes and show a broken image.
   apiGateway:
     binaryMediaTypes:
+      # POST /api/admin/uploads/course-media (multipart file + kind). API Gateway defaults
+      # to UTF-8 for non-binary types, which corrupts JPEG/MP4 bytes inside the body.
+      - multipart/form-data
       - image/jpeg
       - image/jpg
       - image/png
