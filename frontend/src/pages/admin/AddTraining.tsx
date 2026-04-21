@@ -36,7 +36,7 @@ import {
   validateFeaturedTrainingImageQuick,
 } from '@/utils/featuredImageValidation'
 import { adminService } from '@/services/adminService'
-import { invalidateCoursesListCache } from '@/services/courseService'
+import { fetchApiHealth, invalidateCoursesListCache } from '@/services/courseService'
 import { absoluteApiUrl } from '@/config/api'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
 import {
@@ -991,6 +991,24 @@ export function AddTraining() {
     : undefined
   const assignmentEditorTopic = assignmentEditorModule?.topics.find((t) => t.id === assignmentEditor?.topicId)
   const shortSummaryPlainLength = plainTextFromHtml(basic.shortDesc).length
+
+  const [courseMediaStorage, setCourseMediaStorage] = useState<'unknown' | 's3' | 'local'>('unknown')
+  useEffect(() => {
+    let cancelled = false
+    fetchApiHealth()
+      .then((h) => {
+        if (cancelled) return
+        const m = h.courseMediaStorage
+        setCourseMediaStorage(m === 's3' || m === 'local' ? m : 'unknown')
+      })
+      .catch(() => {
+        if (!cancelled) setCourseMediaStorage('unknown')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const rawFeaturedImageUrl = basic.featuredImageUrl.trim()
   const featuredHostedBasename = featuredImageStoredBasename(rawFeaturedImageUrl)
   const featuredPreviewHref =
@@ -1050,6 +1068,24 @@ export function AddTraining() {
           {error}
         </div>
       )}
+
+      {courseMediaStorage === 'local' ? (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          role="status"
+        >
+          <p className="font-semibold text-amber-900">Course media is stored on this machine only</p>
+          <p className="mt-1 leading-relaxed text-amber-900/90">
+            This API saves uploads under local disk, so cover images and videos work at{' '}
+            <span className="font-mono text-xs">localhost:5000</span> but the live site loads the same paths from the
+            cloud API (S3). Either set <span className="font-mono text-xs">COURSE_MEDIA_S3_BUCKET</span> in{' '}
+            <span className="font-mono text-xs">backend/.env</span> to your dev bucket (see{' '}
+            <span className="font-mono text-xs">backend/.env.example</span>), or open the admin panel with{' '}
+            <span className="font-mono text-xs">VITE_API_URL</span> pointing at the deployed API and upload the cover
+            there.
+          </p>
+        </div>
+      ) : null}
 
       {/* Step indicator */}
       <div className="flex gap-2">

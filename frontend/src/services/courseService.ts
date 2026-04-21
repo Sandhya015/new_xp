@@ -18,6 +18,19 @@ export function invalidateCoursesListCache() {
   coursesListCache = null
 }
 
+/** Public GET /api/health (no auth). Used to detect local-disk vs S3 course media. */
+export type ApiHealthPayload = {
+  status: string
+  service: string
+  courseMediaStorage?: 's3' | 'local' | 'unknown'
+}
+
+export async function fetchApiHealth(): Promise<ApiHealthPayload> {
+  const base = getApiBase().replace(/\/$/, '')
+  const { data } = await axios.get<ApiHealthPayload>(`${base}/api/health`, { withCredentials: false })
+  return data
+}
+
 function coursesListCacheKey(params?: { page?: number; limit?: number; category?: string; search?: string }) {
   return JSON.stringify({
     page: params?.page ?? 1,
