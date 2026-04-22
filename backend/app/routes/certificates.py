@@ -1,15 +1,12 @@
 """
 Certificates: verify (public), list my (student). Admin upload/bulk/send-email stubbed for later.
 """
-import uuid
-from datetime import datetime
-
 from bson import ObjectId
 from flask import Blueprint, Response, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.cert_constants import CERTIFICATE_PDF_DOWNLOAD_LIMIT
-from app.certificate_pdf import build_course_certificate_pdf
+from app.certificate_quiz_pass import apply_quiz_pass_certificate, course_certificate_is_email_only
 from app.course_features import course_has_completion_quiz
 from app.db import (
     get_db,
@@ -18,7 +15,6 @@ from app.db import (
     get_enrollments_collection,
     get_users_collection,
 )
-from app.notifications import schedule_certificate_email
 from app.enrollment_lookup import user_course_enrollment_filter
 
 certificates_bp = Blueprint("certificates", __name__)
@@ -76,6 +72,13 @@ def generate_from_quiz():
     c = courses_coll.find_one({"_id": ObjectId(course_id)})
     if not c or not course_has_completion_quiz(c):
         return jsonify({"error": "Certificate is not available for this course"}), 404
+    if course_certificate_is_email_only(c):
+        return jsonify({
+            "error": (
+                "This course delivers your certificate by email only. "
+                "It was issued when you passed the completion quiz, or it will be sent as soon as mail is enabled on the server."
+            ),
+        }), 400
 
     users_coll = get_users_collection()
     try:
@@ -84,9 +87,6 @@ def generate_from_quiz():
         user = None
     if not user:
         return jsonify({"error": "User not found"}), 404
-
-    student_name = user.get("name") or user.get("fullName") or "Student"
-    course_title = c.get("title") or "Course"
 
     cc = e.get("courseCertificate") or {}
     download_count = int(cc.get("pdfDownloadCount", 0) or 0)
@@ -98,72 +98,18 @@ def generate_from_quiz():
             ),
         }), 429
 
-    cert_no = cc.get("certNo")
-    issue_dt = datetime.utcnow()
-
-    if not cert_no:
-        cert_no = f"XPI-{uuid.uuid4().hex[:12].upper()}"
-        issue_dt = datetime.utcnow()
-        cert_coll = get_certificates_collection()
-        cert_coll.insert_one({
-            "studentId": user_id,
-            "courseId": course_id,
-            "certNo": cert_no,
-            "studentName": student_name,
-            "programName": course_title,
-            "university": user.get("university") or "",
-            "issueDate": issue_dt,
-            "completionDate": issue_dt.strftime("%Y-%m-%d"),
-            "status": "valid",
-            "source": "python-quiz",
-        })
-        enroll_coll.update_one(
-            {"_id": e["_id"]},
-            {
-                "$set": {
-                    "courseCertificate": {
-                        "certNo": cert_no,
-                        "issuedAt": issue_dt,
-                        "pdfDownloadCount": 0,
-                    },
-                    "status": "completed",
-                    "completedAt": issue_dt,
-                },
-            },
-        )
-    else:
-        issued = cc.get("issuedAt")
-        if hasattr(issued, "strftime"):
-            issue_dt = issued
-
-    date_str = issue_dt.strftime("%Y-%m-%d") if hasattr(issue_dt, "strftime") else datetime.utcnow().strftime("%Y-%m-%d")
-    pdf_bytes = build_course_certificate_pdf(student_name, course_title, cert_no, date_str)
-
-    to_email = (user.get("email") or "").strip()
-    if to_email:
-        schedule_certificate_email(
-            current_app._get_current_object(),
-            student_name,
-            to_email,
-            course_title,
-            cert_no,
-            pdf_bytes,
-        )
-
-    enroll_coll.update_one(
-        {"_id": e["_id"]},
-        {"$inc": {"courseCertificate.pdfDownloadCount": 1}},
+    resp = apply_quiz_pass_certificate(
+        current_app._get_current_object(),
+        user_id=user_id,
+        course_id=course_id,
+        enrollment=e,
+        course=c,
+        user=user,
+        for_pdf_download=True,
     )
-
-    safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
-    return Response(
-        pdf_bytes,
-        mimetype="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="XpertIntern-{safe_name}.pdf"',
-            "X-Certificate-Id": cert_no,
-        },
-    )
+    if isinstance(resp, dict):
+        return jsonify({"error": "Could not build certificate response"}), 500
+    return resp
 
 
 @certificates_bp.route("/my", methods=["GET"])

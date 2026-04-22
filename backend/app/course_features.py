@@ -19,11 +19,13 @@ def course_has_python_quiz(course: dict | None) -> bool:
 
 def course_has_completion_quiz(course: dict | None) -> bool:
     """Courses that expose GET/POST .../python-quiz and certificate-from-quiz (includes Java seed)."""
+    if not course:
+        return False
+    if (course.get("completionQuizTitle") or "").strip():
+        return True
     if course_has_python_quiz(course):
         return True
     slug = (course.get("slug") or "").strip().lower()
     if slug == "demo-java-programming-seed":
-        return True
-    if slug == "aiml-foundations-seed":
         return True
     return False

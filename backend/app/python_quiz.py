@@ -1,8 +1,10 @@
-"""Static completion quizzes (Python fundamentals + Java seed); questions only via API without correct indices."""
+"""Static completion quizzes (Python fundamentals + Java seed); curriculum-driven completion when completionQuizTitle is set."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
+
+from app.services.curriculum import normalize_quiz_question
 
 # correct_index: 0-based index into options
 PYTHON_QUIZ_QUESTIONS: list[dict[str, Any]] = [
@@ -84,94 +86,133 @@ JAVA_QUIZ_QUESTIONS: list[dict[str, Any]] = [
 PASS_PERCENT = 60
 
 JAVA_SEED_SLUG = "demo-java-programming-seed"
-AIML_SEED_SLUG = "aiml-foundations-seed"
 
-AIML_QUIZ_QUESTIONS: list[dict[str, Any]] = [
-    {
-        "id": "aiml1",
-        "question": "In supervised learning, what are paired with each example during training?",
-        "options": ["Only labels", "Features and labels", "Only features", "Hyperparameters only"],
-        "correctIndex": 1,
-    },
-    {
-        "id": "aiml2",
-        "question": "Why do we commonly split data into training and validation sets?",
-        "options": [
-            "To delete half the data",
-            "To estimate how well the model generalizes to unseen data",
-            "To make training slower",
-            "To avoid using labels",
-        ],
-        "correctIndex": 1,
-    },
-    {
-        "id": "aiml3",
-        "question": "Overfitting usually means the model has…",
-        "options": [
-            "Memorized training patterns but poor performance on new data",
-            "Perfect performance everywhere",
-            "Too few parameters",
-            "No access to features",
-        ],
-        "correctIndex": 0,
-    },
-    {
-        "id": "aiml4",
-        "question": "What is the typical role of a non-linearity (activation) between layers in a neural network?",
-        "options": [
-            "To remove all gradients",
-            "To allow the model to learn non-linear decision boundaries",
-            "To convert labels into features",
-            "To shuffle the dataset",
-        ],
-        "correctIndex": 1,
-    },
-    {
-        "id": "aiml5",
-        "question": "In a binary classifier, high recall usually implies…",
-        "options": [
-            "We catch most of the positive cases (fewer false negatives)",
-            "We never make false positives",
-            "Accuracy is always 100%",
-            "The model ignores the negative class",
-        ],
-        "correctIndex": 0,
-    },
-]
+
+def _modules_iter(course: dict | None) -> list:
+    cur = (course or {}).get("curriculum")
+    if not isinstance(cur, list):
+        return []
+    return [m for m in cur if isinstance(m, dict)]
+
+
+def find_quiz_topic_by_title(course: dict | None, title: str) -> Optional[dict]:
+    want = (title or "").strip().lower()
+    if not want:
+        return None
+    for mod in _modules_iter(course):
+        topics = mod.get("topics")
+        if not isinstance(topics, list):
+            continue
+        for raw in topics:
+            if not isinstance(raw, dict):
+                continue
+            ttype = str(raw.get("type") or "").strip().lower()
+            if ttype != "quiz":
+                continue
+            if str(raw.get("title") or "").strip().lower() == want:
+                return raw
+    return None
+
+
+def _static_bank_from_curriculum_questions(raw_list: list) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for idx, raw in enumerate(raw_list or []):
+        nq = normalize_quiz_question(raw, idx)
+        if not nq:
+            continue
+        qid = nq.get("id") or f"q_{idx}"
+        if nq.get("questionType") == "mcq":
+            opts = nq.get("options") or []
+            if not isinstance(opts, list):
+                continue
+            ci = int(nq.get("correctOptionIndex") or 0)
+            out.append(
+                {
+                    "id": qid,
+                    "question": nq.get("title") or "",
+                    "options": [str(x) for x in opts],
+                    "correctIndex": max(0, min(ci, len(opts) - 1)) if len(opts) else 0,
+                }
+            )
+        elif nq.get("questionType") == "true_false":
+            out.append(
+                {
+                    "id": qid,
+                    "question": nq.get("title") or "",
+                    "options": ["True", "False"],
+                    "correctIndex": 0 if nq.get("tfCorrect") is True else 1,
+                }
+            )
+    return out
+
+
+def completion_quiz_pass_percent(course: dict | None) -> int:
+    """Default PASS_PERCENT; override from curriculum when completionQuizTitle targets a topic with quizSettings."""
+    if course and (course.get("completionQuizTitle") or "").strip():
+        t = find_quiz_topic_by_title(course, (course.get("completionQuizTitle") or "").strip())
+        if t and isinstance(t, dict):
+            st = t.get("quizSettings") or {}
+            if isinstance(st, dict):
+                p = (st.get("passingGradePercent") or st.get("passingGrade") or "")
+                s = str(p).strip() if p is not None else ""
+                if s:
+                    try:
+                        n = int(float(s))
+                        if 0 <= n <= 100:
+                            return n
+                    except (TypeError, ValueError):
+                        pass
+    return PASS_PERCENT
 
 
 def _question_bank(course: dict | None) -> list[dict[str, Any]]:
-    slug = (course.get("slug") or "").strip().lower() if course else ""
+    c = course
+    ct = (c.get("completionQuizTitle") or "").strip() if c else ""
+    if c and ct:
+        topic = find_quiz_topic_by_title(c, ct)
+        if topic:
+            qs = topic.get("quizQuestions")
+            if isinstance(qs, list):
+                bank = _static_bank_from_curriculum_questions(qs)
+                if bank:
+                    return bank
+        return []
+    slug = (c.get("slug") or "").strip().lower() if c else ""
     if slug == JAVA_SEED_SLUG:
         return JAVA_QUIZ_QUESTIONS
-    if slug == AIML_SEED_SLUG:
-        return AIML_QUIZ_QUESTIONS
     return PYTHON_QUIZ_QUESTIONS
+
+
+def quiz_has_questions(course: dict | None) -> bool:
+    return bool(_question_bank(course))
 
 
 def quiz_questions_for_client(course: dict | None = None) -> list[dict[str, Any]]:
     bank = _question_bank(course)
     out = []
     for q in bank:
-        out.append({
-            "id": q["id"],
-            "question": q["question"],
-            "options": q["options"],
-        })
+        out.append(
+            {
+                "id": q["id"],
+                "question": q["question"],
+                "options": q["options"],
+            }
+        )
     return out
 
 
-def grade_quiz(answer_indices: list[int], course: dict | None = None) -> tuple[bool, int]:
+def grade_quiz(answer_indices: list[int], course: dict | None = None) -> tuple[bool, int, int]:
     """
     answer_indices: selected option index per question, same order as the bank for this course.
-    Returns (passed, score_percent).
+    Returns (passed, score_percent, pass_percent).
     """
     bank = _question_bank(course)
+    ppass = completion_quiz_pass_percent(course)
     total = len(bank)
     if total == 0:
-        return True, 100
+        return False, 0, ppass
     if len(answer_indices) != total:
-        return False, 0
+        return False, 0, ppass
     correct = 0
     for i, q in enumerate(bank):
         try:
@@ -181,4 +222,4 @@ def grade_quiz(answer_indices: list[int], course: dict | None = None) -> tuple[b
         if sel == q["correctIndex"]:
             correct += 1
     pct = int(round(100 * correct / total))
-    return pct >= PASS_PERCENT, pct
+    return (pct >= ppass), pct, ppass

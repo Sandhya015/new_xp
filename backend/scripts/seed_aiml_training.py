@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Seed a free, public AIML foundations course with fixed YouTube intro + two module lessons,
-module quizzes (curriculum), and an AIML completion quiz (Quizzes tab).
+module quizzes (curriculum), and a server-graded completion quiz (curriculum + completionQuizTitle).
 
 Run from backend/:
   set -a && source .env && set +a
@@ -196,6 +196,86 @@ def _raw_curriculum() -> list[dict]:
                 },
             ],
         },
+        {
+            "id": "aiml_mod3",
+            "title": "Module 3 — Course completion & certificate",
+            "order": 2,
+            "topics": [
+                {
+                    "id": "aiml_cert_quiz",
+                    "title": "AIML — Course completion & certificate quiz",
+                    "type": "Quiz",
+                    "duration": "25 min",
+                    "details": (
+                        "<p>Final multiple-choice and true/false check tied to the certificate. "
+                        "This assessment is the same as the <strong>completion quiz</strong> in the Quizzes tab "
+                        "(author it here in the curriculum; not hardcoded in the app).</p>"
+                    ),
+                    "quizSettings": {
+                        "passingGradePercent": "60",
+                        "attemptsAllowed": "10",
+                        "feedbackMode": "retry",
+                    },
+                    "quizQuestions": [
+                        {
+                            "id": "aiml_c1",
+                            "title": "In supervised learning, what are paired with each example during training?",
+                            "options": [
+                                "Only labels",
+                                "Features and labels",
+                                "Only features",
+                                "Hyperparameters only",
+                            ],
+                            "correctOptionIndex": 1,
+                        },
+                        {
+                            "id": "aiml_c2",
+                            "title": "Why do we commonly split data into training and validation sets?",
+                            "options": [
+                                "To delete half the data",
+                                "To estimate how well the model generalizes to unseen data",
+                                "To make training slower",
+                                "To avoid using labels",
+                            ],
+                            "correctOptionIndex": 1,
+                        },
+                        {
+                            "id": "aiml_c3",
+                            "title": "Overfitting usually means the model has…",
+                            "options": [
+                                "Memorized training patterns but poor performance on new data",
+                                "Perfect performance everywhere",
+                                "Too few parameters",
+                                "No access to features",
+                            ],
+                            "correctOptionIndex": 0,
+                        },
+                        {
+                            "id": "aiml_c4",
+                            "title": "What is the typical role of a non-linearity (activation) between layers in a neural network?",
+                            "options": [
+                                "To remove all gradients",
+                                "To allow the model to learn non-linear decision boundaries",
+                                "To convert labels into features",
+                                "To shuffle the dataset",
+                            ],
+                            "correctOptionIndex": 1,
+                        },
+                        {
+                            "id": "aiml_c5",
+                            "title": "In a binary classifier, high recall usually implies…",
+                            "options": [
+                                "We catch most of the positive cases (fewer false negatives)",
+                                "We never make false positives",
+                                "Accuracy is always 100%",
+                                "The model ignores the negative class",
+                            ],
+                            "correctOptionIndex": 0,
+                        },
+                    ],
+                },
+            ],
+        },
     ]
 
 
@@ -274,9 +354,19 @@ linear ideas with depth and non-linearity.</p>
         "instructions": "Use Chrome or Edge for best video playback. Complete the Quizzes tab assessment to validate certificate flow when enabled.",
         "trainingTags": ["aiml", "seed", "machine-learning", "free"],
         "curriculum": curriculum,
+        "completionQuizTitle": "AIML — Course completion & certificate quiz",
+        "certificateEmailOnly": True,
         "quizzes": [
-            {"title": "AIML completion quiz", "dueDate": "", "description": "Pass to unlock certificate generation when mail and Razorpay flows are configured."},
-            {"title": "Module checkpoints", "dueDate": "", "description": "Study quizzes embedded per module in the Curriculum tab."},
+            {
+                "title": "AIML — Course completion & certificate quiz",
+                "dueDate": "",
+                "description": "Pass the completion quiz; certificate is emailed (no in-app PDF download for this course).",
+            },
+            {
+                "title": "Module checkpoints",
+                "dueDate": "",
+                "description": "Per-module self-checks in the Curriculum and Quizzes tabs (not the final certificate assessment).",
+            },
         ],
         "createdAt": now,
         "updatedAt": now,

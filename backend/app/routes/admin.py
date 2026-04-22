@@ -1,6 +1,7 @@
 """
 Admin: dashboard, course CRUD, students, leads, payments, companies, internships, certificates. Admin JWT required.
 """
+import base64
 import os
 import re
 import uuid
@@ -9,7 +10,9 @@ from pathlib import Path
 
 from werkzeug.utils import secure_filename
 from bson import ObjectId
-from flask import Blueprint, current_app, request, jsonify
+from io import BytesIO
+
+from flask import Blueprint, current_app, request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.routes.enrollments import _serialize_submission
@@ -18,7 +21,18 @@ from app.services.course_media_storage import (
     parse_stored_course_media_url,
     save_uploaded_file,
 )
+from app.certificate_pdf import build_course_certificate_pdf
+from app.certificate_quiz_pass import apply_quiz_pass_certificate
 from app.services.curriculum import normalize_curriculum
+from app.services.enrollment_excel import (
+    build_enrollment_workbook_bytes,
+    export_row_for_enrollment,
+    norm_approve_certificate_cell,
+    parse_workbook_rows,
+    row_email,
+    row_enrollment_id,
+)
+from app.enrollment_lookup import course_id_enrollment_filter
 from app.db import (
     get_db,
     get_users_collection,
@@ -178,6 +192,8 @@ def _course_to_detail(c):
     out["assignments"] = c.get("assignments", [])
     out["quizzes"] = c.get("quizzes", [])
     out["announcements"] = c.get("announcements", [])
+    out["completionQuizTitle"] = (c.get("completionQuizTitle") or "") or ""
+    out["certificateEmailOnly"] = bool(c.get("certificateEmailOnly"))
     return out
 
 
@@ -634,6 +650,11 @@ def update_course(course_id):
                 updates["trainingMaxSeats"] = max(0, int(tms))
             except (TypeError, ValueError):
                 updates["trainingMaxSeats"] = None
+    if "completionQuizTitle" in data:
+        raw_ct = (str(data.get("completionQuizTitle") or "")).strip()
+        updates["completionQuizTitle"] = raw_ct[:500]
+    if "certificateEmailOnly" in data:
+        updates["certificateEmailOnly"] = bool(data.get("certificateEmailOnly"))
     if updates:
         updates["updatedAt"] = datetime.utcnow()
         coll.update_one({"_id": ObjectId(course_id)}, {"$set": updates})
@@ -683,7 +704,7 @@ def course_enrollments(course_id):
         return jsonify({"items": []}), 503
     enroll_coll = get_enrollments_collection()
     users_coll = get_users_collection()
-    cursor = enroll_coll.find({"courseId": course_id}).sort("createdAt", -1)
+    cursor = enroll_coll.find(course_id_enrollment_filter(course_id)).sort("createdAt", -1)
     items = []
     for e in cursor:
         uid = e.get("userId")
@@ -706,6 +727,221 @@ def course_enrollments(course_id):
             "assignmentSubmissions": [_serialize_submission(x) for x in subs if isinstance(x, dict)],
         })
     return jsonify({"items": items})
+
+
+@admin_bp.route("/courses/<course_id>/enrollments/export.xlsx", methods=["GET"])
+@jwt_required()
+def export_course_enrollments_xlsx(course_id):
+    """Excel: students, assignment submission columns, completion quiz flags, ApproveCertificate for re-upload workflow."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    enroll_coll = get_enrollments_collection()
+    users_coll = get_users_collection()
+    rows = []
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)).sort("createdAt", 1):
+        uid = e.get("userId")
+        u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(str(uid)) else None
+        rows.append(export_row_for_enrollment(c, e, u))
+    try:
+        blob = build_enrollment_workbook_bytes(c, rows)
+    except ImportError:
+        return jsonify({"error": "Excel export requires openpyxl (pip install openpyxl)"}), 503
+    safe_title = re.sub(r"[^\w\-]+", "_", (c.get("title") or "enrollments")[:60]).strip("_") or "enrollments"
+    fname = f"{safe_title}_enrollments.xlsx"
+    return send_file(
+        BytesIO(blob),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=fname,
+    )
+
+
+@admin_bp.route("/courses/<course_id>/enrollments/certificate-sheet/parse", methods=["POST"])
+@jwt_required()
+def parse_course_certificate_sheet(course_id):
+    """Upload edited export workbook; returns rows for admin review (match + ApproveCertificate from sheet).
+
+    Accepts either:
+    - JSON ``{ "fileBase64": "...", "filename": "optional.xlsx" }`` (recommended behind API Gateway binary multipart)
+    - multipart field ``file`` (legacy; can be corrupted when API Gateway treats multipart as binary)
+    """
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    parsed = None
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        b64 = payload.get("fileBase64")
+        if not b64 or not isinstance(b64, str):
+            return jsonify({"error": "fileBase64 is required in JSON body"}), 400
+        try:
+            raw = base64.b64decode(b64.strip(), validate=False)
+        except Exception:
+            return jsonify({"error": "Invalid base64 payload"}), 400
+        if len(raw) > 12 * 1024 * 1024:
+            return jsonify({"error": "Workbook too large (max 12MB)"}), 400
+        fn = str(payload.get("filename") or "").strip().lower()
+        if fn and not (fn.endswith(".xlsx") or fn.endswith(".xlsm")):
+            return jsonify({"error": "Only .xlsx / .xlsm workbooks are supported."}), 400
+        try:
+            _, parsed = parse_workbook_rows(BytesIO(raw))
+        except Exception as ex:
+            return jsonify({"error": f"Could not read Excel workbook: {ex}"}), 400
+    else:
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"error": "file is required (multipart field 'file') or send JSON with fileBase64"}), 400
+        fn = (f.filename or "").lower()
+        if fn and not (fn.endswith(".xlsx") or fn.endswith(".xlsm")):
+            return jsonify({"error": "Only .xlsx / .xlsm workbooks are supported."}), 400
+        try:
+            raw = f.read()
+            _, parsed = parse_workbook_rows(BytesIO(raw))
+        except Exception as ex:
+            return jsonify({"error": f"Could not read Excel workbook: {ex}"}), 400
+
+    enroll_coll = get_enrollments_collection()
+    users_coll = get_users_collection()
+    by_id = {}
+    by_email = {}
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)):
+        eid = str(e["_id"])
+        by_id[eid] = e
+        uid = e.get("userId")
+        u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(str(uid)) else None
+        em = (u.get("email") or "").strip().lower() if u else ""
+        if em:
+            by_email[em] = e
+
+    def _sheet_display_name(raw_row: dict) -> str:
+        for k in ("Name", "name", "LearnerName", "StudentName", "FullName", "Full name", "Student Name"):
+            if k not in raw_row:
+                continue
+            v = raw_row.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return ""
+
+    preview = []
+    for raw in parsed:
+        eid = row_enrollment_id(raw)
+        em = row_email(raw)
+        e = None
+        if eid and eid in by_id:
+            e = by_id[eid]
+        elif em and em in by_email:
+            e = by_email[em]
+        uid = e.get("userId") if e else None
+        u = users_coll.find_one({"_id": ObjectId(uid)}) if e and uid and ObjectId.is_valid(str(uid)) else None
+        pq = (e or {}).get("pythonQuiz") or {}
+        cc = (e or {}).get("courseCertificate") or {}
+        sheet_name = _sheet_display_name(raw)
+        db_name = (u.get("name") or u.get("fullName") or "").strip() if u else ""
+        preview.append({
+            "enrollmentId": str(e["_id"]) if e else (eid or ""),
+            "email": (u.get("email") or "").strip() if u else em,
+            "name": db_name or sheet_name or (em or ""),
+            "matched": e is not None,
+            "approveInSheet": norm_approve_certificate_cell(raw.get("ApproveCertificate")),
+            "completionQuizPassed": bool(pq.get("passedAt")) if e else False,
+            "certificateIssued": bool((cc.get("certNo") or "").strip()) if e else False,
+        })
+    return jsonify({"items": preview, "count": len(preview)}), 200
+
+
+@admin_bp.route("/courses/<course_id>/certificates/bulk-email", methods=["POST"])
+@jwt_required()
+def bulk_email_certificates_for_course(course_id):
+    """Issue certificate + email for selected enrollments (admin). Skips rows that already have a certificate."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    data = request.get_json() or {}
+    ids = data.get("enrollmentIds")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "enrollmentIds must be a non-empty list"}), 400
+    if len(ids) > 200:
+        return jsonify({"error": "At most 200 enrollments per request"}), 400
+
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    courses_coll = get_courses_collection()
+    c = courses_coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+
+    enroll_coll = get_enrollments_collection()
+    users_coll = get_users_collection()
+    app_obj = current_app._get_current_object()
+    emailed = 0
+    skipped = 0
+    errors: list = []
+    for raw_id in ids:
+        eid = str(raw_id or "").strip()
+        if not eid or not ObjectId.is_valid(eid):
+            errors.append({"enrollmentId": eid, "error": "invalid id"})
+            continue
+        e = enroll_coll.find_one({"_id": ObjectId(eid), **course_id_enrollment_filter(course_id)})
+        if not e:
+            errors.append({"enrollmentId": eid, "error": "not found for this course"})
+            continue
+        cc = e.get("courseCertificate") or {}
+        if (cc.get("certNo") or "").strip():
+            skipped += 1
+            continue
+        uid = e.get("userId")
+        if not uid or not ObjectId.is_valid(str(uid)):
+            errors.append({"enrollmentId": eid, "error": "invalid user on enrollment"})
+            continue
+        user = users_coll.find_one({"_id": ObjectId(str(uid))})
+        if not user:
+            errors.append({"enrollmentId": eid, "error": "user not found"})
+            continue
+        try:
+            result = apply_quiz_pass_certificate(
+                app_obj,
+                user_id=str(uid),
+                course_id=course_id,
+                enrollment=e,
+                course=c,
+                user=user,
+                for_pdf_download=False,
+                cert_source="admin-bulk",
+            )
+            if isinstance(result, dict) and result.get("certNo"):
+                emailed += 1
+            else:
+                errors.append({"enrollmentId": eid, "error": "unexpected issue result"})
+        except Exception as ex:
+            errors.append({"enrollmentId": eid, "error": str(ex)})
+    return jsonify({
+        "ok": True,
+        "issuedOrEmailed": emailed,
+        "skippedAlreadyIssued": skipped,
+        "errors": errors,
+    }), 200
 
 
 # ----- Lead by ID + update -----
@@ -1152,6 +1388,15 @@ def force_close_internship(internship_id):
 
 
 # ----- Certificates (register list + trainings for dropdown) -----
+def _issue_date_str(c: dict) -> str:
+    v = c.get("issueDate")
+    if hasattr(v, "strftime"):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, str) and v.strip():
+        return v.strip()[:10]
+    return str(c.get("completionDate") or "")[:10]
+
+
 @admin_bp.route("/certificates", methods=["GET"])
 @jwt_required()
 def certificates_list():
@@ -1162,26 +1407,59 @@ def certificates_list():
     if db is None:
         return jsonify({"items": []}), 503
     search = request.args.get("search", "").strip()
+    email_filter = request.args.get("email", "").strip()
     status = request.args.get("status", "").strip().lower()
-    q = {}
+    cert_coll = get_certificates_collection()
+    users_coll = get_users_collection()
+
+    and_parts: list = []
     if search:
-        q["$or"] = [
-            {"certNo": {"$regex": search, "$options": "i"}},
-            {"studentName": {"$regex": search, "$options": "i"}},
-        ]
+        and_parts.append({
+            "$or": [
+                {"certNo": {"$regex": search, "$options": "i"}},
+                {"studentName": {"$regex": search, "$options": "i"}},
+                {"studentEmail": {"$regex": search, "$options": "i"}},
+            ],
+        })
+    if email_filter:
+        esc = re.escape(email_filter)
+        uid_list: list[str] = []
+        for u in users_coll.find({"email": {"$regex": esc, "$options": "i"}}, {"_id": 1}).limit(400):
+            uid_list.append(str(u["_id"]))
+        email_or = [{"studentEmail": {"$regex": esc, "$options": "i"}}]
+        if uid_list:
+            email_or.append({"studentId": {"$in": uid_list}})
+        and_parts.append({"$or": email_or})
     if status in ("valid", "revoked"):
-        q["status"] = status
-    cursor = get_certificates_collection().find(q).sort("issueDate", -1)
+        and_parts.append({"status": status})
+
+    if not and_parts:
+        q: dict = {}
+    elif len(and_parts) == 1:
+        q = and_parts[0]
+    else:
+        q = {"$and": and_parts}
+
+    cursor = cert_coll.find(q).sort("issueDate", -1).limit(500)
     items = []
     for c in cursor:
+        uid = str(c.get("studentId") or "")
+        em = (c.get("studentEmail") or "").strip()
+        if not em and uid and ObjectId.is_valid(uid):
+            u = users_coll.find_one({"_id": ObjectId(uid)}, {"email": 1})
+            em = (u.get("email") or "").strip() if u else ""
         items.append({
             "id": str(c["_id"]),
             "certNo": c.get("certNo", ""),
             "studentName": c.get("studentName", ""),
+            "studentEmail": em,
             "programName": c.get("programName", ""),
-            "issueDate": c.get("issueDate", ""),
+            "courseId": str(c.get("courseId") or ""),
+            "issueDate": _issue_date_str(c),
+            "completionDate": str(c.get("completionDate") or "")[:10],
             "university": c.get("university", ""),
             "status": c.get("status", "valid"),
+            "source": c.get("source", "") or "",
         })
     return jsonify({"items": items})
 
@@ -1198,6 +1476,123 @@ def certificates_trainings():
     cursor = get_courses_collection().find({"active": True}).sort("title", 1)
     items = [{"id": str(c["_id"]), "title": c.get("title", "")} for c in cursor]
     return jsonify({"items": items})
+
+
+def _certificate_to_admin_detail(c: dict, users_coll, courses_coll) -> dict:
+    uid = str(c.get("studentId") or "")
+    em = (c.get("studentEmail") or "").strip()
+    if not em and uid and ObjectId.is_valid(uid):
+        u = users_coll.find_one({"_id": ObjectId(uid)}, {"email": 1, "mobile": 1})
+        em = (u.get("email") or "").strip() if u else ""
+        mobile = (u.get("mobile") or "").strip() if u else ""
+    else:
+        mobile = ""
+        if uid and ObjectId.is_valid(uid):
+            u = users_coll.find_one({"_id": ObjectId(uid)}, {"mobile": 1})
+            mobile = (u.get("mobile") or "").strip() if u else ""
+    course_title = ""
+    cid = c.get("courseId")
+    if cid is not None and str(cid).strip():
+        cs = str(cid).strip()
+        if ObjectId.is_valid(cs):
+            crs = courses_coll.find_one({"_id": ObjectId(cs)}, {"title": 1})
+            if crs:
+                course_title = crs.get("title") or ""
+    revoked_at = c.get("revokedAt")
+    return {
+        "id": str(c["_id"]),
+        "certNo": c.get("certNo", ""),
+        "studentName": c.get("studentName", ""),
+        "studentEmail": em,
+        "studentMobile": mobile,
+        "studentId": uid,
+        "programName": c.get("programName", ""),
+        "courseId": str(c.get("courseId") or ""),
+        "courseTitle": course_title,
+        "university": c.get("university", ""),
+        "issueDate": _issue_date_str(c),
+        "completionDate": str(c.get("completionDate") or "")[:10],
+        "status": c.get("status", "valid"),
+        "source": c.get("source", "") or "",
+        "revokeReason": c.get("revokeReason") or "",
+        "revokedAt": revoked_at.strftime("%Y-%m-%d %H:%M UTC") if hasattr(revoked_at, "strftime") else (str(revoked_at) if revoked_at else ""),
+    }
+
+
+@admin_bp.route("/certificates/<cert_id>/pdf", methods=["GET"])
+@jwt_required()
+def certificate_admin_pdf(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    cert_coll = get_certificates_collection()
+    c = cert_coll.find_one({"_id": ObjectId(cert_id)})
+    if not c:
+        return jsonify({"error": "Certificate not found"}), 404
+    student_name = c.get("studentName") or "Student"
+    program = c.get("programName") or "Program"
+    cert_no = (c.get("certNo") or "").strip() or "CERT"
+    date_str = _issue_date_str(c) or datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        pdf_bytes = build_course_certificate_pdf(student_name, program, cert_no, date_str)
+    except Exception as ex:
+        return jsonify({"error": f"Could not build PDF: {ex}"}), 500
+    safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"XpertIntern-{safe_name or 'certificate'}.pdf",
+    )
+
+
+@admin_bp.route("/certificates/<cert_id>/revoke", methods=["POST"])
+@jwt_required()
+def certificate_admin_revoke(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    data = request.get_json() or {}
+    reason = str(data.get("reason") or "").strip()
+    if len(reason) < 3:
+        return jsonify({"error": "A revoke reason of at least 3 characters is required."}), 400
+    reason = reason[:2000]
+    cert_coll = get_certificates_collection()
+    res = cert_coll.update_one(
+        {"_id": ObjectId(cert_id), "status": {"$ne": "revoked"}},
+        {"$set": {
+            "status": "revoked",
+            "revokedAt": datetime.utcnow(),
+            "revokeReason": reason,
+        }},
+    )
+    if res.matched_count == 0:
+        c = cert_coll.find_one({"_id": ObjectId(cert_id)})
+        if not c:
+            return jsonify({"error": "Certificate not found"}), 404
+        return jsonify({"error": "Certificate is already revoked."}), 400
+    return jsonify({"ok": True, "message": "Certificate revoked."})
+
+
+@admin_bp.route("/certificates/<cert_id>", methods=["GET"])
+@jwt_required()
+def certificate_admin_detail(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    cert_coll = get_certificates_collection()
+    c = cert_coll.find_one({"_id": ObjectId(cert_id)})
+    if not c:
+        return jsonify({"error": "Certificate not found"}), 404
+    users_coll = get_users_collection()
+    courses_coll = get_courses_collection()
+    return jsonify(_certificate_to_admin_detail(c, users_coll, courses_coll))
 
 
 _MEDIA_UPLOAD_NAME_RE = re.compile(

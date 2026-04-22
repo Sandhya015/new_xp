@@ -20,8 +20,21 @@ from app.services.course_media_storage import (
     object_key,
     uses_s3,
 )
-from app.enrollment_lookup import user_course_enrollment_filter
-from app.python_quiz import PASS_PERCENT, quiz_questions_for_client
+from app.enrollment_lookup import course_id_enrollment_filter, user_course_enrollment_filter
+from app.python_quiz import completion_quiz_pass_percent, quiz_has_questions, quiz_questions_for_client
+from app.quiz_attempt_limits import QUIZ_MAX_ATTEMPTS
+
+
+def _as_int_list(raw) -> list:
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for v in raw[:200]:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 courses_bp = Blueprint("courses", __name__)
 
@@ -333,7 +346,7 @@ def get_course(course_id):
     if not c:
         return jsonify({"error": "Course not found"}), 404
     enroll_coll = get_enrollments_collection()
-    ec = enroll_coll.count_documents({"courseId": course_id})
+    ec = enroll_coll.count_documents(course_id_enrollment_filter(course_id))
     return jsonify(_course_to_public_detail(c, ec))
 
 
@@ -365,6 +378,8 @@ def _course_to_content(c):
         "assignments": c.get("assignments", []),
         "quizzes": c.get("quizzes", []),
         "announcements": c.get("announcements", []),
+        "completionQuizTitle": (c.get("completionQuizTitle") or "") or "",
+        "certificateEmailOnly": bool(c.get("certificateEmailOnly")),
     }
 
 
@@ -379,15 +394,29 @@ def get_python_quiz(course_id):
         return jsonify({"error": "Invalid course id"}), 400
     user_id = get_jwt_identity()
     enroll_coll = get_enrollments_collection()
-    if not enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id)):
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
         return jsonify({"error": "Not enrolled in this course"}), 403
     coll = get_courses_collection()
     c = coll.find_one({"_id": ObjectId(course_id)})
     if not c or not course_has_completion_quiz(c):
         return jsonify({"error": "Completion quiz is not available for this course"}), 404
+    if not quiz_has_questions(c):
+        return jsonify({
+            "error": "Completion quiz is not configured. Ask your administrator to set completion quiz content in the course curriculum.",
+        }), 404
+    pq = e.get("pythonQuiz") or {}
+    attempts_used = int(pq.get("attempts") or 0)
+    # Lock the form only when no attempts remain (includes passed learners who used all retakes).
+    read_only = bool(attempts_used >= QUIZ_MAX_ATTEMPTS)
     return jsonify({
-        "passPercent": PASS_PERCENT,
+        "passPercent": completion_quiz_pass_percent(c),
         "questions": quiz_questions_for_client(c),
+        "attemptsUsed": attempts_used,
+        "attemptsMax": QUIZ_MAX_ATTEMPTS,
+        "readOnly": read_only,
+        "lastAnswerIndices": _as_int_list(pq.get("lastAnswerIndices")),
+        "lastScorePercent": pq.get("lastScorePercent"),
     }), 200
 
 

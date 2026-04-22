@@ -18,7 +18,9 @@ from app.cert_constants import CERTIFICATE_PDF_DOWNLOAD_LIMIT
 from app.course_features import course_has_completion_quiz
 from app.db import get_db, get_enrollments_collection, get_courses_collection
 from app.notifications import schedule_enrollment_email
-from app.python_quiz import PASS_PERCENT, grade_quiz
+from app.certificate_quiz_pass import try_auto_email_certificate_on_quiz_pass
+from app.python_quiz import completion_quiz_pass_percent, find_quiz_topic_by_title, grade_quiz
+from app.quiz_attempt_limits import QUIZ_MAX_ATTEMPTS
 from app.enrollment_lookup import user_course_enrollment_filter
 
 enrollments_bp = Blueprint("enrollments", __name__)
@@ -47,6 +49,39 @@ def _iso_utc(dt):
     if isinstance(dt, datetime):
         return dt.replace(microsecond=0).isoformat() + "Z"
     return str(dt)
+
+
+def _coerce_answer_indices(raw) -> list:
+    if not isinstance(raw, list):
+        return []
+    out: list = []
+    for v in raw[:200]:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _serialize_curriculum_quiz_attempts(e):
+    raw = e.get("curriculumQuizAttempts")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for x in raw:
+        if not isinstance(x, dict):
+            continue
+        ai = x.get("answerIndices")
+        out.append({
+            "quizTitle": str(x.get("quizTitle") or ""),
+            "passed": bool(x.get("passed")),
+            "scorePercent": x.get("scorePercent"),
+            "attempts": int(x.get("attempts") or 0),
+            "attemptsMax": QUIZ_MAX_ATTEMPTS,
+            "answerIndices": _coerce_answer_indices(ai) if isinstance(ai, list) else [],
+            "updatedAt": _iso_utc(x.get("updatedAt")),
+        })
+    return out
 
 
 def _serialize_submission(s):
@@ -107,6 +142,11 @@ def _enrollment_to_item(e, course=None):
         "certificatePdfDownloadCount": pdf_n,
         "certificatePdfDownloadsRemaining": max(0, CERTIFICATE_PDF_DOWNLOAD_LIMIT - pdf_n),
         "pythonQuizAvailable": bool(course and course_has_completion_quiz(course)),
+        "pythonQuizAttemptsUsed": int(pq.get("attempts") or 0),
+        "pythonQuizAttemptsMax": QUIZ_MAX_ATTEMPTS,
+        "pythonQuizLastAnswerIndices": _coerce_answer_indices(pq.get("lastAnswerIndices")),
+        "pythonQuizLastScorePercent": pq.get("lastScorePercent"),
+        "curriculumQuizAttempts": _serialize_curriculum_quiz_attempts(e),
     }
     subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
     out["assignmentSubmissions"] = [_serialize_submission(x) for x in subs if isinstance(x, dict)]
@@ -352,33 +392,145 @@ def submit_python_quiz(course_id):
         return jsonify({"error": "Completion quiz is not available for this course"}), 404
 
     pq = e.get("pythonQuiz") or {}
-    if pq.get("passedAt"):
+    already_passed = bool(pq.get("passedAt"))
+
+    attempts_before = int(pq.get("attempts") or 0)
+    if attempts_before >= QUIZ_MAX_ATTEMPTS:
         return jsonify({
-            "passed": True,
-            "scorePercent": pq.get("scorePercent", 100),
-            "passPercent": PASS_PERCENT,
-            "alreadyCompleted": True,
-        }), 200
+            "error": f"You have used all {QUIZ_MAX_ATTEMPTS} attempts for this quiz.",
+            "code": "max_quiz_attempts",
+            "attemptsUsed": attempts_before,
+            "attemptsMax": QUIZ_MAX_ATTEMPTS,
+        }), 400
 
     data = request.get_json() or {}
     answers = data.get("answers")
     if not isinstance(answers, list):
         return jsonify({"error": "answers must be a list of selected option indices (same order as questions)"}), 400
+    answer_indices = _coerce_answer_indices(answers)
 
-    passed, pct = grade_quiz(answers, c)
+    passed, pct, ppass = grade_quiz(answers, c)
     if not passed:
+        fail_set = {
+            "pythonQuiz.attempts": attempts_before + 1,
+            "pythonQuiz.lastAnswerIndices": answer_indices,
+            "pythonQuiz.lastScorePercent": pct,
+        }
+        enroll_coll.update_one(
+            {"_id": e["_id"]},
+            {"$set": fail_set},
+        )
+        e2 = enroll_coll.find_one({"_id": e["_id"]})
         return jsonify({
             "passed": False,
             "scorePercent": pct,
-            "passPercent": PASS_PERCENT,
-            "message": f"You need at least {PASS_PERCENT}% to pass. Try again.",
+            "passPercent": ppass,
+            "message": f"You need at least {ppass}% to pass. Try again.",
+            "attemptsUsed": attempts_before + 1,
+            "attemptsMax": QUIZ_MAX_ATTEMPTS,
+            "hadPassRecorded": already_passed,
+            "enrollment": _enrollment_to_item(e2, c) if e2 else None,
         }), 200
 
+    pass_set = {
+        "pythonQuiz.attempts": attempts_before + 1,
+        "pythonQuiz.lastAnswerIndices": answer_indices,
+        "pythonQuiz.lastScorePercent": pct,
+        "pythonQuiz.scorePercent": pct,
+    }
+    if not already_passed:
+        pass_set["pythonQuiz.passedAt"] = datetime.utcnow()
     enroll_coll.update_one(
         {"_id": e["_id"]},
-        {"$set": {
-            "pythonQuiz.passedAt": datetime.utcnow(),
-            "pythonQuiz.scorePercent": pct,
-        }},
+        {"$set": pass_set},
     )
-    return jsonify({"passed": True, "scorePercent": pct, "passPercent": PASS_PERCENT}), 200
+    e2 = enroll_coll.find_one({"_id": e["_id"]})
+    if not already_passed:
+        try_auto_email_certificate_on_quiz_pass(
+            current_app._get_current_object(),
+            user_id=user_id,
+            course_id=course_id,
+            course=c,
+            enrollment=e2 or e,
+        )
+    return jsonify({
+        "passed": True,
+        "scorePercent": pct,
+        "passPercent": ppass,
+        "attemptsUsed": attempts_before + 1,
+        "attemptsMax": QUIZ_MAX_ATTEMPTS,
+        "retakeAfterPass": already_passed,
+        "enrollment": _enrollment_to_item(e2, c) if e2 else None,
+    }), 200
+
+
+@enrollments_bp.route("/by-course/<course_id>/curriculum-quiz", methods=["POST"])
+@jwt_required()
+def submit_curriculum_quiz_result(course_id):
+    """Persist pass/fail for a curriculum Quiz topic (MCQ/TF self-check). Not for completionQuizTitle (server quiz)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = get_jwt_identity()
+    enroll_coll = get_enrollments_collection()
+    courses_coll = get_courses_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    c = courses_coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+
+    data = request.get_json() or {}
+    quiz_title = str(data.get("quizTitle") or "").strip()
+    if not quiz_title:
+        return jsonify({"error": "quizTitle is required"}), 400
+    passed = bool(data.get("passed"))
+    try:
+        score_pct = int(data.get("scorePercent", 0))
+    except (TypeError, ValueError):
+        score_pct = 0
+    score_pct = max(0, min(100, score_pct))
+
+    topic = find_quiz_topic_by_title(c, quiz_title)
+    if not topic or str(topic.get("type") or "").strip().lower() != "quiz":
+        return jsonify({"error": "Quiz topic not found in this course curriculum"}), 404
+
+    ct = (c.get("completionQuizTitle") or "").strip().lower()
+    if ct and quiz_title.strip().lower() == ct:
+        return jsonify({"error": "This quiz is graded on the server; use the completion quiz in the Quizzes tab."}), 400
+
+    existing = None
+    prev = []
+    for x in (e.get("curriculumQuizAttempts") or []):
+        if not isinstance(x, dict):
+            continue
+        if str(x.get("quizTitle") or "").strip().lower() == quiz_title.lower():
+            existing = x
+        else:
+            prev.append(x)
+
+    prev_attempts = int(existing.get("attempts") or 0) if existing else 0
+    if prev_attempts >= QUIZ_MAX_ATTEMPTS:
+        return jsonify({
+            "error": f"You have used all {QUIZ_MAX_ATTEMPTS} attempts for this quiz.",
+            "code": "max_quiz_attempts",
+            "attemptsUsed": prev_attempts,
+            "attemptsMax": QUIZ_MAX_ATTEMPTS,
+        }), 400
+
+    answer_indices = _coerce_answer_indices(data.get("answers"))
+    new_row = {
+        "quizTitle": quiz_title,
+        "passed": passed,
+        "scorePercent": score_pct,
+        "attempts": prev_attempts + 1,
+        "answerIndices": answer_indices,
+        "updatedAt": datetime.utcnow(),
+    }
+    prev.append(new_row)
+    enroll_coll.update_one({"_id": e["_id"]}, {"$set": {"curriculumQuizAttempts": prev}})
+    e2 = enroll_coll.find_one({"_id": e["_id"]})
+    return jsonify(_enrollment_to_item(e2, c)), 200
