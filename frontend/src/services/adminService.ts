@@ -9,6 +9,42 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** API Gateway only decodes Lambda base64 bodies when Content-Type is in binaryMediaTypes; otherwise clients get raw base64 text (e.g. UEsDB…). */
+function blobFromMaybeBase64Body(
+  buffer: ArrayBuffer,
+  mime: string,
+  kind: 'zip' | 'pdf',
+): Blob {
+  const u8 = new Uint8Array(buffer)
+  const magicOk =
+    kind === 'zip'
+      ? u8.length >= 2 && u8[0] === 0x50 && u8[1] === 0x4b
+      : u8.length >= 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46
+  if (magicOk) return new Blob([buffer], { type: mime })
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim()
+  if (text.startsWith('{')) return new Blob([buffer], { type: mime })
+  const cleaned = text.replace(/\s/g, '')
+  if (
+    cleaned.length < 8 ||
+    !/^[A-Za-z0-9+/=]+$/.test(cleaned.slice(0, Math.min(1000, cleaned.length)))
+  ) {
+    return new Blob([buffer], { type: mime })
+  }
+  try {
+    const bin = atob(cleaned)
+    const out = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+    const ok2 =
+      kind === 'zip'
+        ? out.length >= 2 && out[0] === 0x50 && out[1] === 0x4b
+        : out.length >= 4 && out[0] === 0x25 && out[1] === 0x50 && out[2] === 0x44 && out[3] === 0x46
+    if (ok2) return new Blob([out], { type: mime })
+  } catch {
+    /* ignore */
+  }
+  return new Blob([buffer], { type: mime })
+}
+
 export type DashboardData = {
   kpis: {
     totalStudents: number
@@ -248,8 +284,14 @@ export const adminService = {
 
   /** Excel: enrollments, assignment submission columns, completion quiz flags, ApproveCertificate (for re-upload). */
   async downloadEnrollmentsCertificateSheet(courseId: string): Promise<Blob> {
-    const { data } = await api.get(`/api/admin/courses/${courseId}/enrollments/export.xlsx`, { responseType: 'blob' })
-    return data as Blob
+    const { data } = await api.get(`/api/admin/courses/${courseId}/enrollments/export.xlsx`, {
+      responseType: 'arraybuffer',
+    })
+    return blobFromMaybeBase64Body(
+      data as ArrayBuffer,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'zip',
+    )
   },
 
   async parseCertificateSheet(
@@ -399,8 +441,8 @@ export const adminService = {
   },
 
   async downloadAdminCertificatePdf(id: string): Promise<Blob> {
-    const { data } = await api.get(`/api/admin/certificates/${id}/pdf`, { responseType: 'blob' })
-    return data as Blob
+    const { data } = await api.get(`/api/admin/certificates/${id}/pdf`, { responseType: 'arraybuffer' })
+    return blobFromMaybeBase64Body(data as ArrayBuffer, 'application/pdf', 'pdf')
   },
 
   async revokeCertificate(id: string, reason: string) {

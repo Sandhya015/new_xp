@@ -19,6 +19,11 @@ provider:
       - image/jpeg
       - image/jpg
       - image/png
+      # GET roster .xlsx / certificate PDF — without these, API Gateway leaves Lambda base64 as text in the body.
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      - application/vnd.ms-excel
+      - application/pdf
+      - application/octet-stream
   iam:
     role:
       statements:
