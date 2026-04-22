@@ -267,9 +267,22 @@ export const adminService = {
     }>
     count: number
   }> {
-    const fd = new FormData()
-    fd.append('file', file)
-    const { data } = await api.post(`/api/admin/courses/${courseId}/enrollments/certificate-sheet/parse`, fd)
+    // JSON + base64 avoids API Gateway treating multipart/form-data as binary and corrupting .xlsx bytes
+    // (openpyxl then fails with "File is not a zip file" even for valid workbooks).
+    const buf = await file.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    const chunkSize = 0x8000
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const sub = bytes.subarray(i, Math.min(i + chunkSize, bytes.length))
+      binary += String.fromCharCode.apply(null, sub as unknown as number[])
+    }
+    const fileBase64 = btoa(binary)
+    const { data } = await api.post(
+      `/api/admin/courses/${courseId}/enrollments/certificate-sheet/parse`,
+      { fileBase64, filename: file.name || 'upload.xlsx' },
+      { headers: { 'Content-Type': 'application/json' } },
+    )
     return data
   },
 
