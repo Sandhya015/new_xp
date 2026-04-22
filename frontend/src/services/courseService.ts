@@ -57,6 +57,10 @@ export type CourseContent = {
   trainerName?: string
   /** Course slug from API (used for completion quiz variant). */
   slug?: string
+  /** Curricula Quiz topic title for the server-graded completion/certificate quiz (if set). */
+  completionQuizTitle?: string
+  /** When true, no in-app PDF; certificate is sent by email after the completion quiz. */
+  certificateEmailOnly?: boolean
   /** Same field as marketing page: YouTube/Vimeo or direct video URL. */
   introVideoUrl?: string
   whatYouWillLearn?: string[]
@@ -117,10 +121,16 @@ export const courseService = {
     const { data } = await api.get<CourseContent>(`/api/courses/${courseId}/content`)
     return data
   },
-  async getPythonQuiz(courseId: string): Promise<{ passPercent: number; questions: PythonQuizQuestion[] }> {
-    const { data } = await api.get<{ passPercent: number; questions: PythonQuizQuestion[] }>(
-      `/api/courses/${courseId}/python-quiz`,
-    )
+  async getPythonQuiz(courseId: string): Promise<{
+    passPercent: number
+    questions: PythonQuizQuestion[]
+    attemptsUsed?: number
+    attemptsMax?: number
+    readOnly?: boolean
+    lastAnswerIndices?: number[]
+    lastScorePercent?: number
+  }> {
+    const { data } = await api.get(`/api/courses/${courseId}/python-quiz`)
     return data
   },
 }

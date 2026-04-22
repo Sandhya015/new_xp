@@ -891,34 +891,6 @@ export function AddTraining() {
         return { ok: false, message: 'Intro video upload failed. Use MP4, MOV, or AVI within the server size limit, or paste a YouTube link instead.' }
       }
     }
-    if (!basic.thumbnail && featuredUrl.startsWith('/api/courses/media/featured/')) {
-      try {
-        const exists = await adminService.verifyHostedCourseMediaExists(featuredUrl)
-        if (!exists) {
-          return {
-            ok: false,
-            message:
-              'Cover image is not stored on this API (file missing in cloud storage). Choose the image file again and click Save so it uploads here, or paste a full https:// image URL. If you tested only against a local backend before, uploads there do not copy to the live site.',
-          }
-        }
-      } catch {
-        return { ok: false, message: 'Could not verify cover image on the server. Check your connection and try again.' }
-      }
-    }
-    if (!basic.introVideoFile && introUrl.startsWith('/api/courses/media/intro/')) {
-      try {
-        const existsIntro = await adminService.verifyHostedCourseMediaExists(introUrl)
-        if (!existsIntro) {
-          return {
-            ok: false,
-            message:
-              'Intro video path is not stored on this API. Upload the video file again while using this same site/API, or use a YouTube/Vimeo link instead.',
-          }
-        }
-      } catch {
-        return { ok: false, message: 'Could not verify intro video on the server. Check your connection and try again.' }
-      }
-    }
     return { ok: true, featuredImageUrl: featuredUrl, introVideoUrl: introUrl }
   }
 

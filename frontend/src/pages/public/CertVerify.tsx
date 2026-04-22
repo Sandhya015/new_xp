@@ -1,9 +1,16 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Search, QrCode, Fingerprint, Database } from 'lucide-react'
 import { certificateService } from '@/services/certificateService'
 
 export function CertVerify() {
+  const [searchParams] = useSearchParams()
   const [certId, setCertId] = useState('')
+
+  useEffect(() => {
+    const q = (searchParams.get('cert') || searchParams.get('id') || '').trim()
+    if (q) setCertId(q)
+  }, [searchParams])
   type VerifyResult =
   | { valid: true; studentName: string; programName: string; university: string; completionDate: string; certificateId: string }
   | { valid: false; message: string }

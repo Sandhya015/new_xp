@@ -38,6 +38,20 @@ export type EnrollmentItem = {
   certificatePdfDownloadCount?: number
   certificatePdfDownloadsRemaining?: number
   pythonQuizAvailable?: boolean
+  pythonQuizAttemptsUsed?: number
+  pythonQuizAttemptsMax?: number
+  pythonQuizLastAnswerIndices?: number[]
+  pythonQuizLastScorePercent?: number
+  /** Server-persisted pass/fail for curriculum Quiz topics (not the completion quiz). */
+  curriculumQuizAttempts?: Array<{
+    quizTitle: string
+    passed: boolean
+    scorePercent?: number
+    attempts?: number
+    attemptsMax?: number
+    answerIndices?: number[]
+    updatedAt?: string
+  }>
   assignmentSubmissions?: AssignmentSubmissionItem[]
 }
 
@@ -77,6 +91,14 @@ export const enrollmentService = {
     return data
   },
 
+  async submitCurriculumQuizResult(
+    courseId: string,
+    body: { quizTitle: string; passed: boolean; scorePercent: number; answers?: number[] },
+  ): Promise<EnrollmentItem> {
+    const { data } = await api.post<EnrollmentItem>(`/api/enrollments/by-course/${courseId}/curriculum-quiz`, body)
+    return data
+  },
+
   async submitPythonQuiz(
     courseId: string,
     answers: number[],
@@ -85,7 +107,14 @@ export const enrollmentService = {
     scorePercent: number
     passPercent: number
     alreadyCompleted?: boolean
+    /** True when this submission was a retake after an earlier pass (no duplicate certificate email). */
+    retakeAfterPass?: boolean
+    /** True when this failed attempt happened after the learner had already passed (pass stays recorded). */
+    hadPassRecorded?: boolean
     message?: string
+    attemptsUsed?: number
+    attemptsMax?: number
+    enrollment?: EnrollmentItem
   }> {
     const { data } = await api.post(`/api/enrollments/by-course/${courseId}/python-quiz`, { answers })
     return data

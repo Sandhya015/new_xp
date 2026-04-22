@@ -246,6 +246,41 @@ export const adminService = {
     return data
   },
 
+  /** Excel: enrollments, assignment submission columns, completion quiz flags, ApproveCertificate (for re-upload). */
+  async downloadEnrollmentsCertificateSheet(courseId: string): Promise<Blob> {
+    const { data } = await api.get(`/api/admin/courses/${courseId}/enrollments/export.xlsx`, { responseType: 'blob' })
+    return data as Blob
+  },
+
+  async parseCertificateSheet(
+    courseId: string,
+    file: File,
+  ): Promise<{
+    items: Array<{
+      enrollmentId: string
+      email: string
+      name: string
+      matched: boolean
+      approveInSheet: boolean
+      completionQuizPassed: boolean
+      certificateIssued: boolean
+    }>
+    count: number
+  }> {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await api.post(`/api/admin/courses/${courseId}/enrollments/certificate-sheet/parse`, fd)
+    return data
+  },
+
+  async bulkEmailCertificates(
+    courseId: string,
+    enrollmentIds: string[],
+  ): Promise<{ ok: boolean; issuedOrEmailed: number; skippedAlreadyIssued: number; errors: Array<{ enrollmentId: string; error: string }> }> {
+    const { data } = await api.post(`/api/admin/courses/${courseId}/certificates/bulk-email`, { enrollmentIds })
+    return data
+  },
+
   /** Authenticated download (admin JWT). Student app uses the same path with student JWT. */
   async downloadAssignmentSubmissionFile(fileStorageName: string): Promise<Blob> {
     const { data } = await api.get(`/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`, {
@@ -309,8 +344,54 @@ export const adminService = {
     return data
   },
 
-  async getCertificates(params?: { search?: string; status?: string }) {
-    const { data } = await api.get<{ items: Array<{ id: string; certNo: string; studentName: string; programName: string; issueDate: string; university: string; status: string }> }>('/api/admin/certificates', { params })
+  async getCertificates(params?: { search?: string; status?: string; email?: string }) {
+    const { data } = await api.get<{
+      items: Array<{
+        id: string
+        certNo: string
+        studentName: string
+        studentEmail: string
+        programName: string
+        courseId: string
+        issueDate: string
+        completionDate: string
+        university: string
+        status: string
+        source: string
+      }>
+    }>('/api/admin/certificates', { params })
+    return data
+  },
+
+  async getCertificateDetail(id: string) {
+    const { data } = await api.get<{
+      id: string
+      certNo: string
+      studentName: string
+      studentEmail: string
+      studentMobile: string
+      studentId: string
+      programName: string
+      courseId: string
+      courseTitle: string
+      university: string
+      issueDate: string
+      completionDate: string
+      status: string
+      source: string
+      revokeReason: string
+      revokedAt: string
+    }>(`/api/admin/certificates/${id}`)
+    return data
+  },
+
+  async downloadAdminCertificatePdf(id: string): Promise<Blob> {
+    const { data } = await api.get(`/api/admin/certificates/${id}/pdf`, { responseType: 'blob' })
+    return data as Blob
+  },
+
+  async revokeCertificate(id: string, reason: string) {
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/certificates/${id}/revoke`, { reason })
     return data
   },
 

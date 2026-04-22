@@ -2,7 +2,7 @@
  * Student Dashboard — View Enrolled Course Content (SD-WF-10).
  * Tabs: Overview, Curriculum, Class Links, Study Materials, Assignments, Quizzes, Announcements, Certificate.
  */
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   BookOpen,
@@ -21,15 +21,13 @@ import {
   Unlock,
 } from 'lucide-react'
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
-import {
-  enrollmentService,
-  type AssignmentSubmissionItem,
-  type EnrollmentItem,
-} from '@/services/enrollmentService'
+import type { EnrollmentItem } from '@/services/enrollmentService'
+import { enrollmentService, type AssignmentSubmissionItem } from '@/services/enrollmentService'
 import { certificateService } from '@/services/certificateService'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
 import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
 import { absoluteApiUrl } from '@/config/api'
+import { migrateQuizQuestion, type QuizQuestionDraft } from '@/components/admin/quizQuestionTypes'
 
 const CERTIFICATE_PDF_DOWNLOAD_LIMIT = 2
 
@@ -71,19 +69,517 @@ type EnrolledCurriculumTopic = {
   lessonVideoAttachMode?: string
 }
 
-function completionQuizCopy(slug: string | undefined) {
+const ADDITIONAL_QUIZ_DEFAULT_PASS = 60
+
+type AdditionalQuizRow = { title: string; dueDate?: string }
+
+/**
+ * Names come from curriculum Quiz topics (what admins author in the builder).
+ * course.quizzes is merged for due dates and legacy rows not yet in curriculum.
+ */
+function listQuizTopicsFromCurriculum(curriculum: unknown): AdditionalQuizRow[] {
+  const out: AdditionalQuizRow[] = []
+  if (!Array.isArray(curriculum)) return out
+  for (const mod of curriculum) {
+    const topics = (mod as { topics?: unknown[] })?.topics
+    if (!Array.isArray(topics)) continue
+    for (const raw of topics) {
+      const t = raw as { type?: string; title?: string; dueDate?: string; duration?: string }
+      if (String(t.type || '').toLowerCase() !== 'quiz') continue
+      const title = String(t.title || '').trim()
+      if (!title) continue
+      const due = t.dueDate || t.duration
+      out.push({ title, dueDate: typeof due === 'string' && due.trim() ? due.trim() : undefined })
+    }
+  }
+  return out
+}
+
+function buildAdditionalQuizList(
+  curriculum: unknown,
+  courseQuizzes: Array<{ title?: string; dueDate?: string }> | undefined,
+): AdditionalQuizRow[] {
+  const fromCurriculum = listQuizTopicsFromCurriculum(curriculum)
+  const map = new Map<string, AdditionalQuizRow>()
+  for (const row of fromCurriculum) {
+    const k = row.title.toLowerCase()
+    if (!map.has(k)) {
+      map.set(k, { title: row.title, dueDate: row.dueDate })
+    }
+  }
+  for (const q of courseQuizzes || []) {
+    const title = String(q.title || '').trim()
+    if (!title) continue
+    const k = title.toLowerCase()
+    const existing = map.get(k)
+    if (existing) {
+      if (q.dueDate && !existing.dueDate) {
+        existing.dueDate = q.dueDate
+      }
+    } else {
+      map.set(k, { title, dueDate: q.dueDate })
+    }
+  }
+  return Array.from(map.values())
+}
+
+type AdditionalQuizModuleGroup = { moduleTitle: string; rows: AdditionalQuizRow[] }
+
+/**
+ * Group curriculum Quiz rows by parent module. Excludes the completion assessment title and attaches due dates from flat.
+ * Remaining flat rows (e.g. legacy `course.quizzes` only) go under "Other course quizzes".
+ */
+function buildQuizModuleGroups(
+  curriculum: unknown,
+  flat: AdditionalQuizRow[],
+  completionTitle: string,
+): AdditionalQuizModuleGroup[] {
+  const ckey = (completionTitle || '').trim().toLowerCase()
+  const dueByTitle = new Map(flat.map((r) => [r.title.trim().toLowerCase(), r]))
+  const groups: AdditionalQuizModuleGroup[] = []
+  const seen = new Set<string>()
+  if (Array.isArray(curriculum)) {
+    for (const mod of curriculum) {
+      const m = mod as { title?: string; topics?: unknown[] }
+      const moduleTitle = String(m.title || 'Module').trim() || 'Module'
+      const rowChunk: AdditionalQuizRow[] = []
+      const topics = m.topics
+      if (Array.isArray(topics)) {
+        for (const raw of topics) {
+          const t = raw as { type?: string; title?: string }
+          if (String(t.type || '').toLowerCase() !== 'quiz') continue
+          const title = String(t.title || '').trim()
+          if (!title) continue
+          const k = title.toLowerCase()
+          if (ckey && k === ckey) continue
+          const ex = dueByTitle.get(k)
+          rowChunk.push({ title, dueDate: ex?.dueDate })
+          seen.add(k)
+        }
+      }
+      if (rowChunk.length) {
+        groups.push({ moduleTitle, rows: rowChunk })
+      }
+    }
+  }
+  const orphan: AdditionalQuizRow[] = []
+  for (const r of flat) {
+    const t = (r.title || '').trim()
+    if (!t) continue
+    const k = t.toLowerCase()
+    if (ckey && k === ckey) continue
+    if (!seen.has(k)) orphan.push(r)
+  }
+  if (orphan.length) {
+    groups.push({ moduleTitle: 'Other course quizzes', rows: orphan })
+  }
+  return groups
+}
+
+type QuizProgressRow = { title: string; kind: 'module' | 'completion'; status: 'not_started' | 'passed' | 'failed' }
+
+function computeQuizProgress(course: CourseContent | null, enrollment: EnrollmentItem | null): {
+  rows: QuizProgressRow[]
+  passed: number
+  failed: number
+  pending: number
+  total: number
+  allPassed: boolean
+} {
+  const empty = { rows: [], passed: 0, failed: 0, pending: 0, total: 0, allPassed: false }
+  if (!course) return empty
+  const ckey = (course.completionQuizTitle || '').trim().toLowerCase()
+  const rows: QuizProgressRow[] = []
+  if (Array.isArray(course.curriculum)) {
+    for (const mod of course.curriculum) {
+      const topics = (mod as { topics?: unknown[] })?.topics
+      if (!Array.isArray(topics)) continue
+      for (const raw of topics) {
+        const t = raw as { title?: string; type?: string }
+        if (String(t.type || '').toLowerCase() !== 'quiz') continue
+        const title = String(t.title || '').trim()
+        if (!title) continue
+        if (ckey && title.toLowerCase() === ckey) continue
+        const att = enrollment?.curriculumQuizAttempts?.find(
+          (a) => String(a.quizTitle || '').trim().toLowerCase() === title.toLowerCase(),
+        )
+        let status: QuizProgressRow['status'] = 'not_started'
+        if (att) status = att.passed ? 'passed' : 'failed'
+        rows.push({ title, kind: 'module', status })
+      }
+    }
+  }
+  if (enrollment?.pythonQuizAvailable) {
+    const slug = (course.slug || '').toLowerCase()
+    const defaultCompletion =
+      slug === 'demo-java-programming-seed' ? 'Java completion quiz' : 'Python fundamentals quiz'
+    const ct = (course.completionQuizTitle || '').trim() || defaultCompletion
+    rows.push({
+      title: ct,
+      kind: 'completion',
+      status: enrollment.pythonQuizPassed ? 'passed' : 'not_started',
+    })
+  }
+  const passed = rows.filter((r) => r.status === 'passed').length
+  const failed = rows.filter((r) => r.status === 'failed').length
+  const pending = rows.filter((r) => r.status === 'not_started').length
+  const total = rows.length
+  const allPassed = total > 0 && passed === total
+  return { rows, passed, failed, pending, total, allPassed }
+}
+
+function QuizProgressSummary({ course, enrollment }: { course: CourseContent; enrollment: EnrollmentItem | null }) {
+  const p = useMemo(() => computeQuizProgress(course, enrollment), [course, enrollment])
+  if (p.total === 0) return null
+  const pct = Math.round((100 * p.passed) / p.total)
+  return (
+    <div className="rounded-xl border border-brand-navy/15 bg-white p-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-semibold text-brand-navy">Your quiz progress</h3>
+        <span className="text-sm font-medium text-slate-700">
+          {p.passed}/{p.total} passed · {p.failed} failed · {p.pending} not completed
+        </span>
+      </div>
+      <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-emerald-500 transition-all"
+          style={{ width: `${pct}%` }}
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        />
+      </div>
+      <ul className="grid gap-2 sm:grid-cols-2 text-sm">
+        {p.rows.map((r) => (
+          <li
+            key={`${r.kind}-${r.title}`}
+            className="flex items-start justify-between gap-2 rounded-lg border border-gray-100 bg-[#f8fafc] px-3 py-2"
+          >
+            <span className="text-gray-800 font-medium line-clamp-2">{r.title}</span>
+            <span
+              className={
+                r.status === 'passed'
+                  ? 'shrink-0 text-emerald-700 font-semibold'
+                  : r.status === 'failed'
+                    ? 'shrink-0 text-red-700 font-semibold'
+                    : 'shrink-0 text-slate-500'
+              }
+            >
+              {r.status === 'passed' ? 'Passed' : r.status === 'failed' ? 'Failed' : 'Not completed'}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {p.allPassed ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+          <p className="font-semibold">All quizzes completed</p>
+          <p className="mt-1 text-emerald-950/90">
+            Thank you. You will receive an email about your certificate once your results have been processed.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function findCurriculumQuizTopic(
+  curriculum: unknown,
+  quizListTitle: string,
+): { quizQuestions: unknown[]; passPercent: number } | null {
+  const want = (quizListTitle || '').trim().toLowerCase()
+  if (!want || !Array.isArray(curriculum)) return null
+  for (const mod of curriculum) {
+    const topics = (mod as { topics?: unknown[] })?.topics
+    if (!Array.isArray(topics)) continue
+    for (const raw of topics) {
+      const t = raw as { title?: string; type?: string; quizQuestions?: unknown[]; quizSettings?: { passingGradePercent?: string } }
+      if (String(t.type || '').toLowerCase() !== 'quiz') continue
+      if (String(t.title || '').trim().toLowerCase() !== want) continue
+      const qs = t.quizQuestions
+      const p = t.quizSettings?.passingGradePercent
+      let pass = ADDITIONAL_QUIZ_DEFAULT_PASS
+      if (typeof p === 'string' && p.trim()) {
+        const n = parseInt(p, 10)
+        if (!Number.isNaN(n) && n >= 0 && n <= 100) pass = n
+      }
+      return { quizQuestions: Array.isArray(qs) ? qs : [], passPercent: pass }
+    }
+  }
+  return null
+}
+
+/** MCQ + True/False only for in-browser additional quizzes (same shape as completion quiz). */
+function buildAdditionalQuizPlayerPayload(rawQuestions: unknown[]): { questions: PythonQuizQuestion[]; correctIndices: number[] } {
+  const questions: PythonQuizQuestion[] = []
+  const correctIndices: number[] = []
+  if (!Array.isArray(rawQuestions)) return { questions, correctIndices }
+  rawQuestions.forEach((q, idx) => {
+    const m = migrateQuizQuestion(q, idx) as QuizQuestionDraft
+    if (m.questionType === 'mcq') {
+      questions.push({ id: m.id, question: m.title, options: m.options.map((o) => String(o ?? '')) })
+      correctIndices.push(Math.max(0, Math.min(m.correctOptionIndex, m.options.length - 1)))
+    } else if (m.questionType === 'true_false') {
+      questions.push({ id: m.id, question: m.title, options: ['True', 'False'] })
+      correctIndices.push(m.tfCorrect ? 0 : 1)
+    }
+  })
+  return { questions, correctIndices }
+}
+
+function StudentAdditionalCurriculumQuiz({
+  curriculum,
+  quizTitle,
+  dueDate,
+  courseId,
+  onRecorded,
+  enrollment,
+  onToast,
+}: {
+  curriculum: unknown
+  quizTitle: string
+  dueDate?: string
+  courseId?: string
+  onRecorded?: () => void | Promise<void>
+  enrollment?: EnrollmentItem | null
+  onToast?: (message: string, tone?: 'success' | 'info') => void
+}) {
+  const found = findCurriculumQuizTopic(curriculum, quizTitle)
+  const { questions, correctIndices } = found
+    ? buildAdditionalQuizPlayerPayload(found.quizQuestions)
+    : { questions: [] as PythonQuizQuestion[], correctIndices: [] as number[] }
+  const passPercent = found?.passPercent ?? ADDITIONAL_QUIZ_DEFAULT_PASS
+  const att = useMemo(() => {
+    const k = quizTitle.trim().toLowerCase()
+    return enrollment?.curriculumQuizAttempts?.find((a) => String(a.quizTitle || '').trim().toLowerCase() === k) ?? null
+  }, [enrollment?.curriculumQuizAttempts, quizTitle])
+  const maxA = typeof att?.attemptsMax === 'number' ? att.attemptsMax : 2
+  const used = typeof att?.attempts === 'number' ? att.attempts : 0
+  const passedSaved = att?.passed === true
+  const exhausted = used >= maxA
+  const serverLocked = exhausted
+
+  const [selections, setSelections] = useState<number[]>([])
+  const [resultMsg, setResultMsg] = useState<{ type: 'ok' | 'err' | 'info'; text: string } | null>(null)
+  const [syncWarn, setSyncWarn] = useState<string | null>(null)
+  const [localFreeze, setLocalFreeze] = useState<{ selections: number[]; text: string } | null>(null)
+
+  useEffect(() => {
+    const ai = att?.answerIndices
+    const n = questions.length
+    if (n === 0) return
+
+    if (exhausted) {
+      if (Array.isArray(ai) && ai.length === n) {
+        setSelections(ai.map((x) => (typeof x === 'number' ? x : -1)))
+      } else {
+        setSelections(Array(n).fill(-1))
+      }
+      setLocalFreeze(null)
+      setResultMsg(null)
+      return
+    }
+
+    if (used > 0 && Array.isArray(ai) && ai.length === n) {
+      const sel = ai.map((x) => (typeof x === 'number' ? x : -1))
+      setSelections(sel)
+      setLocalFreeze({
+        selections: [...sel],
+        text: passedSaved
+          ? 'Your last submitted answers are shown below. You have already passed; use Retake quiz if you want another attempt.'
+          : 'Your last submitted answers are shown below. Use Retake quiz when you are ready for another attempt.',
+      })
+      setResultMsg(null)
+      return
+    }
+
+    setSelections(Array(n).fill(-1))
+    setLocalFreeze(null)
+    setResultMsg(null)
+  }, [questions.length, quizTitle, passedSaved, used, maxA, exhausted, att?.answerIndices])
+
+  const inputsLocked = serverLocked || !!localFreeze
+  const displaySelections = localFreeze ? localFreeze.selections : selections
+  const showRetakeQuiz = !!localFreeze && !serverLocked && used < maxA
+
+  const submit = async () => {
+    if (selections.length === 0) return
+    if (selections.some((i) => i < 0)) {
+      setResultMsg({ type: 'err', text: 'Please answer every question.' })
+      return
+    }
+    setResultMsg(null)
+    setSyncWarn(null)
+    let correct = 0
+    for (let i = 0; i < questions.length; i++) {
+      if (selections[i] === correctIndices[i]) correct += 1
+    }
+    const pct = questions.length ? Math.round((100 * correct) / questions.length) : 0
+    const passed = pct >= passPercent
+    const msgText = passed
+      ? `You passed with ${pct}% (required ${passPercent}%).`
+      : `You scored ${pct}%. You need at least ${passPercent}% to pass.`
+    setResultMsg(passed ? { type: 'ok', text: msgText } : { type: 'info', text: msgText })
+    if (courseId) {
+      try {
+        await enrollmentService.submitCurriculumQuizResult(courseId, {
+          quizTitle,
+          passed,
+          scorePercent: pct,
+          answers: selections,
+        })
+        await onRecorded?.()
+        if (passed && !passedSaved) {
+          onToast?.('Your certificate will be emailed to you when your program sends it.', 'success')
+        }
+        const nextUsed = used + 1
+        if (nextUsed < maxA) {
+          setLocalFreeze({ selections: [...selections], text: msgText })
+        } else {
+          setLocalFreeze(null)
+        }
+      } catch (err: unknown) {
+        const ax = err as { response?: { status?: number; data?: { error?: string; code?: string } } }
+        const d = ax.response?.data
+        if (ax.response?.status === 400 && d?.code === 'max_quiz_attempts') {
+          setSyncWarn(d.error || 'Maximum attempts reached for this quiz.')
+          await onRecorded?.()
+        } else {
+          setSyncWarn('Could not save this attempt right now. Your score is shown here only until it syncs.')
+        }
+      }
+    } else {
+      if (!passed) {
+        setLocalFreeze({ selections: [...selections], text: msgText })
+      }
+    }
+  }
+
+  if (!found) {
+    return (
+      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        No matching <strong>Quiz</strong> topic was found in the course curriculum for &quot;{quizTitle}&quot;. Add a curriculum
+        topic of type <strong>Quiz</strong> with the <strong>same title</strong> as this row, and add questions in the quiz
+        builder.
+      </p>
+    )
+  }
+
+  if (questions.length === 0) {
+    return (
+      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        This quiz has no multiple-choice or true/false questions yet. Open the course in admin, find the <strong>Quiz</strong> topic
+        named &quot;{quizTitle}&quot;, and add at least one such question.
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-brand-navy/15 bg-[#f8fafc] p-4">
+      <div>
+        <h4 className="text-base font-semibold text-brand-navy">{quizTitle}</h4>
+        {dueDate && <p className="text-xs text-slate-gray">Due: {dueDate}</p>}
+        <p className="mt-1 text-sm text-slate-gray">Passing score: {passPercent}%</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Attempts: {used}/{maxA}
+          {exhausted ? ' — no further attempts.' : passedSaved ? ' — passed (you may still retake until attempts are used).' : ''}
+        </p>
+      </div>
+      {syncWarn && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{syncWarn}</p>
+      )}
+      {localFreeze && (
+        <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{localFreeze.text}</p>
+      )}
+      {resultMsg && !localFreeze && (
+        <p
+          className={
+            resultMsg.type === 'ok'
+              ? 'text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2'
+              : resultMsg.type === 'err'
+                ? 'text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2'
+                : 'text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2'
+          }
+        >
+          {resultMsg.text}
+        </p>
+      )}
+      <ol className="space-y-4">
+        {questions.map((q, qi) => (
+          <li key={q.id} className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="font-medium text-gray-900 text-sm">
+              {qi + 1}. {q.question}
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {q.options.map((opt, oi) => (
+                <label
+                  key={oi}
+                  className={`flex items-start gap-2 text-sm ${inputsLocked ? 'text-gray-600 cursor-default' : 'text-gray-700 cursor-pointer'}`}
+                >
+                  <input
+                    type="radio"
+                    name={`addq-${quizTitle}-${q.id}`}
+                    className="mt-0.5"
+                    disabled={inputsLocked}
+                    checked={displaySelections[qi] === oi}
+                    onChange={() => {
+                      if (inputsLocked) return
+                      const next = [...selections]
+                      next[qi] = oi
+                      setSelections(next)
+                    }}
+                  />
+                  <span>{opt}</span>
+                </label>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {inputsLocked && (
+        <p className="text-xs text-slate-600">Answers are locked after submit (or when this quiz is marked done).</p>
+      )}
+      {showRetakeQuiz ? (
+        <button
+          type="button"
+          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+          onClick={() => {
+            setLocalFreeze(null)
+            setSelections(Array(questions.length).fill(-1))
+            setResultMsg(null)
+          }}
+        >
+          Retake quiz (attempt {used + 1} of {maxA})
+        </button>
+      ) : null}
+      {!inputsLocked ? (
+        <button
+          type="button"
+          disabled={questions.length === 0}
+          onClick={() => void submit()}
+          className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+        >
+          Submit quiz
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function completionQuizCopy(slug: string | undefined, explicitTitle?: string) {
+  if ((explicitTitle || '').trim()) {
+    const t = (explicitTitle || '').trim()
+    return {
+      title: t,
+      passedTitle: `You have passed ${t}.`,
+      intro: 'Pass with at least {pct}% to be eligible for your certificate of completion.',
+    }
+  }
   const s = (slug || '').toLowerCase()
   if (s === 'demo-java-programming-seed') {
     return {
       title: 'Java completion quiz',
       passedTitle: 'You have passed the Java completion quiz.',
-      intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
-    }
-  }
-  if (s === 'aiml-foundations-seed') {
-    return {
-      title: 'AIML foundations quiz',
-      passedTitle: 'You have passed the AIML foundations quiz.',
       intro: 'Pass with at least {pct}% to unlock your certificate of completion.',
     }
   }
@@ -97,6 +593,7 @@ function completionQuizCopy(slug: string | undefined) {
 function PythonCourseQuizBlock({
   courseId,
   courseSlug,
+  completionLabel,
   passed,
   score,
   onUpdate,
@@ -107,9 +604,16 @@ function PythonCourseQuizBlock({
   certMessageTone,
   certificateDownloadsRemaining,
   onGenerateCertificate,
+  certificateEmailOnly,
+  onToast,
+  enrollmentAttemptSync,
+  pythonQuizAttemptsUsed,
+  pythonQuizAttemptsMax,
 }: {
   courseId: string
   courseSlug?: string
+  /** Shown in headings when the course uses curriculum completionQuizTitle. */
+  completionLabel?: string
   passed: boolean
   score?: number
   onUpdate: () => void | Promise<void>
@@ -120,8 +624,16 @@ function PythonCourseQuizBlock({
   certMessageTone?: 'success' | 'error' | 'info'
   certificateDownloadsRemaining?: number
   onGenerateCertificate?: () => void
+  certificateEmailOnly?: boolean
+  onToast?: (message: string, tone?: 'success' | 'info') => void
+  /** Bumps when enrollment quiz attempts change so we reload read-only state. */
+  enrollmentAttemptSync?: number
+  /** From enrollment while passed (retake cap). */
+  pythonQuizAttemptsUsed?: number
+  pythonQuizAttemptsMax?: number
 }) {
-  const copy = completionQuizCopy(courseSlug)
+  const copy = completionQuizCopy(courseSlug, completionLabel)
+  const noPdfDownload = !!certificateEmailOnly
   const tone = certMessageTone ?? 'success'
   const feedbackClass =
     tone === 'error'
@@ -139,24 +651,49 @@ function PythonCourseQuizBlock({
   const [selections, setSelections] = useState<number[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
+  const [serverReadOnly, setServerReadOnly] = useState(false)
+  const [attemptsMax, setAttemptsMax] = useState(2)
+  const [attemptsUsed, setAttemptsUsed] = useState(0)
+  const [localFreeze, setLocalFreeze] = useState<{ selections: number[]; msg: string } | null>(null)
+  const [retakeMode, setRetakeMode] = useState(false)
 
   useEffect(() => {
-    if (passed) {
+    if (!passed) setRetakeMode(false)
+  }, [passed])
+
+  useEffect(() => {
+    if (passed && !retakeMode) {
       setLoading(false)
+      setLocalFreeze(null)
       return
     }
     setLoading(true)
     setBanner(null)
+    setLocalFreeze(null)
     courseService
       .getPythonQuiz(courseId)
       .then((d) => {
         setQuestions(d.questions)
         setPassPercent(d.passPercent)
-        setSelections(Array(d.questions.length).fill(-1))
+        const max = typeof d.attemptsMax === 'number' ? d.attemptsMax : 2
+        const used = typeof d.attemptsUsed === 'number' ? d.attemptsUsed : 0
+        setAttemptsMax(max)
+        setAttemptsUsed(used)
+        setServerReadOnly(!!d.readOnly)
+        const n = d.questions.length
+        const last = Array.isArray(d.lastAnswerIndices) ? d.lastAnswerIndices : []
+        if (d.readOnly && last.length === n) {
+          setSelections(last.map((i) => (typeof i === 'number' ? i : -1)))
+        } else {
+          setSelections(Array(n).fill(-1))
+        }
       })
       .catch(() => setBanner('Could not load the quiz. Try again later.'))
       .finally(() => setLoading(false))
-  }, [courseId, passed])
+  }, [courseId, passed, retakeMode, enrollmentAttemptSync])
+
+  const inputsLocked = serverReadOnly || !!localFreeze
+  const showRetakeQuiz = !!localFreeze && !serverReadOnly && attemptsUsed < attemptsMax
 
   const submit = async () => {
     if (selections.some((i) => i < 0)) {
@@ -168,28 +705,73 @@ function PythonCourseQuizBlock({
     try {
       const res = await enrollmentService.submitPythonQuiz(courseId, selections)
       if (res.alreadyCompleted || res.passed) {
+        const wasRetake = retakeMode
         await onUpdate()
         setBanner(null)
+        setLocalFreeze(null)
+        if (wasRetake) {
+          setRetakeMode(false)
+        }
+        if (noPdfDownload && !wasRetake && !res.retakeAfterPass) {
+          onToast?.('Your certificate will be emailed to your registered address.', 'success')
+        }
+        if (res.retakeAfterPass) {
+          onToast?.('Retake submitted. Your pass is already on file.', 'info')
+        }
       } else {
-        setBanner(res.message || `You scored ${res.scorePercent}%. You need ${res.passPercent}% to pass.`)
+        const msg = res.message || `You scored ${res.scorePercent}%. You need ${res.passPercent}% to pass.`
+        const used = typeof res.attemptsUsed === 'number' ? res.attemptsUsed : attemptsUsed + 1
+        const max = typeof res.attemptsMax === 'number' ? res.attemptsMax : attemptsMax
+        setAttemptsUsed(used)
+        if (used >= max) {
+          setServerReadOnly(true)
+          setLocalFreeze(null)
+          setBanner(res.hadPassRecorded ? `${msg} Your pass from an earlier attempt still counts.` : msg)
+        } else {
+          setLocalFreeze({
+            selections: [...selections],
+            msg: res.hadPassRecorded ? `${msg} Your pass from an earlier attempt still counts.` : msg,
+          })
+        }
+        await onUpdate()
       }
-    } catch {
-      setBanner('Submission failed. Please try again.')
+    } catch (err: unknown) {
+      const ax = err as { response?: { status?: number; data?: { error?: string; code?: string } } }
+      const st = ax.response?.status
+      const data = ax.response?.data
+      if (st === 400 && data?.code === 'max_quiz_attempts') {
+        setBanner(data.error || 'Maximum quiz attempts reached.')
+        setServerReadOnly(true)
+        setLocalFreeze(null)
+        await onUpdate()
+      } else {
+        setBanner(data?.error || 'Submission failed. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
   }
 
-  if (passed) {
+  if (passed && !retakeMode) {
+    const pqUsed = typeof pythonQuizAttemptsUsed === 'number' ? pythonQuizAttemptsUsed : 0
+    const pqMax = typeof pythonQuizAttemptsMax === 'number' ? pythonQuizAttemptsMax : attemptsMax
+    const canRetakeCompletion = pqUsed < pqMax
     return (
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 space-y-4">
         <div>
           <p className="font-semibold">{copy.passedTitle}</p>
           {score != null && <p className="mt-1 text-sm">Your score: {score}%</p>}
+          <p className="mt-1 text-xs text-emerald-800/90">
+            Quiz attempts used: {pqUsed}/{pqMax}.
+            {canRetakeCompletion
+              ? ' You may retake for practice until attempts are used.'
+              : ' No quiz attempts remaining.'}
+          </p>
         </div>
         <p className="text-sm leading-relaxed text-emerald-950 bg-white/70 border border-emerald-100 rounded-lg px-3 py-2.5">
-          Thank you for taking the quiz. We have emailed your certificate of completion to your registered email address
-          (when outgoing mail is enabled on the server).
+          {noPdfDownload
+            ? 'You have met the pass criteria. Your certificate of completion will be emailed to your registered address.'
+            : 'Thank you for taking the quiz. Your certificate of completion has been sent to your registered email address.'}
         </p>
         {certificateNumber && (
           <p className="text-sm text-emerald-800">
@@ -200,7 +782,7 @@ function PythonCourseQuizBlock({
         {certMessage && (
           <p className={`text-sm rounded-lg border px-3 py-2 ${feedbackClass}`}>{certMessage}</p>
         )}
-        {onGenerateCertificate && downloadsLeft > 0 ? (
+        {!noPdfDownload && onGenerateCertificate && downloadsLeft > 0 ? (
           <button
             type="button"
             disabled={certBusy}
@@ -210,20 +792,31 @@ function PythonCourseQuizBlock({
             {certBusy && <Loader2 className="h-4 w-4 animate-spin" />}
             {certificateIssued ? 'Generate certificate again' : 'Generate certificate (PDF)'}
           </button>
-        ) : onGenerateCertificate && downloadsLeft <= 0 ? (
+        ) : !noPdfDownload && onGenerateCertificate && downloadsLeft <= 0 ? (
           <p className="text-sm text-emerald-900">
             You have used all {CERTIFICATE_PDF_DOWNLOAD_LIMIT} certificate generations for this course. Use the copies
             from your email, or contact support if you need help.
           </p>
         ) : null}
-        <p className="text-xs text-emerald-800/90">
-          You can generate the certificate PDF at most {CERTIFICATE_PDF_DOWNLOAD_LIMIT} times. Each successful generation
-          downloads the PDF and emails a copy to your registered address when mail is configured on the server.
-        </p>
-        {downloadsLeft > 0 && downloadsLeft < CERTIFICATE_PDF_DOWNLOAD_LIMIT ? (
+        {!noPdfDownload ? (
+          <p className="text-xs text-emerald-800/90">
+            You can generate the certificate PDF at most {CERTIFICATE_PDF_DOWNLOAD_LIMIT} times. Each successful generation
+            downloads the PDF and emails a copy to your registered address.
+          </p>
+        ) : null}
+        {!noPdfDownload && downloadsLeft > 0 && downloadsLeft < CERTIFICATE_PDF_DOWNLOAD_LIMIT ? (
           <p className="text-xs font-medium text-emerald-900">
             Generations remaining: {downloadsLeft}
           </p>
+        ) : null}
+        {canRetakeCompletion ? (
+          <button
+            type="button"
+            onClick={() => setRetakeMode(true)}
+            className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-emerald-50"
+          >
+            Retake quiz
+          </button>
         ) : null}
       </div>
     )
@@ -241,14 +834,28 @@ function PythonCourseQuizBlock({
     return <p className="text-red-600">{banner}</p>
   }
 
+  const displaySelections = localFreeze ? localFreeze.selections : selections
+
   return (
     <div className="space-y-4 rounded-xl border border-brand-navy/15 bg-[#f8fafc] p-4">
       <div>
         <h3 className="text-lg font-semibold text-brand-navy">{copy.title}</h3>
         <p className="mt-1 text-sm text-slate-gray">{copy.intro.replace('{pct}', String(passPercent))}</p>
+        {retakeMode && passed ? (
+          <p className="mt-2 text-sm text-slate-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            You have already passed. This attempt is optional practice; your recorded pass stays on file.
+          </p>
+        ) : null}
+        <p className="mt-1 text-xs text-slate-500">
+          Attempts: {attemptsUsed}/{attemptsMax}
+          {serverReadOnly ? ' — no further attempts.' : ''}
+        </p>
       </div>
+      {localFreeze && (
+        <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{localFreeze.msg}</p>
+      )}
       {banner && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{banner}</p>}
-      <ol className="space-y-6">
+      <ol className={`space-y-6 ${inputsLocked ? 'opacity-95' : ''}`}>
         {questions.map((q, qi) => (
           <li key={q.id} className="rounded-lg border border-gray-200 bg-white p-4">
             <p className="font-medium text-gray-900">
@@ -256,13 +863,20 @@ function PythonCourseQuizBlock({
             </p>
             <div className="mt-3 space-y-2">
               {q.options.map((opt, oi) => (
-                <label key={oi} className="flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                <label
+                  key={oi}
+                  className={`flex items-start gap-2 text-sm ${
+                    inputsLocked ? 'text-gray-600 cursor-default' : 'text-gray-700 cursor-pointer'
+                  }`}
+                >
                   <input
                     type="radio"
                     name={q.id}
                     className="mt-1"
-                    checked={selections[qi] === oi}
+                    disabled={inputsLocked}
+                    checked={displaySelections[qi] === oi}
                     onChange={() => {
+                      if (inputsLocked) return
                       const next = [...selections]
                       next[qi] = oi
                       setSelections(next)
@@ -275,14 +889,32 @@ function PythonCourseQuizBlock({
           </li>
         ))}
       </ol>
-      <button
-        type="button"
-        disabled={submitting || questions.length === 0}
-        onClick={() => void submit()}
-        className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
-      >
-        {submitting ? 'Submitting…' : 'Submit quiz'}
-      </button>
+      {inputsLocked && (
+        <p className="text-xs text-slate-600">Submitted answers are shown above. You cannot change selections in this state.</p>
+      )}
+      {showRetakeQuiz ? (
+        <button
+          type="button"
+          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+          onClick={() => {
+            setLocalFreeze(null)
+            setSelections(Array(questions.length).fill(-1))
+            setBanner(null)
+          }}
+        >
+          Retake quiz (attempt {attemptsUsed + 1} of {attemptsMax})
+        </button>
+      ) : null}
+      {!inputsLocked ? (
+        <button
+          type="button"
+          disabled={submitting || questions.length === 0}
+          onClick={() => void submit()}
+          className="rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+        >
+          {submitting ? 'Submitting…' : 'Submit quiz'}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -432,6 +1064,18 @@ export function CourseContent() {
   const [certBusy, setCertBusy] = useState(false)
   const [certMessage, setCertMessage] = useState<string | null>(null)
   const [certMessageTone, setCertMessageTone] = useState<'success' | 'error' | 'info'>('success')
+  const [openAdditionalQuizTitle, setOpenAdditionalQuizTitle] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'info' } | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(null), 6000)
+    return () => window.clearTimeout(t)
+  }, [toast])
+
+  const showToast = useCallback((message: string, tone: 'success' | 'info' = 'success') => {
+    setToast({ message, tone })
+  }, [])
 
   const refreshEnrollment = useCallback(() => {
     if (!courseId) return Promise.resolve()
@@ -456,6 +1100,20 @@ export function CourseContent() {
     refreshEnrollment()
   }, [refreshEnrollment])
 
+  useEffect(() => {
+    setOpenAdditionalQuizTitle(null)
+  }, [courseId])
+
+  const additionalQuizRows = useMemo(
+    () => buildAdditionalQuizList(course?.curriculum, course?.quizzes),
+    [course?.curriculum, course?.quizzes],
+  )
+  const additionalQuizModuleGroups = useMemo(
+    () => buildQuizModuleGroups(course?.curriculum, additionalQuizRows, (course?.completionQuizTitle || '').trim()),
+    [course?.curriculum, additionalQuizRows, course?.completionQuizTitle],
+  )
+  const quizProgress = useMemo(() => computeQuizProgress(course, enrollment), [course, enrollment])
+
   const handleGenerateCertificate = useCallback(() => {
     if (!courseId) return
     setCertBusy(true)
@@ -471,7 +1129,7 @@ export function CourseContent() {
         a.click()
         URL.revokeObjectURL(url)
         setCertMessageTone('success')
-        setCertMessage('Your certificate PDF has started downloading. A copy is also being sent to your email when mail is configured.')
+        setCertMessage('Your certificate PDF has started downloading. A copy is also being sent to your email.')
         void refreshEnrollment()
       })
       .catch((err: unknown) => {
@@ -516,6 +1174,7 @@ export function CourseContent() {
   }
 
   return (
+    <>
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6 flex items-center gap-4">
         <Link
@@ -852,10 +1511,12 @@ export function CourseContent() {
         )}
         {activeTab === 'quizzes' && (
           <div className="space-y-6">
+            <QuizProgressSummary course={course} enrollment={enrollment} />
             {enrollment?.pythonQuizAvailable && courseId && (
               <PythonCourseQuizBlock
                 courseId={courseId}
                 courseSlug={course.slug}
+                completionLabel={course.completionQuizTitle}
                 passed={!!enrollment.pythonQuizPassed}
                 score={enrollment.pythonQuizScore}
                 onUpdate={refreshEnrollment}
@@ -868,30 +1529,73 @@ export function CourseContent() {
                   enrollment.certificatePdfDownloadsRemaining ?? CERTIFICATE_PDF_DOWNLOAD_LIMIT
                 }
                 onGenerateCertificate={
-                  enrollment.pythonQuizPassed ? handleGenerateCertificate : undefined
+                  enrollment.pythonQuizPassed && !course.certificateEmailOnly
+                    ? handleGenerateCertificate
+                    : undefined
                 }
+                certificateEmailOnly={!!course.certificateEmailOnly}
+                onToast={showToast}
+                enrollmentAttemptSync={enrollment?.pythonQuizAttemptsUsed ?? 0}
+                pythonQuizAttemptsUsed={enrollment?.pythonQuizAttemptsUsed}
+                pythonQuizAttemptsMax={enrollment?.pythonQuizAttemptsMax}
               />
             )}
-            {(!course.quizzes || course.quizzes.length === 0) ? (
-              !enrollment?.pythonQuizAvailable && <p className="text-slate-gray">No quizzes yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {enrollment?.pythonQuizAvailable && course.quizzes && course.quizzes.length > 0 && (
-                  <p className="text-sm font-medium text-brand-navy">Additional quizzes</p>
+            {additionalQuizModuleGroups.length === 0 && !enrollment?.pythonQuizAvailable ? (
+              <p className="text-slate-gray">No quizzes yet.</p>
+            ) : null}
+            {additionalQuizModuleGroups.length > 0 ? (
+              <div className="space-y-6">
+                {enrollment?.pythonQuizAvailable && (
+                  <p className="text-sm font-medium text-brand-navy">Quizzes by module</p>
                 )}
-                {course.quizzes.map((q, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
-                    <div>
-                      <p className="font-medium text-gray-800">{q.title}</p>
-                      {q.dueDate && <p className="text-xs text-slate-gray">Due: {q.dueDate}</p>}
-                    </div>
-                    <button type="button" className="rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600">
-                      Start Quiz
-                    </button>
+                {additionalQuizModuleGroups.map((g) => (
+                  <div key={g.moduleTitle} className="space-y-3">
+                    <p className="text-sm font-semibold text-slate-700 border-b border-gray-100 pb-1">{g.moduleTitle}</p>
+                    {g.rows.map((q) => {
+                      const t = (q.title || '').trim()
+                      return (
+                        <div key={`${g.moduleTitle}-${t}`} className="rounded-lg border border-gray-100 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="font-medium text-gray-800">{q.title}</p>
+                              {q.dueDate && <p className="text-xs text-slate-gray">Due: {q.dueDate}</p>}
+                            </div>
+                            {openAdditionalQuizTitle !== t ? (
+                              <button
+                                type="button"
+                                onClick={() => setOpenAdditionalQuizTitle(t)}
+                                className="rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600"
+                              >
+                                Start Quiz
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setOpenAdditionalQuizTitle(null)}
+                                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                Close
+                              </button>
+                            )}
+                          </div>
+                          {openAdditionalQuizTitle === t && t ? (
+                            <StudentAdditionalCurriculumQuiz
+                              curriculum={course.curriculum}
+                              quizTitle={t}
+                              dueDate={q.dueDate}
+                              courseId={courseId}
+                              enrollment={enrollment}
+                              onRecorded={refreshEnrollment}
+                              onToast={showToast}
+                            />
+                          ) : null}
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         )}
         {activeTab === 'announcements' && (
@@ -912,18 +1616,34 @@ export function CourseContent() {
         {activeTab === 'certificate' && (
           <div className="rounded-lg border border-gray-100 p-6 text-center space-y-4">
             <Award className="mx-auto h-12 w-12 text-gray-400" />
+            {quizProgress.allPassed && quizProgress.total > 0 ? (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 text-left">
+                All quizzes for this course are complete. You will receive an email about your certificate when processing
+                is complete.
+              </p>
+            ) : null}
             {enrollment?.pythonQuizAvailable ? (
               <>
                 {!enrollment.pythonQuizPassed && (
                   <p className="font-medium text-gray-700">
-                    Pass the <strong>{completionQuizCopy(course.slug).title}</strong> in the <strong>Quizzes</strong> tab, then use{' '}
-                    <strong>Generate certificate</strong> there to get your PDF (and email copy when configured).
+                    Pass the <strong>{completionQuizCopy(course.slug, course.completionQuizTitle).title}</strong> in the{' '}
+                    <strong>Quizzes</strong> tab
+                    {course.certificateEmailOnly
+                      ? '. Your certificate of completion will be sent by email (no in-app download for this program).'
+                      : ', then use Generate certificate (PDF) there to download a copy; a copy is also emailed to you.'}
                   </p>
                 )}
                 {enrollment.pythonQuizPassed && (
                   <p className="font-medium text-gray-700">
-                    You have passed the quiz. Open the <strong>Quizzes</strong> tab and use <strong>Generate certificate (PDF)</strong>{' '}
-                    below your pass message to download and email your certificate.
+                    {course.certificateEmailOnly
+                      ? 'You have passed the completion quiz. Your certificate will be delivered by email to your registered address.'
+                      : (
+                          <>
+                            You have passed the quiz. Open the <strong>Quizzes</strong> tab and use{' '}
+                            <strong>Generate certificate (PDF)</strong> below your pass message to download and email your
+                            certificate.
+                          </>
+                        )}
                   </p>
                 )}
               </>
@@ -937,5 +1657,18 @@ export function CourseContent() {
         )}
       </div>
     </div>
+    {toast ? (
+      <div
+        role="status"
+        className={`fixed bottom-6 right-6 z-[100] max-w-sm rounded-lg border px-4 py-3 text-sm shadow-lg ${
+          toast.tone === 'success'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+            : 'border-slate-200 bg-white text-slate-800'
+        }`}
+      >
+        {toast.message}
+      </div>
+    ) : null}
+    </>
   )
 }
