@@ -24,9 +24,8 @@ provider:
       - application/vnd.ms-excel
       - application/pdf
       - application/octet-stream
-      # Browsers / axios often send Accept: application/json first; that prevents decode unless
-      # clients override Accept — this catches remaining cases (see AWS lambda-proxy-binary-media).
-      - '*/*'
+      # Do NOT add '*/*' here — it breaks API Gateway CORS OPTIONS preflight (MOCK + binary conflict).
+      # Binary downloads use explicit Accept headers in the frontend (adminService / enrollmentService).
   iam:
     role:
       statements:
