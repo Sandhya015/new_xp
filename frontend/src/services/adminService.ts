@@ -9,7 +9,12 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-/** API Gateway only decodes Lambda base64 bodies when Content-Type is in binaryMediaTypes; otherwise clients get raw base64 text (e.g. UEsDB…). */
+/**
+ * API Gateway (REST + Lambda proxy) uses the **first** `Accept` request header value against
+ * `binaryMediaTypes` to decide whether to decode `isBase64Encoded` bodies. Axios defaults to
+ * `Accept: application/json, ...` first, so binary responses stay as base64 text unless we send
+ * an Accept that matches a configured binary type (see backend serverless.yml).
+ */
 function blobFromMaybeBase64Body(
   buffer: ArrayBuffer,
   mime: string,
@@ -286,6 +291,9 @@ export const adminService = {
   async downloadEnrollmentsCertificateSheet(courseId: string): Promise<Blob> {
     const { data } = await api.get(`/api/admin/courses/${courseId}/enrollments/export.xlsx`, {
       responseType: 'arraybuffer',
+      headers: {
+        Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
     })
     return blobFromMaybeBase64Body(
       data as ArrayBuffer,
@@ -338,10 +346,20 @@ export const adminService = {
 
   /** Authenticated download (admin JWT). Student app uses the same path with student JWT. */
   async downloadAssignmentSubmissionFile(fileStorageName: string): Promise<Blob> {
-    const { data } = await api.get(`/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`, {
-      responseType: 'blob',
-    })
-    return data as Blob
+    const { data, headers } = await api.get(
+      `/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`,
+      {
+        responseType: 'arraybuffer',
+        headers: {
+          // Must be first in Accept and match API GW binaryMediaTypes so Lambda base64 is decoded.
+          Accept: 'application/octet-stream, image/jpeg, image/png, application/pdf',
+        },
+      },
+    )
+    const ct =
+      (typeof headers['content-type'] === 'string' && headers['content-type']) ||
+      'application/octet-stream'
+    return new Blob([data as ArrayBuffer], { type: ct.split(';')[0].trim() })
   },
 
   async getCompanies(params?: { status?: string }) {
@@ -441,7 +459,10 @@ export const adminService = {
   },
 
   async downloadAdminCertificatePdf(id: string): Promise<Blob> {
-    const { data } = await api.get(`/api/admin/certificates/${id}/pdf`, { responseType: 'arraybuffer' })
+    const { data } = await api.get(`/api/admin/certificates/${id}/pdf`, {
+      responseType: 'arraybuffer',
+      headers: { Accept: 'application/pdf' },
+    })
     return blobFromMaybeBase64Body(data as ArrayBuffer, 'application/pdf', 'pdf')
   },
 

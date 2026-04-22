@@ -24,6 +24,9 @@ provider:
       - application/vnd.ms-excel
       - application/pdf
       - application/octet-stream
+      # Browsers / axios often send Accept: application/json first; that prevents decode unless
+      # clients override Accept — this catches remaining cases (see AWS lambda-proxy-binary-media).
+      - '*/*'
   iam:
     role:
       statements:

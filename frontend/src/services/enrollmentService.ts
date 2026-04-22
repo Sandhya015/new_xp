@@ -70,10 +70,18 @@ export const enrollmentService = {
     return data
   },
   async downloadSubmissionFile(fileStorageName: string): Promise<Blob> {
-    const { data } = await api.get(`/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`, {
-      responseType: 'blob',
-    })
-    return data as Blob
+    const { data, headers } = await api.get(
+      `/api/enrollments/submission-media/${encodeURIComponent(fileStorageName)}`,
+      {
+        responseType: 'arraybuffer',
+        headers: {
+          Accept: 'application/octet-stream, image/jpeg, image/png, application/pdf',
+        },
+      },
+    )
+    const raw = headers['content-type']
+    const ct = typeof raw === 'string' ? raw.split(';')[0].trim() : 'application/octet-stream'
+    return new Blob([data as ArrayBuffer], { type: ct })
   },
 
   async submitAssignment(
