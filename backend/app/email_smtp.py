@@ -203,24 +203,21 @@ def send_certificate_email(
     course_title: str,
     cert_no: str,
     pdf_bytes: bytes,
+    *,
+    resent: bool = False,
 ) -> bool:
-    name = student_name or "there"
-    safe_title = course_title or "your course"
-    subject = f"Your XpertIntern certificate — {safe_title}"
-    html = f"""
-    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
-    <p>Hi {name},</p>
-    <p>Congratulations on completing the quiz for <strong>{safe_title}</strong>.</p>
-    <p>Your certificate of completion is attached to this email. Certificate ID: <strong>{cert_no}</strong>.</p>
-    <p>Keep learning and building your skills with XpertIntern.</p>
-    <p>— Team XpertIntern</p>
-    </body></html>
-    """
-    fn = f"XpertIntern-Certificate-{cert_no}.pdf"
+    from app.email_templates import course_certificate_email_bodies
+
+    subject, html, text_body = course_certificate_email_bodies(
+        student_name, course_title, cert_no, resent=resent
+    )
+    safe_fn = "".join(ch for ch in (cert_no or "cert") if ch.isalnum() or ch in "-_") or "cert"
+    fn = f"XpertIntern-Certificate-{safe_fn}.pdf"
     return send_email(
         config,
         to_email,
         subject,
         html,
+        text_body=text_body,
         attachments=[(fn, pdf_bytes, "application/pdf")],
     )

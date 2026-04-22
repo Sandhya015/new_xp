@@ -243,7 +243,11 @@ export function CertificateUpload() {
     try {
       const res = await adminService.bulkEmailCertificates(cid, enrollmentIds)
       const errPart = res.errors?.length ? ` Errors: ${res.errors.length}.` : ''
-      setExcelMsg(`Emailed / issued: ${res.issuedOrEmailed}. Skipped (already issued): ${res.skippedAlreadyIssued}.${errPart}`)
+      const parts: string[] = []
+      if ((res.newlyIssued ?? 0) > 0) parts.push(`${res.newlyIssued} newly issued`)
+      if ((res.resent ?? 0) > 0) parts.push(`${res.resent} re-sent (same certificate ID)`)
+      const breakdown = parts.length ? ` ${parts.join(', ')}.` : ''
+      setExcelMsg(`Certificate email(s) completed: ${res.issuedOrEmailed}.${breakdown}${errPart}`)
       setCertPreview(null)
       setCertSelected({})
     } catch (e: unknown) {

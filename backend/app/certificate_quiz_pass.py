@@ -41,6 +41,7 @@ def apply_quiz_pass_certificate(
     student_name = user.get("name") or user.get("fullName") or "Student"
     to_email = (user.get("email") or "").strip()
     cc = enrollment.get("courseCertificate") or {}
+    had_cert_at_start = bool((cc.get("certNo") or "").strip())
 
     # Caller must verify download limit for for_pdf_download=True before calling.
 
@@ -93,7 +94,13 @@ def apply_quiz_pass_certificate(
             course_title,
             cert_no,
             pdf_bytes,
+            resent=had_cert_at_start,
         )
+        if had_cert_at_start and not for_pdf_download:
+            enroll_coll.update_one(
+                {"_id": enrollment["_id"]},
+                {"$set": {"courseCertificate.lastEmailedAt": datetime.utcnow()}},
+            )
 
     if for_pdf_download:
         enroll_coll.update_one(

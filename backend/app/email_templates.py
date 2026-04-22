@@ -153,6 +153,78 @@ def enrollment_confirmation_email_bodies(student_name: str, course_title: str) -
     return subject, html_body, plain
 
 
+def course_certificate_email_bodies(
+    student_name: str,
+    course_title: str,
+    cert_no: str,
+    *,
+    resent: bool = False,
+) -> Tuple[str, str, str]:
+    """Subject, HTML, plain text for course completion certificate (attachment sent separately)."""
+    from urllib.parse import quote
+
+    safe_name = html.escape(student_name or "there", quote=False)
+    safe_course = html.escape(course_title or "your course", quote=False)
+    raw_cert = (cert_no or "").strip()
+    safe_cert = html.escape(raw_cert, quote=False)
+    base = _public_app_url()
+    verify_url = f"{base}/verify?cert={quote(raw_cert, safe='')}" if raw_cert else base
+    verify_href = html.escape(verify_url, quote=True)
+    subject_plain = (course_title or "your course").replace("\n", " ").strip() or "your course"
+    subject = (
+        f"Your certificate (copy) — {subject_plain[:180]}"
+        if resent
+        else f"Your XpertIntern certificate — {subject_plain[:180]}"
+    )
+    resent_block = ""
+    if resent:
+        resent_block = """
+<p style="margin:0 0 16px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:14px;color:#92400e;">
+  <strong>Updated copy.</strong> This certificate was already issued; we are sending the same certificate ID again with a fresh PDF attachment.
+</p>
+"""
+    inner = f"""
+<p style="margin:0 0 16px;font-size:18px;font-weight:600;color:#0f172a;">Hi {safe_name},</p>
+{resent_block}
+<p style="margin:0 0 16px;">Congratulations on completing <strong>{safe_course}</strong>. Your <strong>official certificate of completion</strong> is attached to this email as a PDF.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:20px 0;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:16px 18px;">
+    <p style="margin:0 0 8px;font-size:12px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">Certificate ID</p>
+    <p style="margin:0;font-family:ui-monospace,'Cascadia Code',monospace;font-size:16px;font-weight:600;color:#0f172a;letter-spacing:0.04em;">{safe_cert}</p>
+  </td></tr>
+</table>
+<p style="margin:0 0 20px;font-size:14px;color:#475569;">Verify authenticity anytime using our public verifier:</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0">
+  <tr>
+    <td style="border-radius:8px;background:#2563eb;">
+      <a href="{verify_href}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">Verify this certificate</a>
+    </td>
+  </tr>
+</table>
+<p style="margin:20px 0 0;font-size:13px;color:#64748b;">Keep the PDF for your records. Questions? Use <strong>Contact support</strong> in the footer.</p>
+<p style="margin:24px 0 0;font-size:14px;color:#475569;">Proudly learning with you,<br/><strong style="color:#0f172a;">Team XpertIntern</strong></p>
+"""
+    pre = (f"Certificate for {subject_plain}" + (" — reissued" if resent else ""))[:160]
+    html_body = _wrap_brand(inner, pre)
+    plain_intro = (
+        "This email is a new copy of a certificate already on file (same certificate ID).\n\n"
+        if resent
+        else ""
+    )
+    plain_verify = f"{base}/verify?cert={quote(raw_cert, safe='')}" if raw_cert else base
+    plain = (
+        f"Hi {student_name or 'there'},\n\n"
+        f"{plain_intro}"
+        f"Congratulations on completing {course_title or 'your course'}.\n\n"
+        f"Certificate ID: {raw_cert or 'N/A'}\n"
+        "Your PDF certificate is attached.\n\n"
+        f"Verify online: {plain_verify}\n\n"
+        "— Team XpertIntern\n"
+        f"{base}\n"
+    )
+    return subject, html_body, plain
+
+
 def registration_otp_bodies(student_name: str, otp: str) -> Tuple[str, str, str]:
     """Subject (includes OTP per product spec), HTML, plain text."""
     safe_name = html.escape(student_name or "there", quote=False)

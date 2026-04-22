@@ -339,7 +339,14 @@ export const adminService = {
   async bulkEmailCertificates(
     courseId: string,
     enrollmentIds: string[],
-  ): Promise<{ ok: boolean; issuedOrEmailed: number; skippedAlreadyIssued: number; errors: Array<{ enrollmentId: string; error: string }> }> {
+  ): Promise<{
+    ok: boolean
+    issuedOrEmailed: number
+    newlyIssued?: number
+    resent?: number
+    skippedAlreadyIssued: number
+    errors: Array<{ enrollmentId: string; error: string }>
+  }> {
     const { data } = await api.post(`/api/admin/courses/${courseId}/certificates/bulk-email`, { enrollmentIds })
     return data
   },

@@ -871,7 +871,7 @@ def parse_course_certificate_sheet(course_id):
 @admin_bp.route("/courses/<course_id>/certificates/bulk-email", methods=["POST"])
 @jwt_required()
 def bulk_email_certificates_for_course(course_id):
-    """Issue certificate + email for selected enrollments (admin). Skips rows that already have a certificate."""
+    """Issue certificate + email for selected enrollments (admin). Re-sends email for existing certificates (same cert ID)."""
     err = _admin_required()
     if err:
         return err
@@ -896,7 +896,8 @@ def bulk_email_certificates_for_course(course_id):
     users_coll = get_users_collection()
     app_obj = current_app._get_current_object()
     emailed = 0
-    skipped = 0
+    newly_issued = 0
+    resent = 0
     errors: list = []
     for raw_id in ids:
         eid = str(raw_id or "").strip()
@@ -908,9 +909,7 @@ def bulk_email_certificates_for_course(course_id):
             errors.append({"enrollmentId": eid, "error": "not found for this course"})
             continue
         cc = e.get("courseCertificate") or {}
-        if (cc.get("certNo") or "").strip():
-            skipped += 1
-            continue
+        had_cert = bool((cc.get("certNo") or "").strip())
         uid = e.get("userId")
         if not uid or not ObjectId.is_valid(str(uid)):
             errors.append({"enrollmentId": eid, "error": "invalid user on enrollment"})
@@ -932,6 +931,10 @@ def bulk_email_certificates_for_course(course_id):
             )
             if isinstance(result, dict) and result.get("certNo"):
                 emailed += 1
+                if had_cert:
+                    resent += 1
+                else:
+                    newly_issued += 1
             else:
                 errors.append({"enrollmentId": eid, "error": "unexpected issue result"})
         except Exception as ex:
@@ -939,7 +942,9 @@ def bulk_email_certificates_for_course(course_id):
     return jsonify({
         "ok": True,
         "issuedOrEmailed": emailed,
-        "skippedAlreadyIssued": skipped,
+        "newlyIssued": newly_issued,
+        "resent": resent,
+        "skippedAlreadyIssued": 0,
         "errors": errors,
     }), 200
 

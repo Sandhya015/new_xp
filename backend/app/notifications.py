@@ -8,6 +8,8 @@ send in the request thread when `AWS_LAMBDA_FUNCTION_NAME` is set (adds a little
 to `/register` only).
 
 Other emails: still background unless `EMAIL_SEND_SYNC=1` (or use SES/SQS for hard guarantees).
+
+Certificate emails: same as welcome on Lambda — run in the request thread so SMTP/SES completes before the invocation freezes.
 """
 from __future__ import annotations
 
@@ -164,15 +166,26 @@ def schedule_certificate_email(
     course_title: str,
     cert_no: str,
     pdf_bytes: bytes,
+    *,
+    resent: bool = False,
 ) -> None:
     if not email or not pdf_bytes:
         return
 
     def job():
-        ok = send_certificate_email(app.config, student_name, email, course_title, cert_no, pdf_bytes)
+        ok = send_certificate_email(
+            app.config, student_name, email, course_title, cert_no, pdf_bytes, resent=resent
+        )
         if ok:
-            logger.info("Certificate email sent to %s", email)
+            logger.info("Certificate email sent to %s cert=%s", email, cert_no)
         else:
-            logger.warning("Certificate email not sent to %s (SMTP disabled or failed)", email)
+            logger.warning(
+                "Certificate email not sent to %s (SMTP/SES disabled, misconfigured, or send failed — check Lambda logs)",
+                email,
+            )
 
-    _dispatch_email_job(app, job)
+    # On Lambda, daemon threads are frozen when the invocation ends; mail never sends unless we block here.
+    if welcome_email_uses_request_thread():
+        _run_in_app_context(app, job)
+    else:
+        _dispatch_email_job(app, job)
