@@ -124,6 +124,8 @@ def create_app(config_class=None):
     from app.routes.internship import internship_bp
     from app.routes.company import company_bp
     from app.routes.student_routes import student_bp
+    from app.routes.reviews import reviews_bp
+    from app.routes.settings_public import settings_public_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -137,6 +139,8 @@ def create_app(config_class=None):
     app.register_blueprint(internship_bp, url_prefix="/api/internship")
     app.register_blueprint(company_bp, url_prefix="/api/company")
     app.register_blueprint(student_bp, url_prefix="/api")
+    app.register_blueprint(reviews_bp, url_prefix="/api/reviews")
+    app.register_blueprint(settings_public_bp, url_prefix="/api/settings")
 
     @app.route("/")
     def index():

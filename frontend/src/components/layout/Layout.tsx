@@ -28,7 +28,7 @@ export function Layout({ children }: LayoutProps) {
     <div className="min-h-screen flex flex-col overflow-x-hidden">
       <ScrollToTop />
       <Navbar />
-      <main className="flex-1 min-w-0 pt-[4.5rem] sm:pt-[5rem]">{children}</main>
+      <main className="flex-1 min-w-0 pt-14 sm:pt-16">{children}</main>
       <Footer />
     </div>
   )

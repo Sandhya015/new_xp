@@ -223,6 +223,9 @@ def create_enrollment():
     enroll_coll = get_enrollments_collection()
     if enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id)):
         return jsonify({"error": "Already enrolled in this course", "code": "already_enrolled"}), 409
+    cert_profile = data.get("certificateProfile")
+    if cert_profile is not None and not isinstance(cert_profile, dict):
+        cert_profile = None
     doc = {
         "userId": user_id,
         "courseId": course_id,
@@ -230,6 +233,8 @@ def create_enrollment():
         "status": "active",
         "createdAt": datetime.utcnow(),
     }
+    if cert_profile:
+        doc["certificateProfile"] = cert_profile
     result = enroll_coll.insert_one(doc)
     doc["_id"] = result.inserted_id
     schedule_enrollment_email(current_app._get_current_object(), user_id, course_id)

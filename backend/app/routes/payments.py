@@ -13,11 +13,43 @@ from bson.errors import InvalidId
 from flask import Blueprint, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from app.db import get_db, get_orders_collection, get_courses_collection, get_enrollments_collection
+from app.db import (
+    get_app_settings_collection,
+    get_db,
+    get_orders_collection,
+    get_courses_collection,
+    get_enrollments_collection,
+)
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.notifications import schedule_payment_success_email
 
 payments_bp = Blueprint("payments", __name__)
+
+
+def _gst_factor(gst_percent: float) -> float:
+    return 1.0 + max(0.0, float(gst_percent)) / 100.0
+
+
+def _split_gross_inr(gross: float, gst_percent: float) -> tuple:
+    """Given tax-inclusive gross, return (taxable_base, gst_amount, gross)."""
+    g = max(0.0, float(gross))
+    if g <= 0:
+        return 0.0, 0.0, 0.0
+    f = _gst_factor(gst_percent)
+    base = round(g / f, 2)
+    gst_amt = round(g - base, 2)
+    return base, gst_amt, g
+
+
+def _find_coupon(settings_doc: dict, code: str):
+    coupons = settings_doc.get("coupons") if isinstance(settings_doc.get("coupons"), list) else []
+    cu = (code or "").strip().upper()
+    for c in coupons:
+        if not isinstance(c, dict) or not c.get("active", True):
+            continue
+        if str(c.get("code") or "").strip().upper() == cu:
+            return c
+    return None
 
 
 def _razorpay_client():
@@ -90,28 +122,93 @@ def create_order():
     data = request.get_json() or {}
     course_id = (data.get("courseId") or "").strip()
     currency = (data.get("currency") or "INR").strip().upper() or "INR"
+    coupon_code = (data.get("couponCode") or "").strip().upper()
+    include_kit = bool(data.get("includeTrainingKit"))
+    enrollment_snapshot = data.get("enrollmentSnapshot") if isinstance(data.get("enrollmentSnapshot"), dict) else {}
+    billing_snapshot = data.get("billingSnapshot") if isinstance(data.get("billingSnapshot"), dict) else {}
 
     if not course_id or not ObjectId.is_valid(course_id):
         return jsonify({"error": "Valid courseId is required"}), 400
 
     courses_coll = get_courses_collection()
-    course = courses_coll.find_one({"_id": ObjectId(course_id), "active": True})
+    course = courses_coll.find_one({
+        "_id": ObjectId(course_id),
+        "$or": [{"active": True}, {"active": {"$exists": False}}],
+    })
     if not course:
         return jsonify({"error": "Course not found"}), 404
 
     try:
-        price_rupees = float(course.get("price") or 0)
+        course_gross = float(course.get("price") or 0)
     except (TypeError, ValueError):
-        price_rupees = 0.0
+        course_gross = 0.0
 
-    if price_rupees <= 0:
+    if course_gross <= 0:
         return jsonify({
             "error": "This course has no paid amount",
             "detail": "Use free enrollment instead (POST /api/enrollments with courseId).",
             "freeEnrollment": True,
         }), 400
 
-    amount_paise = int(round(price_rupees * 100))
+    settings_coll = get_app_settings_collection()
+    settings_doc = settings_coll.find_one({"_id": "global"}) or {}
+    try:
+        gst_percent = float(settings_doc.get("gstPercent") or 18)
+    except (TypeError, ValueError):
+        gst_percent = 18.0
+    try:
+        kit_price = max(0.0, float(settings_doc.get("trainingKitPriceInr") or 0))
+    except (TypeError, ValueError):
+        kit_price = 0.0
+
+    matched_coupon = None
+    discounted_gross = course_gross
+    if coupon_code:
+        c = _find_coupon(settings_doc, coupon_code)
+        if not c:
+            return jsonify({"error": "Invalid or expired coupon code."}), 400
+        matched_coupon = coupon_code
+        if c.get("percentOff") is not None:
+            try:
+                pct = float(c.get("percentOff"))
+                discounted_gross = course_gross * max(0.0, 1.0 - pct / 100.0)
+            except (TypeError, ValueError):
+                discounted_gross = course_gross
+        elif c.get("rupeesOff") is not None:
+            try:
+                off = float(c.get("rupeesOff"))
+                discounted_gross = max(0.0, course_gross - off)
+            except (TypeError, ValueError):
+                discounted_gross = course_gross
+
+    kit_component = kit_price if include_kit else 0.0
+    total_gross = round(discounted_gross + kit_component, 2)
+
+    base_course, gst_course, _ = _split_gross_inr(course_gross, gst_percent)
+    base_disc, gst_disc, _ = _split_gross_inr(discounted_gross, gst_percent)
+    if kit_component > 0:
+        base_kit, gst_kit, _ = _split_gross_inr(kit_component, gst_percent)
+    else:
+        base_kit, gst_kit = 0.0, 0.0
+
+    pricing = {
+        "courseListGross": round(course_gross, 2),
+        "courseBaseInr": base_course,
+        "courseGstInr": gst_course,
+        "couponCode": matched_coupon or "",
+        "afterCouponGross": round(discounted_gross, 2),
+        "afterCouponBaseInr": base_disc,
+        "afterCouponGstInr": gst_disc,
+        "trainingKitGross": round(kit_component, 2),
+        "trainingKitBaseInr": base_kit,
+        "trainingKitGstInr": gst_kit,
+        "totalGrossInr": total_gross,
+        "totalBaseInr": round(base_disc + base_kit, 2),
+        "totalGstInr": round(gst_disc + gst_kit, 2),
+        "gstPercent": gst_percent,
+    }
+
+    amount_paise = int(round(total_gross * 100))
     if amount_paise < 100:
         return jsonify({"error": "Amount too small for Razorpay (minimum ₹1)"}), 400
 
@@ -138,7 +235,7 @@ def create_order():
     doc = {
         "userId": user_id,
         "courseId": course_id,
-        "amount": price_rupees,
+        "amount": total_gross,
         "amountPaise": amount_paise,
         "currency": currency,
         "orderId": razorpay_order_id,
@@ -146,6 +243,10 @@ def create_order():
         "status": "created",
         "method": "razorpay",
         "createdAt": datetime.utcnow(),
+        "pricing": pricing,
+        "enrollmentSnapshot": enrollment_snapshot,
+        "billingSnapshot": billing_snapshot,
+        "includeTrainingKit": include_kit,
     }
     result = coll.insert_one(doc)
 
@@ -157,6 +258,7 @@ def create_order():
         "amount": amount_paise,
         "currency": currency,
         "courseTitle": course.get("title", ""),
+        "pricing": pricing,
     }), 201
 
 
@@ -219,12 +321,16 @@ def verify():
     if course_id and ObjectId.is_valid(str(course_id)):
         enroll = get_enrollments_collection()
         if not enroll.find_one(user_course_enrollment_filter(user_id, str(course_id))):
+            snap = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
+            bill = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
             enroll.insert_one({
                 "userId": user_id,
                 "courseId": str(course_id),
                 "orderId": str(order["_id"]),
                 "status": "active",
                 "createdAt": datetime.utcnow(),
+                "certificateProfile": snap,
+                "billingAddress": bill,
             })
             enrollment_created = True
 

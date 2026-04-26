@@ -1,124 +1,76 @@
 import { useState, useMemo, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
-import {
-  Search,
-  Filter,
-  ChevronDown,
-  Clock,
-  Monitor,
-  Building2,
-  Laptop,
-  Code2,
-  Cpu,
-  Brain,
-  Megaphone,
-  Smartphone,
-  BarChart3,
-  X,
-  ArrowRight,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { UNIVERSITIES_LIST } from '@/constants/universities'
+import { Search, Filter, Clock, Monitor, Building2, Laptop, X } from 'lucide-react'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
-
-const BRANCHES = [
-  'Computer Science',
-  'IT',
-  'Electrical',
-  'Electronics',
-  'Mechanical',
-  'Civil',
-  'BA / BSc / BCom',
-  'BBA / BCA',
-] as const
-
-const UNIVERSITIES_FILTER = [
-  'BEU',
-  'SBTE',
-  'JUT',
-  'AKTU',
-  'Patna University',
-  'Magadh University',
-  'Others',
-] as const
-
-type Category = 'all' | 'technical' | 'non-technical'
-type Mode = 'Online' | 'Offline' | 'Hybrid'
-
-const DURATION_WEEKS = [2, 4, 6, 8, 12, 24] as const
-const DURATION_HOURS = [60, 80, 100, 120] as const
-const MODES: Mode[] = ['Online', 'Offline', 'Hybrid']
-
-const INITIAL_ENROLL_FORM = {
-  fullName: '',
-  email: '',
-  mobile: '',
-  university: '',
-  branch: '',
-  semester: '1st',
-  address: '',
-}
+import { absoluteApiUrl } from '@/config/api'
+import { splitInrTaxInclusive, formatInr } from '@/utils/gstPricing'
+import { ShareCourseMenu } from '@/components/training/ShareCourseMenu'
+import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
+import {
+  catalogCourseMatchesFilters,
+  CATALOG_FILTER_ALL as ALL,
+  type CatalogCategoryFilter,
+  type CatalogModeFilter,
+} from '@/components/training/trainingCatalogFilters'
+import { TrainingFiltersControls } from '@/components/training/TrainingFiltersControls'
 
 interface Course {
   id: string
   title: string
   description: string
-  category: 'technical' | 'non-technical'
+  category: 'technical' | 'non-technical' | 'other'
   duration: string
-  mode: Mode
+  mode: string
   universities: string
-  /** Program tag from API (used for search). */
   tag: string
   price: number
-  tagColor: string
-  iconBg: string
-  Icon: LucideIcon
+  originalPrice: number
+  featuredImageUrl: string
+  trainingTags: string[]
+  courses: string[]
+  streams: string[]
+  subjects: string[]
 }
 
-const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
-function courseFromApi(
-  c: {
-    id: string
-    title: string
-    description: string
-    shortDescription?: string
-    category: string
-    duration: string
-    mode: string
-    universities: string
-    tag?: string
-    price: number
-  },
-  i: number,
-): Course {
-  const isTech = (c.category || 'technical') === 'technical'
-  const mode: Mode = ['Online', 'Offline', 'Hybrid'].includes(c.mode) ? c.mode as Mode : 'Online'
-  const blurb = courseListingBlurb(c.shortDescription, c.description)
+function courseFromApi(c: Record<string, unknown>): Course {
+  const catRaw = String(c.category || 'technical').toLowerCase()
+  const category: Course['category'] =
+    catRaw === 'non-technical' ? 'non-technical' : catRaw === 'other' ? 'other' : 'technical'
+  const mode = String(c.mode || 'Online')
+  const tags = Array.isArray(c.trainingTags) ? (c.trainingTags as string[]) : []
+  const courses = Array.isArray(c.courses) ? (c.courses as string[]) : []
+  const streams = Array.isArray(c.streams) ? (c.streams as string[]) : []
+  const subjects = Array.isArray(c.subjects) ? (c.subjects as string[]) : []
   return {
-    id: c.id,
-    title: c.title,
-    description: blurb,
-    category: isTech ? 'technical' : 'non-technical',
-    duration: c.duration,
+    id: String(c.id || ''),
+    title: String(c.title || ''),
+    description: courseListingBlurb(String(c.shortDescription || ''), String(c.description || '')),
+    category,
+    duration: String(c.duration || ''),
     mode,
-    universities: c.universities,
-    tag: (c.tag || '').trim(),
-    price: c.price,
-    tagColor: isTech ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800',
-    iconBg: isTech ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600',
-    Icon: ICON_MAP[i % ICON_MAP.length],
+    universities: String(c.universities || ''),
+    tag: String(c.tag || '').trim(),
+    price: Number(c.price) || 0,
+    originalPrice: Number(c.originalPrice) || 0,
+    featuredImageUrl: String(c.featuredImageUrl || ''),
+    trainingTags: tags,
+    courses,
+    streams,
+    subjects,
   }
 }
 
-function ModeIcon({ mode }: { mode: Mode }) {
-  if (mode === 'Online') return <Laptop className="h-4 w-4 shrink-0 text-slate-500" />
-  if (mode === 'Offline') return <Building2 className="h-4 w-4 shrink-0 text-slate-500" />
-  return <Monitor className="h-4 w-4 shrink-0 text-slate-500" />
+function ModeIcon({ mode }: { mode: string }) {
+  const m = mode.toLowerCase()
+  if (m.includes('online')) return <Laptop className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+  if (m.includes('offline')) return <Building2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+  return <Monitor className="h-3.5 w-3.5 shrink-0 text-slate-500" />
 }
 
 export function Training() {
@@ -126,20 +78,22 @@ export function Training() {
   const [courses, setCourses] = useState<Course[]>([])
   const [coursesLoading, setCoursesLoading] = useState(true)
   const [coursesLoadError, setCoursesLoadError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [category, setCategory] = useState<Category>('all')
-  const [branches, setBranches] = useState<Set<string>>(new Set())
-  const [universities, setUniversities] = useState<Set<string>>(new Set())
-  const [durationWeeks, setDurationWeeks] = useState<Set<number>>(new Set())
-  const [durationHours, setDurationHours] = useState<Set<number>>(new Set())
-  const [modes, setModes] = useState<Set<Mode>>(new Set())
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [category, setCategory] = useState<CatalogCategoryFilter>(ALL)
+  const [university, setUniversity] = useState(ALL)
+  const [courseLevel, setCourseLevel] = useState(ALL)
+  const [branchVal, setBranchVal] = useState(ALL)
+  const [branchOther, setBranchOther] = useState('')
+  const [durType, setDurType] = useState<'' | 'hours' | 'weeks'>('')
+  const [durVal, setDurVal] = useState(ALL)
+  const [mode, setMode] = useState<CatalogModeFilter>(ALL)
+  const [filtersSheetOpen, setFiltersSheetOpen] = useState(false)
   const [enrollCourse, setEnrollCourse] = useState<Course | null>(null)
-  const [enrollForm, setEnrollForm] = useState(INITIAL_ENROLL_FORM)
-  const { user, token } = useAuth()
+  const { token } = useAuth()
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
   const [completedCourseIds, setCompletedCourseIds] = useState<Set<string>>(new Set())
+
+  const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
 
   useEffect(() => {
     if (!token) {
@@ -148,9 +102,7 @@ export function Training() {
       return
     }
     const path = location.pathname.replace(/\/$/, '')
-    if (path !== '/training') {
-      return
-    }
+    if (path !== '/training') return
     let cancelled = false
     enrollmentService
       .list()
@@ -175,65 +127,6 @@ export function Training() {
       cancelled = true
     }
   }, [token, location.pathname, location.key])
-  const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
-
-  /** Fresh form each time the modal opens; clear when it closes (avoids stale admin / previous user data). */
-  useEffect(() => {
-    if (!enrollCourse) {
-      setEnrollForm(INITIAL_ENROLL_FORM)
-      return
-    }
-    setEnrollForm({
-      ...INITIAL_ENROLL_FORM,
-      fullName: user?.name || '',
-      email: user?.email || '',
-    })
-  }, [enrollCourse, user])
-
-  const toggleBranch = (b: string) => {
-    setBranches((prev) => {
-      const next = new Set(prev)
-      if (next.has(b)) next.delete(b)
-      else next.add(b)
-      return next
-    })
-  }
-
-  const toggleUniversity = (u: string) => {
-    setUniversities((prev) => {
-      const next = new Set(prev)
-      if (next.has(u)) next.delete(u)
-      else next.add(u)
-      return next
-    })
-  }
-
-  const toggleDurationWeeks = (w: number) => {
-    setDurationWeeks((prev) => {
-      const next = new Set(prev)
-      if (next.has(w)) next.delete(w)
-      else next.add(w)
-      return next
-    })
-  }
-
-  const toggleDurationHours = (h: number) => {
-    setDurationHours((prev) => {
-      const next = new Set(prev)
-      if (next.has(h)) next.delete(h)
-      else next.add(h)
-      return next
-    })
-  }
-
-  const toggleMode = (m: Mode) => {
-    setModes((prev) => {
-      const next = new Set(prev)
-      if (next.has(m)) next.delete(m)
-      else next.add(m)
-      return next
-    })
-  }
 
   useEffect(() => {
     let cancelled = false
@@ -243,20 +136,7 @@ export function Training() {
       .then((res) => {
         if (cancelled) return
         const items = Array.isArray(res.items) ? res.items : []
-        setCourses(
-          (items as Array<{
-            id: string
-            title: string
-            description: string
-            shortDescription?: string
-            category: string
-            duration: string
-            mode: string
-            universities: string
-            tag?: string
-            price: number
-          }>).map((c, i) => courseFromApi(c, i)),
-        )
+        setCourses(items.map((c) => courseFromApi(c as Record<string, unknown>)))
       })
       .catch(() => {
         if (!cancelled) {
@@ -272,314 +152,286 @@ export function Training() {
     }
   }, [])
 
-  const filteredCourses = useMemo(() => {
-    return courses.filter((c) => {
-      const q = search.trim().toLowerCase()
-      const haystack = `${c.title} ${c.description} ${c.tag} ${c.universities}`.toLowerCase()
-      const matchSearch = !q || haystack.includes(q)
-      const matchCategory =
-        category === 'all' ||
-        (category === 'technical' && c.category === 'technical') ||
-        (category === 'non-technical' && c.category === 'non-technical')
-      const weeksMatch = c.duration.match(/^(\d+)\s*Weeks?$/i)
-      const hoursMatch = c.duration.match(/^(\d+)\s*Hours?$/i)
-      const courseWeeks = weeksMatch ? parseInt(weeksMatch[1], 10) : null
-      const courseHours = hoursMatch ? parseInt(hoursMatch[1], 10) : null
-      const durationFiltersActive = durationWeeks.size > 0 || durationHours.size > 0
-      const unparsedDuration = courseWeeks === null && courseHours === null
-      const matchDuration =
-        !durationFiltersActive ||
-        (courseWeeks !== null && durationWeeks.has(courseWeeks)) ||
-        (courseHours !== null && durationHours.has(courseHours)) ||
-        (durationFiltersActive && unparsedDuration)
-      const matchMode =
-        modes.size === 0 || modes.has(c.mode)
-      return matchSearch && matchCategory && matchDuration && matchMode
-    })
-  }, [courses, search, category, durationWeeks, durationHours, modes])
+  const catalogFilters = useMemo(
+    () => ({
+      search: searchQuery,
+      category,
+      university,
+      courseLevel,
+      branchVal,
+      branchOther,
+      durType,
+      durVal,
+      mode,
+    }),
+    [searchQuery, category, university, courseLevel, branchVal, branchOther, durType, durVal, mode],
+  )
+
+  const filteredCourses = useMemo(
+    () => courses.filter((c) => catalogCourseMatchesFilters(c, catalogFilters)),
+    [courses, catalogFilters],
+  )
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setCategory(ALL)
+    setUniversity(ALL)
+    setCourseLevel(ALL)
+    setBranchVal(ALL)
+    setBranchOther('')
+    setDurType('')
+    setDurVal(ALL)
+    setMode(ALL)
+  }
+
+  const filterControls = (
+    <TrainingFiltersControls
+      category={category}
+      setCategory={setCategory}
+      university={university}
+      setUniversity={setUniversity}
+      courseLevel={courseLevel}
+      setCourseLevel={setCourseLevel}
+      branchVal={branchVal}
+      setBranchVal={setBranchVal}
+      branchOther={branchOther}
+      setBranchOther={setBranchOther}
+      durType={durType}
+      setDurType={setDurType}
+      durVal={durVal}
+      setDurVal={setDurVal}
+      mode={mode}
+      setMode={setMode}
+    />
+  )
+
+  const enrollLite = (c: Course | null): EnrollCourseLite | null =>
+    c
+      ? {
+          id: c.id,
+          title: c.title,
+          price: c.price,
+          universities: c.universities,
+          mode: c.mode,
+          duration: c.duration,
+          featuredImageUrl: c.featuredImageUrl,
+          shortDescription: c.description,
+        }
+      : null
 
   return (
     <div className="min-h-screen bg-gray-50/50 min-w-0">
-      {/* Blue hero section */}
       <section className="bg-gradient-to-br from-brand-navy via-primary-800 to-primary-900 text-white">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14 sm:px-6 lg:px-8 lg:py-16">
           <nav className="text-sm text-primary-200" aria-label="Breadcrumb">
-            <Link to="/" className="hover:text-white transition">Home</Link>
+            <Link to="/" className="hover:text-white transition">
+              Home
+            </Link>
             <span className="mx-2">/</span>
             <span className="text-white font-medium">Trainings</span>
           </nav>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-            Explore Training Programs
-          </h1>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">Explore Training Programs</h1>
           <p className="mt-3 max-w-2xl text-base text-primary-200 sm:text-lg">
             Find the perfect training aligned with your university, branch and career goals.
           </p>
         </div>
       </section>
 
-      {/* Search + Filter bar */}
-      <div className="border-b border-gray-200 bg-white">
+      <div className="sticky top-14 z-30 border-b border-gray-200 bg-white shadow-sm sm:top-16">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-2xl">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search trainings (e.g. Web Development, Python)..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-3 text-sm placeholder-gray-500 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-              />
+          <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+            <div className="flex w-full flex-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="flex flex-1 items-center gap-2 pl-3 pr-1 min-w-0">
+                <Search className="h-5 w-5 shrink-0 text-gray-400" aria-hidden />
+                <input
+                  type="search"
+                  placeholder="Search as you type — course, skill, or university…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  autoComplete="off"
+                  className="min-w-0 flex-1 border-0 bg-transparent py-3 pr-1 text-sm placeholder:text-gray-500 outline-none focus:outline-none focus:ring-0"
+                />
+                {searchQuery.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                    aria-label="Clear search"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
             </div>
             <button
               type="button"
-              onClick={() => setFiltersOpen(!filtersOpen)}
-              className="flex items-center justify-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition shrink-0 lg:hidden"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setFiltersSheetOpen(true)
+              }}
+              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-brand-navy lg:hidden"
             >
-              <Filter className="h-4 w-4" /> Filter
+              <Filter className="h-4 w-4 shrink-0" aria-hidden /> Filters
             </button>
           </div>
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex gap-6 lg:gap-8">
-        {/* Left sidebar - Filters */}
-        <aside
-          className={`${
-            filtersOpen ? 'fixed inset-0 z-40 lg:relative lg:inset-auto' : 'hidden lg:block'
-          } lg:w-64 xl:w-72 shrink-0`}
-        >
-          {filtersOpen && (
-            <div
-              className="fixed inset-0 bg-black/30 z-30 lg:hidden"
-              onClick={() => setFiltersOpen(false)}
-              aria-hidden
-            />
-          )}
-          <div className="relative w-full rounded-xl border border-gray-200 bg-white p-4 shadow-sm lg:sticky lg:top-24 max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between lg:justify-start">
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="flex items-center gap-2 text-sm font-semibold text-brand-navy"
-              >
-                Filters
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${sidebarOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => setFiltersOpen(false)}
-                className="lg:hidden p-1 rounded hover:bg-gray-100"
-                aria-label="Close filters"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {sidebarOpen && (
-              <div className="mt-4 space-y-6">
-                {/* Category */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    Category
-                  </p>
-                  <div className="space-y-2">
-                    {(['all', 'technical', 'non-technical'] as const).map((c) => (
-                      <label key={c} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="category"
-                          checked={category === c}
-                          onChange={() => setCategory(c)}
-                          className="h-4 w-4 border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm font-medium text-gray-700 capitalize">
-                          {c === 'all' ? 'All' : c.replace('-', ' ')}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Branch / Stream */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    Branch / Stream
-                  </p>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {BRANCHES.map((b) => (
-                      <label key={b} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={branches.has(b)}
-                          onChange={() => toggleBranch(b)}
-                          className="h-4 w-4 rounded border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm text-gray-700">{b}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Duration (Weeks) */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    Duration (Weeks)
-                  </p>
-                  <div className="space-y-2">
-                    {DURATION_WEEKS.map((w) => (
-                      <label key={w} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={durationWeeks.has(w)}
-                          onChange={() => toggleDurationWeeks(w)}
-                          className="h-4 w-4 rounded border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm text-gray-700">{w} Weeks</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Duration (Hours) */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    Duration (Hours)
-                  </p>
-                  <div className="space-y-2">
-                    {DURATION_HOURS.map((h) => (
-                      <label key={h} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={durationHours.has(h)}
-                          onChange={() => toggleDurationHours(h)}
-                          className="h-4 w-4 rounded border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm text-gray-700">{h} Hours</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Mode */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    Mode
-                  </p>
-                  <div className="space-y-2">
-                    {MODES.map((m) => (
-                      <label key={m} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={modes.has(m)}
-                          onChange={() => toggleMode(m)}
-                          className="h-4 w-4 rounded border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm text-gray-700">{m}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* University */}
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
-                    University
-                  </p>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {UNIVERSITIES_FILTER.map((u) => (
-                      <label key={u} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={universities.has(u)}
-                          onChange={() => toggleUniversity(u)}
-                          className="h-4 w-4 rounded border-gray-300 text-brand-accent focus:ring-brand-accent"
-                        />
-                        <span className="text-sm text-gray-700">{u}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="hidden lg:block rounded-xl border border-gray-200 bg-white p-4 shadow-sm mb-6">
+          {filterControls}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
+            <p className="text-sm text-gray-600">
+              <span className="font-semibold text-brand-navy">{filteredCourses.length}</span> program
+              {filteredCourses.length === 1 ? '' : 's'}
+            </p>
+            <button type="button" onClick={clearFilters} className="text-sm font-semibold text-brand-accent hover:underline">
+              Clear all filters
+            </button>
           </div>
-        </aside>
+        </div>
 
-        {/* Course grid */}
-        <div className="flex-1 min-w-0">
-          {coursesLoading && <p className="text-sm text-slate-gray py-4">Loading courses...</p>}
-          {!coursesLoading && coursesLoadError && (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{coursesLoadError}</p>
-          )}
-          <div className="grid gap-4 sm:gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredCourses.map((course) => {
-              const CourseIcon = course.Icon
-              const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
-              const isCompleted = Boolean(token && completedCourseIds.has(course.id))
-              const detailTo = isEnrolled ? courseContentPath(course.id) : courseMarketingPath(course.id)
-              return (
-                <article
-                  key={course.id}
-                  className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition min-w-0"
-                >
-                  {/* Cover image only on course detail (/training/:id), not in list cards */}
-                  <div className="p-4 sm:p-5 flex flex-col flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${course.iconBg}`}
-                      >
-                        <CourseIcon className="h-6 w-6" />
-                      </div>
-                      <span
-                        className={`rounded-lg px-2 py-0.5 text-xs font-medium ${course.tagColor}`}
-                      >
-                        {course.category === 'technical' ? 'Technical' : 'Non-Technical'}
-                      </span>
-                    </div>
-                    <h2 className="mt-3 text-base font-bold text-brand-navy sm:text-lg line-clamp-2">
-                      <Link to={detailTo} className="hover:text-brand-accent transition">
-                        {course.title}
-                      </Link>
-                    </h2>
-                    <p className="mt-1.5 text-sm text-slate-gray line-clamp-2">{course.description}</p>
-                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5 shrink-0" /> {course.duration}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <ModeIcon mode={course.mode} /> {course.mode}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Building2 className="h-3.5 w-3.5 shrink-0" /> {course.universities}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm font-semibold text-brand-navy">
-                      {course.price > 0 ? `₹${course.price.toLocaleString('en-IN')} / course` : 'Free'}
+        {filtersSheetOpen && typeof document !== 'undefined'
+          ? createPortal(
+              <div
+                className="fixed inset-0 z-[200] flex flex-col justify-end bg-black/40 sm:justify-center sm:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="training-filters-title"
+              >
+                <button
+                  type="button"
+                  className="absolute inset-0 cursor-default border-0 bg-transparent"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersSheetOpen(false)}
+                />
+                <div className="relative z-10 max-h-[85vh] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-6 shadow-xl sm:mx-auto sm:max-h-[90vh] sm:max-w-lg sm:rounded-2xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <p id="training-filters-title" className="font-bold text-brand-navy">
+                      Filters
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => setFiltersSheetOpen(false)}
+                      className="rounded-lg p-2 hover:bg-gray-100"
+                      aria-label="Close"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
                   </div>
-                  <div className="border-t border-gray-100 p-4 sm:p-5 pt-0 flex flex-col gap-2">
+                  {filterControls}
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="flex-1 rounded-lg border border-gray-300 py-2.5 text-sm font-semibold"
+                    >
+                      Clear all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFiltersSheetOpen(false)}
+                      className="flex-1 rounded-lg bg-brand-accent py-2.5 text-sm font-semibold text-white"
+                    >
+                      Show {filteredCourses.length} results
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+
+        {coursesLoading && <p className="text-sm text-slate-gray py-4">Loading courses...</p>}
+        {!coursesLoading && coursesLoadError && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{coursesLoadError}</p>
+        )}
+
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+          {filteredCourses.map((course) => {
+            const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
+            const isCompleted = Boolean(token && completedCourseIds.has(course.id))
+            const detailTo = isEnrolled ? courseContentPath(course.id) : courseMarketingPath(course.id)
+            const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}${courseMarketingPath(course.id)}` : ''
+            const thumb = course.featuredImageUrl ? absoluteApiUrl(course.featuredImageUrl) : ''
+            const catLabel = course.category === 'technical' ? 'Technical' : course.category === 'non-technical' ? 'Non-Technical' : 'Other'
+            const catClass =
+              course.category === 'technical'
+                ? 'bg-emerald-500/95 text-white'
+                : course.category === 'non-technical'
+                  ? 'bg-orange-500/95 text-white'
+                  : 'bg-slate-600/95 text-white'
+            const listPrice = course.originalPrice > course.price ? course.originalPrice : null
+            const gstLine = course.price > 0 ? splitInrTaxInclusive(course.price, 0.18) : null
+            return (
+              <article
+                key={course.id}
+                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg min-w-0"
+              >
+                <div className="relative aspect-video w-full overflow-hidden bg-gray-100">
+                  {thumb ? (
+                    <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No thumbnail</div>
+                  )}
+                  <span className={`absolute right-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-semibold shadow ${catClass}`}>{catLabel}</span>
+                  <div className="absolute left-2 top-2">
+                    <ShareCourseMenu
+                      iconOnly
+                      url={shareUrl}
+                      title={course.title}
+                      description={course.description}
+                      university={course.universities}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-1 flex-col p-4 sm:p-5">
+                  <h2 className="text-base font-bold text-brand-navy line-clamp-2 leading-snug">
+                    <Link to={detailTo} className="hover:text-brand-accent transition">
+                      {course.title}
+                    </Link>
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-gray line-clamp-2">{course.description}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+                    <span className="flex items-center gap-1">
+                      <Building2 className="h-3.5 w-3.5 shrink-0" /> {course.universities}
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5 shrink-0" /> {course.duration}
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span className="flex items-center gap-1">
+                      <ModeIcon mode={course.mode} /> {course.mode}
+                    </span>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-baseline gap-2">
+                    {course.price > 0 ? (
+                      <>
+                        <span className="text-lg font-bold text-brand-navy">{formatInr(course.price)}</span>
+                        {listPrice ? <span className="text-sm text-gray-400 line-through">{formatInr(listPrice)}</span> : null}
+                        {gstLine ? (
+                          <span className="w-full text-xs text-gray-500">
+                            Incl. GST (taxable {formatInr(gstLine.base)} + GST {formatInr(gstLine.gst)})
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-sm font-bold text-emerald-800">Free</span>
+                    )}
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Link
                       to={detailTo}
-                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-gray-50 transition"
+                      className="flex w-full items-center justify-center rounded-lg border-2 border-brand-accent px-4 py-2.5 text-sm font-semibold text-brand-accent hover:bg-brand-light-bg transition min-h-[44px]"
                     >
-                      {isEnrolled ? (
-                        <>
-                          View course <ArrowRight className="h-4 w-4" />
-                        </>
-                      ) : (
-                        <>
-                          View details <ArrowRight className="h-4 w-4" />
-                        </>
-                      )}
+                      View Details
                     </Link>
                     {isEnrolled ? (
                       <span
-                        className={`flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-semibold ${
-                          isCompleted
-                            ? 'border-violet-200 bg-violet-50 text-violet-900'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        className={`flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-semibold min-h-[44px] ${
+                          isCompleted ? 'border-violet-200 bg-violet-50 text-violet-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
                         }`}
                       >
                         {isCompleted ? 'Completed' : 'Enrolled'}
@@ -588,210 +440,45 @@ export function Training() {
                       <button
                         type="button"
                         onClick={() => setEnrollCourse(course)}
-                        className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
+                        className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 min-h-[44px]"
                       >
                         Enroll Now
                       </button>
                     )}
                   </div>
-                </article>
-              )
-            })}
-          </div>
-          {!coursesLoading && !coursesLoadError && courses.length === 0 && (
-            <p className="text-center py-12 text-slate-gray">
-              No trainings are listed yet. If you just added courses in the database, confirm this site uses the same API
-              environment and try a hard refresh.
-            </p>
-          )}
-          {!coursesLoading && !coursesLoadError && courses.length > 0 && filteredCourses.length === 0 && (
-            <div className="py-12 text-center space-y-3">
-              <p className="text-slate-gray">No courses match your current search or filters.</p>
-              {(search.trim() ||
-                category !== 'all' ||
-                durationWeeks.size > 0 ||
-                durationHours.size > 0 ||
-                modes.size > 0) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch('')
-                    setCategory('all')
-                    setDurationWeeks(new Set())
-                    setDurationHours(new Set())
-                    setModes(new Set())
-                  }}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
-                >
-                  Clear search and filters
-                </button>
-              )}
-            </div>
-          )}
+                </div>
+              </article>
+            )
+          })}
         </div>
+
+        {!coursesLoading && !coursesLoadError && courses.length === 0 && (
+          <p className="text-center py-12 text-slate-gray">
+            No trainings are listed yet. If you just added courses in the database, confirm this site uses the same API environment and try a hard refresh.
+          </p>
+        )}
+        {!coursesLoading && !coursesLoadError && courses.length > 0 && filteredCourses.length === 0 && (
+          <div className="py-12 text-center space-y-3">
+            <p className="text-slate-gray">No courses match your current search or filters.</p>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Enroll modal */}
-      {enrollCourse && (
-        <>
-          <div
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
-            onClick={() => setEnrollCourse(null)}
-            aria-hidden
-          />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div
-              className="relative w-full max-w-lg rounded-xl border border-gray-200 bg-white shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
-                <h2 className="text-lg font-bold text-brand-navy">Enroll: {enrollCourse.title}</h2>
-                <button
-                  type="button"
-                  onClick={() => setEnrollCourse(null)}
-                  className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <form
-                className="p-5 space-y-4"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  if (!enrollCourse) return
-                  clearPayError()
-                  void startCheckout({
-                    courseId: enrollCourse.id,
-                    courseTitle: enrollCourse.title,
-                    price: enrollCourse.price,
-                    prefill: {
-                      name: enrollForm.fullName,
-                      email: enrollForm.email,
-                      contact: enrollForm.mobile.replace(/\D/g, '').slice(-10),
-                    },
-                    onSuccess: () => setEnrollCourse(null),
-                  })
-                }}
-              >
-                {/* Two-column row: Full Name, Email */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="enroll-name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                    <input
-                      id="enroll-name"
-                      type="text"
-                      placeholder="Full name"
-                      value={enrollForm.fullName}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, fullName: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="enroll-email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <input
-                      id="enroll-email"
-                      type="email"
-                      placeholder="Email"
-                      value={enrollForm.email}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, email: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    />
-                  </div>
-                </div>
-                {/* Two-column row: Mobile, University */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="enroll-mobile" className="block text-sm font-medium text-gray-700 mb-1">Mobile</label>
-                    <input
-                      id="enroll-mobile"
-                      type="tel"
-                      placeholder="+91"
-                      value={enrollForm.mobile}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, mobile: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="enroll-university" className="block text-sm font-medium text-gray-700 mb-1">University</label>
-                    <select
-                      id="enroll-university"
-                      value={enrollForm.university}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, university: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    >
-                      <option value="">Select</option>
-                      {UNIVERSITIES_LIST.map((u) => (
-                        <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {/* Two-column row: Branch / Stream, Semester */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="enroll-branch" className="block text-sm font-medium text-gray-700 mb-1">Branch / Stream</label>
-                    <input
-                      id="enroll-branch"
-                      type="text"
-                      placeholder="Branch"
-                      value={enrollForm.branch}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, branch: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="enroll-semester" className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
-                    <select
-                      id="enroll-semester"
-                      value={enrollForm.semester}
-                      onChange={(e) => setEnrollForm((f) => ({ ...f, semester: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                    >
-                      {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {/* Full width: Address */}
-                <div>
-                  <label htmlFor="enroll-address" className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                  <textarea
-                    id="enroll-address"
-                    rows={3}
-                    placeholder="Address"
-                    value={enrollForm.address}
-                    onChange={(e) => setEnrollForm((f) => ({ ...f, address: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent resize-none"
-                  />
-                </div>
-                <p className="rounded-lg bg-primary-50 px-3 py-2 text-xs text-brand-navy">
-                  {enrollCourse.price > 0
-                    ? 'You will pay securely via Razorpay (UPI, card, netbanking). Price is taken from the course — not editable here.'
-                    : 'This course is free — we will enroll you without payment.'}
-                </p>
-                {payError && (
-                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
-                    {payError}
-                  </p>
-                )}
-                <button
-                  type="submit"
-                  disabled={payBusy}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition disabled:opacity-60"
-                >
-                  {payBusy ? 'Please wait…' : enrollCourse.price > 0 ? (
-                    <>Proceed to payment <ArrowRight className="h-4 w-4" /></>
-                  ) : (
-                    <>Enroll free <ArrowRight className="h-4 w-4" /></>
-                  )}
-                </button>
-              </form>
-            </div>
-          </div>
-        </>
-      )}
+      <TrainingEnrollmentModal
+        course={enrollLite(enrollCourse)}
+        onClose={() => setEnrollCourse(null)}
+        startCheckout={startCheckout}
+        payBusy={payBusy}
+        payError={payError}
+        clearPayError={clearPayError}
+      />
     </div>
   )
 }

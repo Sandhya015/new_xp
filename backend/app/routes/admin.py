@@ -40,6 +40,7 @@ from app.db import (
     get_orders_collection,
     get_courses_collection,
     get_enrollments_collection,
+    get_course_reviews_collection,
     get_applications_collection,
     get_internships_collection,
     get_certificates_collection,
@@ -727,6 +728,69 @@ def course_enrollments(course_id):
             "assignmentSubmissions": [_serialize_submission(x) for x in subs if isinstance(x, dict)],
         })
     return jsonify({"items": items})
+
+
+@admin_bp.route("/courses/<course_id>/reviews", methods=["GET"])
+@jwt_required()
+def admin_course_reviews(course_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"items": []}), 503
+    coll = get_course_reviews_collection()
+    rows = list(coll.find({"courseId": course_id}).sort("createdAt", -1).limit(500))
+    items = []
+    for r in rows:
+        items.append({
+            "id": str(r["_id"]),
+            "studentName": r.get("studentName") or "",
+            "userId": str(r.get("userId") or ""),
+            "rating": int(r.get("rating") or 0),
+            "title": r.get("title") or "",
+            "body": r.get("body") or "",
+            "flagged": bool(r.get("flagged")),
+            "deleted": bool(r.get("deleted")),
+            "createdAt": r.get("createdAt").strftime("%Y-%m-%dT%H:%M:%SZ") if r.get("createdAt") else "",
+        })
+    return jsonify({"items": items})
+
+
+@admin_bp.route("/courses/<course_id>/reviews/<review_id>", methods=["DELETE"])
+@jwt_required()
+def admin_delete_course_review(course_id, review_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id) or not ObjectId.is_valid(review_id):
+        return jsonify({"error": "Invalid id"}), 400
+    coll = get_course_reviews_collection()
+    coll.update_one(
+        {"_id": ObjectId(review_id), "courseId": course_id},
+        {"$set": {"deleted": True, "updatedAt": datetime.utcnow()}},
+    )
+    return jsonify({"ok": True})
+
+
+@admin_bp.route("/courses/<course_id>/reviews/<review_id>/flag", methods=["PATCH"])
+@jwt_required()
+def admin_flag_course_review(course_id, review_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id) or not ObjectId.is_valid(review_id):
+        return jsonify({"error": "Invalid id"}), 400
+    data = request.get_json() or {}
+    flagged = bool(data.get("flagged", True))
+    coll = get_course_reviews_collection()
+    coll.update_one(
+        {"_id": ObjectId(review_id), "courseId": course_id},
+        {"$set": {"flagged": flagged, "updatedAt": datetime.utcnow()}},
+    )
+    return jsonify({"ok": True})
 
 
 @admin_bp.route("/courses/<course_id>/enrollments/export.xlsx", methods=["GET"])

@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { paymentService } from '@/services/paymentService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { loadRazorpayScript } from '@/utils/loadRazorpay'
+import { courseContentPath } from '@/utils/courseStudyLink'
 
 type RazorpaySuccessResponse = {
   razorpay_payment_id: string
@@ -26,8 +27,22 @@ export function useRazorpayCheckout() {
       price: number
       prefill?: { name?: string; email?: string; contact?: string }
       onSuccess?: () => void
+      couponCode?: string
+      includeTrainingKit?: boolean
+      enrollmentSnapshot?: Record<string, string | undefined>
+      billingSnapshot?: Record<string, string | undefined>
     }) => {
-      const { courseId, courseTitle, price, prefill, onSuccess } = opts
+      const {
+        courseId,
+        courseTitle,
+        price,
+        prefill,
+        onSuccess,
+        couponCode,
+        includeTrainingKit,
+        enrollmentSnapshot,
+        billingSnapshot,
+      } = opts
       setError(null)
 
       if (!token) {
@@ -43,10 +58,13 @@ export function useRazorpayCheckout() {
           } catch {
             /* modal callbacks must not block navigation */
           }
-          navigate(`/dashboard/my-courses/${encodeURIComponent(courseId)}`)
+          navigate(courseContentPath(courseId))
         }
         try {
-          await enrollmentService.create({ courseId })
+          await enrollmentService.create({
+            courseId,
+            certificateProfile: enrollmentSnapshot,
+          })
           setError(null)
           goToCourse()
         } catch (e: unknown) {
@@ -71,7 +89,12 @@ export function useRazorpayCheckout() {
           return
         }
 
-        const order = await paymentService.createOrder(courseId)
+        const order = await paymentService.createOrder(courseId, {
+          couponCode,
+          includeTrainingKit,
+          enrollmentSnapshot,
+          billingSnapshot,
+        })
 
         const options: Record<string, unknown> = {
           key: order.keyId,
@@ -93,7 +116,7 @@ export function useRazorpayCheckout() {
               } catch {
                 /* ignore */
               }
-              navigate('/dashboard/my-courses')
+              navigate(courseContentPath(courseId))
             } catch {
               setError('Payment received but verification failed. Please contact support with your payment ID.')
               setCheckoutCourseId(null)

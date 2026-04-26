@@ -65,7 +65,11 @@ export const enrollmentService = {
     return data
   },
   /** Free enrollment or after manual confirmation (no gateway). */
-  async create(payload: { courseId: string; orderId?: string }): Promise<{ id: string; message?: string }> {
+  async create(payload: {
+    courseId: string
+    orderId?: string
+    certificateProfile?: Record<string, string | undefined>
+  }): Promise<{ id: string; message?: string }> {
     const { data } = await api.post<{ id: string; message?: string }>('/api/enrollments', payload)
     return data
   },

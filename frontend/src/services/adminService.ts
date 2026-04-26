@@ -256,6 +256,31 @@ export const adminService = {
     }
   },
 
+  async getCourseReviews(courseId: string) {
+    const { data } = await api.get<{
+      items: Array<{
+        id: string
+        studentName: string
+        userId: string
+        rating: number
+        title: string
+        body: string
+        flagged: boolean
+        deleted: boolean
+        createdAt: string
+      }>
+    }>(`/api/admin/courses/${courseId}/reviews`)
+    return data
+  },
+
+  async deleteCourseReview(courseId: string, reviewId: string) {
+    await api.delete(`/api/admin/courses/${courseId}/reviews/${reviewId}`)
+  },
+
+  async flagCourseReview(courseId: string, reviewId: string, flagged: boolean) {
+    await api.patch(`/api/admin/courses/${courseId}/reviews/${reviewId}/flag`, { flagged })
+  },
+
   async getCourseEnrollments(courseId: string) {
     const { data } = await api.get<{
       items: Array<{

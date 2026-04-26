@@ -317,13 +317,13 @@ export function Home() {
   return (
     <>
       {/* Hero — content left, image right */}
-      <section className="relative min-h-[calc(100vh-7rem)] flex flex-col bg-gradient-to-br from-brand-navy via-primary-900 to-primary-950 text-white overflow-hidden">
+      <section className="relative min-h-[calc(100vh-4rem)] sm:min-h-[calc(100vh-4.25rem)] flex flex-col bg-gradient-to-br from-brand-navy via-primary-900 to-primary-950 text-white overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.04\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] opacity-80" />
         <div className={`relative flex flex-1 flex-col justify-center mx-auto max-w-7xl w-full px-4 py-10 sm:py-16 sm:px-6 lg:px-8 lg:py-24 ${heroVisible ? 'animate-fade-in-up' : 'opacity-0 translate-y-8'}`}>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
             {/* Left: headline + CTA + stats */}
             <div className="order-1 flex flex-col justify-center">
-              <p className="text-primary-300 text-xs sm:text-sm font-medium uppercase tracking-wider">AICTE & UGC Approved Programs</p>
+              <p className="text-primary-300 text-xs sm:text-sm font-medium uppercase tracking-wider">AICTE & UGC compliant Programs</p>
               <h1 className="mt-3 sm:mt-4 text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl lg:text-6xl">
                 India&apos;s Leading Training
                 <br />
@@ -373,7 +373,7 @@ export function Home() {
             {/* Left: About Us illustration — same height as text column */}
             <div className="order-2 lg:order-1 min-w-0 h-full min-h-[300px] sm:min-h-[360px] flex items-center justify-center">
               <img
-                src="/images/about-us-partner-universities.png"
+                src="/images/about-us-infographic.png"
                 alt="About Us — XpertIntern: 50,000+ students trained, 100+ programs offered, 30+ partner universities"
                 className="max-w-full w-full h-full min-h-[280px] object-contain object-center rounded-2xl shadow-lg"
               />

@@ -21,12 +21,12 @@ export function Navbar() {
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200">
       <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex min-h-[4.5rem] sm:min-h-[5rem] items-center gap-2 py-2">
+        <div className="flex min-h-14 sm:min-h-16 items-center gap-2 py-1.5">
           <Link to="/" className="shrink-0 md:mr-0" aria-label="XpertIntern Home">
             <img
               src="/logo-navbar.png"
               alt="XpertIntern"
-              className="h-14 sm:h-16 md:h-20 w-auto object-contain"
+              className="h-9 sm:h-10 md:h-11 w-auto object-contain"
               decoding="async"
               fetchPriority="high"
             />

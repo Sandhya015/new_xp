@@ -26,15 +26,32 @@ export const paymentService = {
     return data
   },
   /** Amount is determined on the server from the course price — only pass courseId. */
-  async createOrder(courseId: string, currency = 'INR'): Promise<{
+  async createOrder(
+    courseId: string,
+    opts?: {
+      currency?: string
+      couponCode?: string
+      includeTrainingKit?: boolean
+      enrollmentSnapshot?: Record<string, string | undefined>
+      billingSnapshot?: Record<string, string | undefined>
+    },
+  ): Promise<{
     keyId: string
     orderId: string
     amount: number
     currency: string
     courseTitle?: string
     internalOrderId?: string
+    pricing?: Record<string, unknown>
   }> {
-    const { data } = await api.post('/api/payments/create-order', { courseId, currency })
+    const { data } = await api.post('/api/payments/create-order', {
+      courseId,
+      currency: opts?.currency ?? 'INR',
+      couponCode: opts?.couponCode?.trim() || undefined,
+      includeTrainingKit: opts?.includeTrainingKit,
+      enrollmentSnapshot: opts?.enrollmentSnapshot,
+      billingSnapshot: opts?.billingSnapshot,
+    })
     return data
   },
   async verify(paymentId: string, orderId: string, signature: string) {

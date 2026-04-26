@@ -75,6 +75,16 @@ def get_orders_collection() -> Collection:
     return get_db()["orders"]
 
 
+def get_course_reviews_collection() -> Collection:
+    """Public course reviews (student ratings)."""
+    return get_db()["course_reviews"]
+
+
+def get_app_settings_collection() -> Collection:
+    """Singleton-style app settings (training kit price, coupons, GST display)."""
+    return get_db()["app_settings"]
+
+
 def get_internships_collection() -> Collection:
     """Internship postings (companyId, title, etc.)."""
     return get_db()["internships"]
@@ -170,6 +180,9 @@ def ensure_indexes(db: Database) -> None:
         name="idx_orders_status_created",
     )
     _ix(db["orders"], "orderId", unique=True, sparse=True, name="idx_orders_orderId")
+
+    _ix(db["course_reviews"], [("courseId", 1), ("createdAt", -1)], name="idx_reviews_course_created")
+    _ix(db["course_reviews"], [("courseId", 1), ("userId", 1)], name="idx_reviews_course_user")
 
     _ix(db["contacts"], [("createdAt", -1)], name="idx_contacts_created")
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
@@ -15,7 +15,6 @@ import {
   BookOpen,
   Star,
   Heart,
-  Share2,
   Play,
   ClipboardList,
   FileText,
@@ -29,6 +28,11 @@ import type { LucideIcon } from 'lucide-react'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
 import { absoluteApiUrl } from '@/config/api'
 import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
+import { splitInrTaxInclusive, formatInr } from '@/utils/gstPricing'
+import { ShareCourseMenu } from '@/components/training/ShareCourseMenu'
+import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
+import { CourseReviewsPanel } from '@/components/training/CourseReviewsPanel'
+import { reviewService } from '@/services/reviewService'
 
 type PublicTopic = {
   id: string
@@ -127,14 +131,17 @@ function parseLearnLine(line: string): { lead: string; rest: string | null } {
 
 export function CourseDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [course, setCourse] = useState<PublicCourse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'info' | 'reviews'>('info')
   const [openModules, setOpenModules] = useState<Set<string>>(() => new Set())
   const [aboutExpanded, setAboutExpanded] = useState(false)
-  const [shareHint, setShareHint] = useState<string | null>(null)
   const [userIsEnrolled, setUserIsEnrolled] = useState<boolean | null>(null)
+  const [reviewAvg, setReviewAvg] = useState<number | null>(null)
+  const [reviewTotal, setReviewTotal] = useState(0)
+  const [enrollOpen, setEnrollOpen] = useState(false)
   const [trainingCoverFailed, setTrainingCoverFailed] = useState(false)
   const { token } = useAuth()
   const { startCheckout, busy, error: payError, clearError } = useRazorpayCheckout()
@@ -215,16 +222,19 @@ export function CourseDetail() {
     }
   }, [course?.curriculum])
 
-  const copyShareLink = async () => {
-    const url = typeof window !== 'undefined' ? window.location.href : ''
-    try {
-      await navigator.clipboard.writeText(url)
-      setShareHint('Link copied')
-    } catch {
-      setShareHint('Copy link manually')
-    }
-    setTimeout(() => setShareHint(null), 2500)
-  }
+  useEffect(() => {
+    if (!id) return
+    reviewService
+      .list(id, { limit: 1, page: 1 })
+      .then((r) => {
+        setReviewAvg(r.stats?.average ?? null)
+        setReviewTotal(r.stats?.total ?? 0)
+      })
+      .catch(() => {
+        setReviewAvg(null)
+        setReviewTotal(0)
+      })
+  }, [id])
 
   if (loading) {
     return (
@@ -261,6 +271,21 @@ export function CourseDetail() {
       : null
   const seatsLeft = maxSeats != null && maxSeats > 0 ? Math.max(0, maxSeats - enrolled) : null
   const enrollmentFull = seatsLeft !== null && seatsLeft <= 0 && userIsEnrolled !== true
+  const gstBreakdown = course.price > 0 ? splitInrTaxInclusive(course.price, 0.18) : null
+  const roundedRating = Math.round(reviewAvg ?? 0)
+  const sharePageUrl = typeof window !== 'undefined' ? window.location.href : ''
+  const enrollLite: EnrollCourseLite | null = course
+    ? {
+        id: course.id,
+        title: course.title,
+        price: course.price,
+        universities: course.universities,
+        mode: course.mode,
+        duration: course.duration,
+        featuredImageUrl: course.featuredImageUrl,
+        shortDescription: course.shortDescription,
+      }
+    : null
 
   const tabBar = (
     <div className="flex gap-8 border-b border-gray-200">
@@ -360,10 +385,19 @@ export function CourseDetail() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="flex gap-0.5 text-amber-400" aria-hidden>
+                  <div
+                    className="flex flex-wrap items-center gap-2 text-amber-400"
+                    aria-label={reviewTotal > 0 ? `Average rating ${reviewAvg?.toFixed(1) ?? 0} of 5` : 'No reviews yet'}
+                  >
                     {[1, 2, 3, 4, 5].map((k) => (
-                      <Star key={k} className="h-5 w-5 fill-none stroke-amber-400 stroke-[1.25]" />
+                      <Star
+                        key={k}
+                        className={`h-5 w-5 stroke-amber-400 stroke-[1.25] ${k <= roundedRating ? 'fill-amber-400' : 'fill-none'}`}
+                      />
                     ))}
+                    <span className="text-sm font-medium text-gray-600">
+                      {reviewTotal > 0 ? `${reviewAvg?.toFixed(1) ?? '0.0'} (${reviewTotal} reviews)` : 'No reviews yet'}
+                    </span>
                   </div>
                   <h1 className="mt-2 text-2xl font-bold uppercase tracking-tight text-gray-900 sm:text-3xl lg:text-4xl">
                     {course.title}
@@ -379,17 +413,14 @@ export function CourseDetail() {
                     <Heart className="h-4 w-4 text-gray-500" />
                     Wishlist
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void copyShareLink()}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 sm:text-sm"
-                  >
-                    <Share2 className="h-4 w-4 text-gray-500" />
-                    Share
-                  </button>
+                  <ShareCourseMenu
+                    url={sharePageUrl}
+                    title={course.title}
+                    description={course.shortDescription || course.description}
+                    university={course.universities}
+                  />
                 </div>
               </div>
-              {shareHint ? <p className="mt-2 text-xs font-medium text-emerald-600">{shareHint}</p> : null}
 
               {course.featuredImageUrl ? (
                 trainingCoverFailed ? (
@@ -421,15 +452,20 @@ export function CourseDetail() {
                 <div className="flex flex-wrap items-baseline gap-2">
                   {course.price > 0 ? (
                     <>
-                      <span className="text-2xl font-bold text-gray-900">₹{course.price.toLocaleString('en-IN')}</span>
+                      <span className="text-2xl font-bold text-gray-900">{formatInr(course.price)}</span>
                       {listPrice ? (
-                        <span className="text-sm text-gray-400 line-through">₹{listPrice.toLocaleString('en-IN')}</span>
+                        <span className="text-sm text-gray-400 line-through">{formatInr(listPrice)}</span>
                       ) : null}
                     </>
                   ) : (
                     <span className="text-2xl font-bold text-emerald-700">Free</span>
                   )}
                 </div>
+                {gstBreakdown ? (
+                  <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                    Incl. GST (18%): taxable value {formatInr(gstBreakdown.base)} + GST {formatInr(gstBreakdown.gst)}
+                  </p>
+                ) : null}
 
                 {payError ? (
                   <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">
@@ -441,9 +477,9 @@ export function CourseDetail() {
                   <div className="mt-4 space-y-2">
                     <Link
                       to={courseContentPath(course.id)}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 min-h-[44px]"
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 min-h-[44px]"
                     >
-                      View course content
+                      Go to Course
                     </Link>
                     <p className="text-center text-xs font-medium text-emerald-700">You are enrolled in this program.</p>
                   </div>
@@ -453,11 +489,11 @@ export function CourseDetail() {
                     disabled={busy || (Boolean(token) && userIsEnrolled === null) || enrollmentFull}
                     onClick={() => {
                       clearError()
-                      void startCheckout({
-                        courseId: course.id,
-                        courseTitle: course.title,
-                        price: course.price,
-                      })
+                      if (!token) {
+                        navigate(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
+                        return
+                      }
+                      setEnrollOpen(true)
                     }}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-accent py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-600 disabled:opacity-60 min-h-[44px]"
                   >
@@ -467,7 +503,7 @@ export function CourseDetail() {
                       : Boolean(token) && userIsEnrolled === null
                         ? 'Checking enrollment…'
                         : course.price > 0
-                          ? 'Add to cart'
+                          ? 'Enroll Now'
                           : 'Enroll free'}
                   </button>
                 )}
@@ -674,7 +710,7 @@ export function CourseDetail() {
 
                 {audienceLines.length > 0 ? (
                   <section>
-                    <h2 className="text-xl font-bold text-gray-900">Requirements</h2>
+                    <h2 className="text-xl font-bold text-gray-900">Who is this course for?</h2>
                     <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
                       {audienceLines.map((line, i) => (
                         <li key={i}>{line}</li>
@@ -689,17 +725,6 @@ export function CourseDetail() {
                     <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
                       {instructionLines.map((line, i) => (
                         <li key={i}>{line}</li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-
-                {course.materialsIncluded && course.materialsIncluded.length > 0 ? (
-                  <section>
-                    <h2 className="text-xl font-bold text-gray-900">What&apos;s included</h2>
-                    <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">
-                      {course.materialsIncluded.map((m, i) => (
-                        <li key={i}>{m}</li>
                       ))}
                     </ul>
                   </section>
@@ -721,14 +746,22 @@ export function CourseDetail() {
           ) : (
             <div>
               {tabBar}
-              <div className="mt-10 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-6 py-12 text-center">
-                <p className="text-sm font-medium text-gray-700">No reviews yet</p>
-                <p className="mt-1 text-xs text-gray-500">Learner ratings will appear here once reviews are enabled.</p>
+              <div className="mt-6">
+                {id ? <CourseReviewsPanel courseId={id} isEnrolled={userIsEnrolled === true} /> : null}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <TrainingEnrollmentModal
+        course={enrollOpen ? enrollLite : null}
+        onClose={() => setEnrollOpen(false)}
+        startCheckout={startCheckout}
+        payBusy={busy}
+        payError={payError}
+        clearPayError={clearError}
+      />
     </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   Plus,
   Download,
   Send,
+  Star,
   Trash2,
   Pencil,
   Loader2,
@@ -35,6 +36,7 @@ const TABS = [
   { id: 'attendance', label: 'Attendance', icon: UserCheck },
   { id: 'announcements', label: 'Announcements', icon: Send },
   { id: 'enrolled', label: 'Enrolled Students', icon: Users },
+  { id: 'reviews', label: 'Reviews', icon: Star },
 ] as const
 
 type CourseDetail = {
@@ -100,6 +102,19 @@ export function ManageTraining() {
   const [enrollLoading, setEnrollLoading] = useState(false)
   const [submissionViewer, setSubmissionViewer] = useState<EnrollmentRow | null>(null)
   const [submissionDownloadError, setSubmissionDownloadError] = useState<string | null>(null)
+  const [adminReviews, setAdminReviews] = useState<
+    Array<{
+      id: string
+      studentName: string
+      rating: number
+      title: string
+      body: string
+      flagged: boolean
+      deleted: boolean
+      createdAt: string
+    }>
+  >([])
+  const [reviewsLoading, setReviewsLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -111,6 +126,17 @@ export function ManageTraining() {
     if (id && activeTab === 'enrolled') {
       setEnrollLoading(true)
       adminService.getCourseEnrollments(id).then((r) => setEnrollments(r.items || [])).catch(() => setEnrollments([])).finally(() => setEnrollLoading(false))
+    }
+  }, [id, activeTab])
+
+  useEffect(() => {
+    if (id && activeTab === 'reviews') {
+      setReviewsLoading(true)
+      adminService
+        .getCourseReviews(id)
+        .then((r) => setAdminReviews(r.items || []))
+        .catch(() => setAdminReviews([]))
+        .finally(() => setReviewsLoading(false))
     }
   }, [id, activeTab])
 
@@ -397,6 +423,74 @@ export function ManageTraining() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'reviews' && (
+          <div className="space-y-4">
+            {reviewsLoading ? (
+              <p className="text-sm text-slate-gray">Loading reviews…</p>
+            ) : adminReviews.length === 0 ? (
+              <p className="text-sm text-slate-gray">No reviews for this training yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {adminReviews.map((r) => (
+                  <li
+                    key={r.id}
+                    className={`rounded-lg border p-4 text-sm ${r.flagged ? 'border-amber-300 bg-amber-50/50' : 'border-gray-200'} ${r.deleted ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-gray-900">{r.studentName || 'Student'}</p>
+                        <p className="text-xs text-gray-500">{r.createdAt}</p>
+                      </div>
+                      <span className="text-amber-600 font-medium">{r.rating}★</span>
+                    </div>
+                    {r.title ? <p className="mt-2 font-medium text-gray-800">{r.title}</p> : null}
+                    <p className="mt-1 text-gray-700 whitespace-pre-wrap">{r.body}</p>
+                    {!r.deleted ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!id) return
+                            if (!window.confirm('Delete this review?')) return
+                            try {
+                              await adminService.deleteCourseReview(id, r.id)
+                              setAdminReviews((prev) => prev.filter((x) => x.id !== r.id))
+                            } catch {
+                              setError('Could not delete review.')
+                            }
+                          }}
+                          className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!id) return
+                            try {
+                              await adminService.flagCourseReview(id, r.id, !r.flagged)
+                              setAdminReviews((prev) =>
+                                prev.map((x) => (x.id === r.id ? { ...x, flagged: !r.flagged } : x)),
+                              )
+                            } catch {
+                              setError('Could not update flag.')
+                            }
+                          }}
+                          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-50"
+                        >
+                          {r.flagged ? 'Unflag' : 'Flag'}
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500">Deleted</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}
