@@ -28,6 +28,7 @@ from app.db import (
     get_users_collection,
 )
 from app.email_smtp import send_company_registration_otp, send_password_reset_email, send_registration_otp
+from app.whatsapp_otp import normalize_mobile_e164_in, send_whatsapp_otp, whatsapp_configured
 from app.email_templates import public_app_url
 from app.notifications import schedule_welcome_email
 from app.registration_otp import (
@@ -179,7 +180,7 @@ def _notify_admins_company_pending_review(company_name: str, company_email: str)
 
 @auth_bp.route("/register", methods=["POST"])
 def register():
-    """Student: validate, send email OTP, return verificationId (no JWT). Company uses /company/register."""
+    """Student: validate, send OTP to email + WhatsApp (best-effort), return verificationId (no JWT)."""
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
@@ -252,6 +253,7 @@ def register():
     ver_col.insert_one({
         "verificationId": verification_id,
         "email": normalized["email"],
+        "mobileE164": normalize_mobile_e164_in(normalized.get("mobile", "")) if isinstance(normalized, dict) else None,
         "otpHash": otp_hash,
         "expiresAt": otp_expiry_utc(),
         "wrongAttempts": 0,
@@ -266,10 +268,20 @@ def register():
         ver_col.delete_one({"verificationId": verification_id})
         return jsonify({"error": "Could not send verification email. Please try again later."}), 503
 
+    wa_sent = False
+    try:
+        if whatsapp_configured():
+            m = normalize_mobile_e164_in(normalized.get("mobile", ""))
+            if m:
+                wa_sent = bool(send_whatsapp_otp(m, otp))
+    except Exception:
+        wa_sent = False
+
     return jsonify({
         "message": "OTP sent",
         "verificationId": verification_id,
         "expiresInSeconds": 600,
+        "whatsappSent": wa_sent,
     }), 200
 
 
@@ -556,7 +568,7 @@ def register_verify_otp():
 
 @auth_bp.route("/register/resend-otp", methods=["POST"])
 def register_resend_otp():
-    """Send a new OTP for the same verification session (max 3 resends, 30s cooldown)."""
+    """Send a new OTP for the same verification session (max 3 resends, 30s cooldown). Email required; WhatsApp best-effort."""
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
@@ -621,7 +633,16 @@ def register_resend_otp():
     if not sent:
         return jsonify({"error": "Could not send verification email. Please try again later."}), 503
 
-    return jsonify({"message": "OTP sent", "verificationId": verification_id}), 200
+    wa_sent = False
+    try:
+        if whatsapp_configured():
+            m = doc.get("mobileE164") or normalize_mobile_e164_in((payload.get("mobile") or ""))
+            if m:
+                wa_sent = bool(send_whatsapp_otp(str(m), otp))
+    except Exception:
+        wa_sent = False
+
+    return jsonify({"message": "OTP sent", "verificationId": verification_id, "whatsappSent": wa_sent}), 200
 
 
 @auth_bp.route("/forgot-password", methods=["POST"])

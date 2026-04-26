@@ -13,6 +13,12 @@ import {
   BRANCH_OTHERS_LABEL,
   subjectOptionsForCourse,
 } from '@/constants/registrationLists'
+import {
+  REGISTRATION_COLLEGES_BY_UNIVERSITY,
+  COLLEGE_OTHER_LABEL,
+  isOtherCollege,
+  collegeOptionsFromList,
+} from '@/constants/registrationColleges'
 import { DPIIT_INDUSTRY_SECTORS } from '@/constants/dpiitIndustrySectors'
 
 const SEMESTERS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th']
@@ -50,7 +56,9 @@ type StudentFormState = {
   mobile: string
   university: string
   universityOther: string
-  collegeName: string
+  college: string
+  collegeOther: string
+  collegeNameText: string
   semester: string
   collegeRegNo: string
   course: string
@@ -79,7 +87,17 @@ function validateStudentForm(f: StudentFormState): Record<string, string> {
   if (f.university === OTHER_OPTION_VALUE && f.universityOther.trim().length < 5) {
     e.universityOther = 'Please enter your university name.'
   }
-  if (!f.collegeName.trim()) e.collegeName = 'College name is required.'
+  const uniKey = f.university
+  const uniHasDropdown = typeof REGISTRATION_COLLEGES_BY_UNIVERSITY[uniKey] !== 'undefined' && REGISTRATION_COLLEGES_BY_UNIVERSITY[uniKey] !== null
+  const isNOU = uniKey === 'Nalanda Open University (NOU), Nalanda'
+  if (f.university === OTHER_OPTION_VALUE) {
+    if (f.collegeNameText.trim().length < 3) e.collegeNameText = 'College name is required.'
+  } else if (isNOU || !uniHasDropdown) {
+    if (f.collegeNameText.trim().length < 3) e.collegeNameText = 'College name is required.'
+  } else {
+    if (!f.college) e.college = 'Please select your college.'
+    if (isOtherCollege(f.college) && f.collegeOther.trim().length < 3) e.collegeOther = 'Please specify your college name.'
+  }
   if (!f.semester) e.semester = 'Semester is required.'
   if (!f.collegeRegNo.trim()) e.collegeRegNo = 'College registration number is required.'
   if (!f.course) e.course = 'Please select your course.'
@@ -162,7 +180,9 @@ const emptyStudentForm = (): StudentFormState => ({
   mobile: '',
   university: '',
   universityOther: '',
-  collegeName: '',
+  college: '',
+  collegeOther: '',
+  collegeNameText: '',
   semester: '',
   collegeRegNo: '',
   course: '',
@@ -315,7 +335,16 @@ export function Register() {
         mobile: studentForm.mobile,
         university: studentForm.university,
         universityOther: studentForm.university === OTHER_OPTION_VALUE ? studentForm.universityOther.trim() : undefined,
-        collegeName: studentForm.collegeName.trim(),
+        collegeName: (() => {
+          const uniKey = studentForm.university
+          const uniList = REGISTRATION_COLLEGES_BY_UNIVERSITY[uniKey]
+          const uniHasDropdown = typeof uniList !== 'undefined' && uniList !== null
+          const isNOU = uniKey === 'Nalanda Open University (NOU), Nalanda'
+          if (studentForm.university === OTHER_OPTION_VALUE) return studentForm.collegeNameText.trim()
+          if (isNOU || !uniHasDropdown) return studentForm.collegeNameText.trim()
+          if (isOtherCollege(studentForm.college)) return studentForm.collegeOther.trim()
+          return studentForm.college.trim()
+        })(),
         semester: studentForm.semester,
         collegeRegNo: studentForm.collegeRegNo.trim(),
         course: studentForm.course,
@@ -577,9 +606,10 @@ export function Register() {
           <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
             <h2 id="otp-title" className="text-lg font-bold text-brand-navy">Verify Your Account</h2>
             <p className="mt-2 text-sm text-gray-600">
-              An OTP has been sent to: <span className="font-medium text-gray-800">Email: {maskEmail(studentForm.email.trim())}</span>
+              An OTP has been sent to:{' '}
+              <span className="font-medium text-gray-800">Email: {maskEmail(studentForm.email.trim())}</span> and your WhatsApp number.
             </p>
-            <p className="mt-1 text-xs text-gray-500">Enter the 6-digit code from your inbox.</p>
+            <p className="mt-1 text-xs text-gray-500">Enter the 6-digit code from your email or WhatsApp.</p>
 
             <div className="mt-4 flex justify-center gap-2" onPaste={onOtpPaste}>
               {otpDigits.map((d, i) => (
@@ -767,86 +797,6 @@ export function Register() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">University *</label>
-                    <select
-                      required
-                      value={studentForm.university}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setStudentForm((f) => ({
-                          ...f,
-                          university: v,
-                          universityOther: v === OTHER_OPTION_VALUE ? f.universityOther : '',
-                        }))
-                      }}
-                      className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 focus:ring-1 ${fieldErrors.university ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
-                    >
-                      <option value="">Select University</option>
-                      {REGISTRATION_UNIVERSITIES_LIST.map((u) => (
-                        <option key={u.name} value={u.name}>
-                          {u.name === OTHER_OPTION_VALUE ? u.shortForm : `${u.shortForm} — ${u.name}`}
-                        </option>
-                      ))}
-                    </select>
-                    {fieldErrors.university ? <p className="mt-1 text-xs text-red-600">{fieldErrors.university}</p> : null}
-                  </div>
-                  {studentForm.university === OTHER_OPTION_VALUE ? (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Please specify your university name *</label>
-                      <input
-                        type="text"
-                        required
-                        value={studentForm.universityOther}
-                        onChange={(e) => setStudentForm((f) => ({ ...f, universityOther: e.target.value }))}
-                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${fieldErrors.universityOther ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
-                      />
-                      {fieldErrors.universityOther ? <p className="mt-1 text-xs text-red-600">{fieldErrors.universityOther}</p> : null}
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">College Name *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Your college name"
-                      value={studentForm.collegeName}
-                      onChange={(e) => setStudentForm((f) => ({ ...f, collegeName: e.target.value }))}
-                      className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${fieldErrors.collegeName ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
-                    />
-                    {fieldErrors.collegeName ? <p className="mt-1 text-xs text-red-600">{fieldErrors.collegeName}</p> : null}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Semester *</label>
-                      <select
-                        required
-                        value={studentForm.semester}
-                        onChange={(e) => setStudentForm((f) => ({ ...f, semester: e.target.value }))}
-                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 focus:ring-1 ${fieldErrors.semester ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
-                      >
-                        <option value="">Select Semester</option>
-                        {SEMESTERS.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                      {fieldErrors.semester ? <p className="mt-1 text-xs text-red-600">{fieldErrors.semester}</p> : null}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">College Registration Number *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="College reg. number"
-                        value={studentForm.collegeRegNo}
-                        onChange={(e) => setStudentForm((f) => ({ ...f, collegeRegNo: e.target.value }))}
-                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${fieldErrors.collegeRegNo ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
-                      />
-                      {fieldErrors.collegeRegNo ? <p className="mt-1 text-xs text-red-600">{fieldErrors.collegeRegNo}</p> : null}
-                    </div>
-                  </div>
-
-                  <div>
                     <label className="block text-sm font-medium text-gray-700">Course *</label>
                     <select
                       required
@@ -957,6 +907,146 @@ export function Register() {
                       {fieldErrors.subjectOther ? <p className="mt-1 text-xs text-red-600">{fieldErrors.subjectOther}</p> : null}
                     </div>
                   ) : null}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">University *</label>
+                    <select
+                      required
+                      value={studentForm.university}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setStudentForm((f) => ({
+                          ...f,
+                          university: v,
+                          universityOther: v === OTHER_OPTION_VALUE ? f.universityOther : '',
+                          college: '',
+                          collegeOther: '',
+                          collegeNameText: '',
+                        }))
+                      }}
+                      className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 focus:ring-1 ${fieldErrors.university ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
+                    >
+                      <option value="">Select University</option>
+                      {REGISTRATION_UNIVERSITIES_LIST.map((u) => (
+                        <option key={u.name} value={u.name}>
+                          {u.name === OTHER_OPTION_VALUE ? u.shortForm : `${u.shortForm} — ${u.name}`}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.university ? <p className="mt-1 text-xs text-red-600">{fieldErrors.university}</p> : null}
+                  </div>
+
+                  {studentForm.university === OTHER_OPTION_VALUE ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">University Name (Other) *</label>
+                      <input
+                        type="text"
+                        required
+                        value={studentForm.universityOther}
+                        onChange={(e) => setStudentForm((f) => ({ ...f, universityOther: e.target.value }))}
+                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${fieldErrors.universityOther ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
+                      />
+                      {fieldErrors.universityOther ? <p className="mt-1 text-xs text-red-600">{fieldErrors.universityOther}</p> : null}
+                    </div>
+                  ) : null}
+
+                  {(() => {
+                    const uniKey = studentForm.university
+                    if (!uniKey) return null
+                    const uniList = REGISTRATION_COLLEGES_BY_UNIVERSITY[uniKey]
+                    const uniHasDropdown = typeof uniList !== 'undefined' && uniList !== null
+                    const isNOU = uniKey === 'Nalanda Open University (NOU), Nalanda'
+                    if (studentForm.university === OTHER_OPTION_VALUE || isNOU || !uniHasDropdown) {
+                      return (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">College Name *</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Your college name"
+                            value={studentForm.collegeNameText}
+                            onChange={(e) => setStudentForm((f) => ({ ...f, collegeNameText: e.target.value }))}
+                            className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${
+                              fieldErrors.collegeNameText ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'
+                            }`}
+                          />
+                          {fieldErrors.collegeNameText ? <p className="mt-1 text-xs text-red-600">{fieldErrors.collegeNameText}</p> : null}
+                        </div>
+                      )
+                    }
+                    const opts = collegeOptionsFromList(uniList || [])
+                    return (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">College Name *</label>
+                        <select
+                          required
+                          value={studentForm.college}
+                          onChange={(e) => setStudentForm((f) => ({ ...f, college: e.target.value, collegeOther: '' }))}
+                          className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 focus:ring-1 ${
+                            fieldErrors.college ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'
+                          }`}
+                        >
+                          <option value="">Select College</option>
+                          {opts.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        {fieldErrors.college ? <p className="mt-1 text-xs text-red-600">{fieldErrors.college}</p> : null}
+                      </div>
+                    )
+                  })()}
+
+                  {studentForm.university &&
+                  studentForm.university !== OTHER_OPTION_VALUE &&
+                  REGISTRATION_COLLEGES_BY_UNIVERSITY[studentForm.university] &&
+                  isOtherCollege(studentForm.college) ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">College Name (Other) *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder={COLLEGE_OTHER_LABEL}
+                        value={studentForm.collegeOther}
+                        onChange={(e) => setStudentForm((f) => ({ ...f, collegeOther: e.target.value }))}
+                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${
+                          fieldErrors.collegeOther ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'
+                        }`}
+                      />
+                      {fieldErrors.collegeOther ? <p className="mt-1 text-xs text-red-600">{fieldErrors.collegeOther}</p> : null}
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Semester *</label>
+                      <select
+                        required
+                        value={studentForm.semester}
+                        onChange={(e) => setStudentForm((f) => ({ ...f, semester: e.target.value }))}
+                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 focus:ring-1 ${fieldErrors.semester ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
+                      >
+                        <option value="">Select Semester</option>
+                        {SEMESTERS.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      {fieldErrors.semester ? <p className="mt-1 text-xs text-red-600">{fieldErrors.semester}</p> : null}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">College Registration Number *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="College reg. number"
+                        value={studentForm.collegeRegNo}
+                        onChange={(e) => setStudentForm((f) => ({ ...f, collegeRegNo: e.target.value }))}
+                        className={`mt-1 block w-full rounded-lg border px-3 py-2.5 text-sm focus:ring-1 ${fieldErrors.collegeRegNo ? 'border-red-400' : 'border-gray-300 focus:border-brand-accent focus:ring-brand-accent'}`}
+                      />
+                      {fieldErrors.collegeRegNo ? <p className="mt-1 text-xs text-red-600">{fieldErrors.collegeRegNo}</p> : null}
+                    </div>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>

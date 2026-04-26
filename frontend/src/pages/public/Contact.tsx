@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom'
 import { Mail, Phone, MapPin, Send, Linkedin, Instagram, Facebook, Youtube, X } from 'lucide-react'
 import { Notification } from '@/components/Notification'
 import { contactService } from '@/services/contactService'
-import { UNIVERSITIES_LIST } from '@/constants/universities'
+import { REGISTRATION_UNIVERSITIES_LIST } from '@/constants/registrationUniversities'
+import { OTHER_OPTION_VALUE, BRANCHES_66, BRANCH_OTHERS_LABEL, subjectOptionsForCourse } from '@/constants/registrationLists'
+import { REGISTRATION_COLLEGES_BY_UNIVERSITY, collegeOptionsFromList, isOtherCollege } from '@/constants/registrationColleges'
 import { SOCIAL_LINKS } from '@/config/socialLinks'
-const COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
-const STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
+const COURSES = ['B.Tech', 'Diploma', 'B.A.', 'B.Sc', 'B.Com', 'BBA', 'BCA', OTHER_OPTION_VALUE]
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -23,12 +24,28 @@ export function Contact() {
     name: '',
     email: '',
     phone: '',
-    university: '',
-    semester: '',
     course: '',
-    stream: '',
+    courseOther: '',
+    branch: '',
+    branchOther: '',
+    subject: '',
+    subjectOther: '',
+    university: '',
+    universityOther: '',
+    college: '',
+    collegeOther: '',
+    collegeNameText: '',
+    semester: '',
     message: '',
   })
+  const showBranch = form.course === 'B.Tech' || form.course === 'Diploma'
+  const showSubject = ['B.Sc', 'B.Com', 'B.A.', 'BBA', 'BCA'].includes(form.course)
+  const collegeListForSelectedUni = form.university ? REGISTRATION_COLLEGES_BY_UNIVERSITY[form.university] : undefined
+  const showCollegeDropdown =
+    form.university &&
+    form.university !== OTHER_OPTION_VALUE &&
+    form.university !== 'Nalanda Open University (NOU), Nalanda' &&
+    Array.isArray(collegeListForSelectedUni)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,11 +56,23 @@ export function Contact() {
         name: form.name,
         email: form.email,
         phone: form.phone,
-        university: form.university || undefined,
+        university: form.university === OTHER_OPTION_VALUE ? form.universityOther : form.university || undefined,
         semester: form.semester || undefined,
-        course: form.course || undefined,
-        stream: form.stream || undefined,
-        message: form.message || undefined,
+        course: form.course === OTHER_OPTION_VALUE ? form.courseOther : form.course || undefined,
+        stream:
+          (showBranch
+            ? (form.branch === BRANCH_OTHERS_LABEL ? form.branchOther : form.branch)
+            : (showSubject
+                ? (form.subject === OTHER_OPTION_VALUE ? form.subjectOther : form.subject)
+                : undefined)) || undefined,
+        message: [
+          form.message || undefined,
+          `College: ${
+            showCollegeDropdown
+              ? (isOtherCollege(form.college) ? form.collegeOther : form.college)
+              : form.collegeNameText
+          }`,
+        ].filter(Boolean).join(' | '),
       })
       setSubmitted(true)
     } catch (err: unknown) {
@@ -106,8 +135,8 @@ export function Contact() {
                   </div>
                   <div>
                     <p className="font-bold text-brand-navy">Phone</p>
-                    <a href="tel:+919876543210" className="mt-1 block text-slate-gray hover:text-brand-accent transition">
-                      +91 9876543210
+                    <a href="tel:+917004762654" className="mt-1 block text-slate-gray hover:text-brand-accent transition">
+                      7004762654
                     </a>
                     <p className="mt-1 text-sm text-slate-gray">Mon-Sat: 9AM - 6PM</p>
                   </div>
@@ -121,9 +150,7 @@ export function Contact() {
                   <div>
                     <p className="font-bold text-brand-navy">Address</p>
                     <p className="mt-1 text-slate-gray">
-                      XpertIntern Headquarters<br />
-                      Patna, Bihar - 800001<br />
-                      India
+                      Arfabadd Colony, East Nahar Road, Bajrangpuri, Patna - 800007
                     </p>
                   </div>
                 </div>
@@ -133,13 +160,13 @@ export function Contact() {
                   <p className="font-bold text-brand-navy">Follow Us</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <a
-                      href={SOCIAL_LINKS.linkedin}
+                      href={SOCIAL_LINKS.facebook}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0A66C2] text-white hover:opacity-90 transition"
-                      aria-label="LinkedIn"
+                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1877F2] text-white hover:opacity-90 transition"
+                      aria-label="Facebook"
                     >
-                      <Linkedin className="h-5 w-5" />
+                      <Facebook className="h-5 w-5" />
                     </a>
                     <a
                       href={SOCIAL_LINKS.instagram}
@@ -151,22 +178,13 @@ export function Contact() {
                       <Instagram className="h-5 w-5" />
                     </a>
                     <a
-                      href={SOCIAL_LINKS.facebook}
+                      href={SOCIAL_LINKS.linkedin}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1877F2] text-white hover:opacity-90 transition"
-                      aria-label="Facebook"
+                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0A66C2] text-white hover:opacity-90 transition"
+                      aria-label="LinkedIn"
                     >
-                      <Facebook className="h-5 w-5" />
-                    </a>
-                    <a
-                      href={SOCIAL_LINKS.youtube}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FF0000] text-white hover:opacity-90 transition"
-                      aria-label="YouTube"
-                    >
-                      <Youtube className="h-5 w-5" />
+                      <Linkedin className="h-5 w-5" />
                     </a>
                     <a
                       href={SOCIAL_LINKS.x}
@@ -178,13 +196,22 @@ export function Contact() {
                       <X className="h-5 w-5" />
                     </a>
                     <a
-                      href="https://wa.me/919876543210"
+                      href="https://wa.me/917004762654"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#25D366] text-white hover:opacity-90 transition"
                       aria-label="WhatsApp"
                     >
                       <WhatsAppIcon className="h-5 w-5" />
+                    </a>
+                    <a
+                      href={SOCIAL_LINKS.youtube}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FF0000] text-white hover:opacity-90 transition"
+                      aria-label="YouTube"
+                    >
+                      <Youtube className="h-5 w-5" />
                     </a>
                   </div>
                 </div>
@@ -208,7 +235,7 @@ export function Contact() {
                   </div>
                 )}
                 <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4">
                     <div>
                       <label htmlFor="contact-name" className="block text-sm font-medium text-gray-700">
                         Full Name *
@@ -254,6 +281,100 @@ export function Contact() {
                     />
                   </div>
                   <div>
+                    <label htmlFor="contact-course" className="block text-sm font-medium text-gray-700">
+                      Course *
+                    </label>
+                    <select
+                      id="contact-course"
+                      required
+                      value={form.course}
+                      onChange={(e) => setForm({ ...form, course: e.target.value, courseOther: '', branch: '', branchOther: '', subject: '', subjectOther: '' })}
+                      className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                    >
+                      <option value="">Select Course</option>
+                      {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  {form.course === OTHER_OPTION_VALUE && (
+                    <div>
+                      <label htmlFor="contact-course-other" className="block text-sm font-medium text-gray-700">
+                        Specify Course Name *
+                      </label>
+                      <input
+                        id="contact-course-other"
+                        type="text"
+                        required
+                        value={form.courseOther}
+                        onChange={(e) => setForm({ ...form, courseOther: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  )}
+                  {showBranch && (
+                    <div>
+                      <label htmlFor="contact-branch" className="block text-sm font-medium text-gray-700">
+                        Branch *
+                      </label>
+                      <select
+                        id="contact-branch"
+                        required
+                        value={form.branch}
+                        onChange={(e) => setForm({ ...form, branch: e.target.value, branchOther: '' })}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select Branch</option>
+                        {BRANCHES_66.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {showBranch && form.branch === BRANCH_OTHERS_LABEL && (
+                    <div>
+                      <label htmlFor="contact-branch-other" className="block text-sm font-medium text-gray-700">
+                        Specify Branch Name *
+                      </label>
+                      <input
+                        id="contact-branch-other"
+                        type="text"
+                        required
+                        value={form.branchOther}
+                        onChange={(e) => setForm({ ...form, branchOther: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  )}
+                  {showSubject && (
+                    <div>
+                      <label htmlFor="contact-subject" className="block text-sm font-medium text-gray-700">
+                        Subject *
+                      </label>
+                      <select
+                        id="contact-subject"
+                        required
+                        value={form.subject}
+                        onChange={(e) => setForm({ ...form, subject: e.target.value, subjectOther: '' })}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select Subject</option>
+                        {subjectOptionsForCourse(form.course).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {showSubject && form.subject === OTHER_OPTION_VALUE && (
+                    <div>
+                      <label htmlFor="contact-subject-other" className="block text-sm font-medium text-gray-700">
+                        Specify Subject Name *
+                      </label>
+                      <input
+                        id="contact-subject-other"
+                        type="text"
+                        required
+                        value={form.subjectOther}
+                        onChange={(e) => setForm({ ...form, subjectOther: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  )}
+                  <div>
                     <label htmlFor="contact-university" className="block text-sm font-medium text-gray-700">
                       University *
                     </label>
@@ -261,13 +382,74 @@ export function Contact() {
                       id="contact-university"
                       required
                       value={form.university}
-                      onChange={(e) => setForm({ ...form, university: e.target.value })}
+                      onChange={(e) => setForm({ ...form, university: e.target.value, universityOther: '', college: '', collegeOther: '', collegeNameText: '' })}
                       className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
                     >
                       <option value="">Select University</option>
-                      {UNIVERSITIES_LIST.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
+                      {REGISTRATION_UNIVERSITIES_LIST.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
                     </select>
                   </div>
+                  {form.university === OTHER_OPTION_VALUE && (
+                    <div>
+                      <label htmlFor="contact-university-other" className="block text-sm font-medium text-gray-700">
+                        Specify University Name *
+                      </label>
+                      <input
+                        id="contact-university-other"
+                        type="text"
+                        required
+                        value={form.universityOther}
+                        onChange={(e) => setForm({ ...form, universityOther: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  )}
+                  {form.university && (showCollegeDropdown ? (
+                    <div>
+                      <label htmlFor="contact-college" className="block text-sm font-medium text-gray-700">
+                        College Name *
+                      </label>
+                      <select
+                        id="contact-college"
+                        required
+                        value={form.college}
+                        onChange={(e) => setForm({ ...form, college: e.target.value, collegeOther: '' })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      >
+                        <option value="">Select College</option>
+                        {collegeOptionsFromList(collegeListForSelectedUni || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label htmlFor="contact-college-text" className="block text-sm font-medium text-gray-700">
+                        College Name *
+                      </label>
+                      <input
+                        id="contact-college-text"
+                        type="text"
+                        required
+                        value={form.collegeNameText}
+                        onChange={(e) => setForm({ ...form, collegeNameText: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  ))}
+                  {showCollegeDropdown && isOtherCollege(form.college) && (
+                    <div>
+                      <label htmlFor="contact-college-other" className="block text-sm font-medium text-gray-700">
+                        Specify College Name *
+                      </label>
+                      <input
+                        id="contact-college-other"
+                        type="text"
+                        required
+                        value={form.collegeOther}
+                        onChange={(e) => setForm({ ...form, collegeOther: e.target.value })}
+                        className="mt-1 block w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label htmlFor="contact-semester" className="block text-sm font-medium text-gray-700">
@@ -284,39 +466,7 @@ export function Contact() {
                         {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label htmlFor="contact-course" className="block text-sm font-medium text-gray-700">
-                        Course *
-                      </label>
-                      <select
-                        id="contact-course"
-                        required
-                        value={form.course}
-                        onChange={(e) => setForm({ ...form, course: e.target.value, stream: '' })}
-                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                      >
-                        <option value="">Select Course</option>
-                        {COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
                   </div>
-                  {(form.course === 'B.Tech' || form.course === 'Diploma') && (
-                    <div>
-                      <label htmlFor="contact-stream" className="block text-sm font-medium text-gray-700">
-                        Stream *
-                      </label>
-                      <select
-                        id="contact-stream"
-                        required
-                        value={form.stream}
-                        onChange={(e) => setForm({ ...form, stream: e.target.value })}
-                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
-                      >
-                        <option value="">Select Stream</option>
-                        {STREAMS.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                  )}
                   <div>
                     <label htmlFor="contact-message" className="block text-sm font-medium text-gray-700">
                       Message *

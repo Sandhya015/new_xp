@@ -95,7 +95,7 @@ export function Footer() {
                 <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> Follow AICTE Guidelines
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-gray-300">
-                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> UGC Guidelines
+                <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" /> Follow UGC Guidelines
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-gray-300">
                 <Lock className="h-3.5 w-3.5 text-green-400" /> Secure Platform
@@ -107,7 +107,7 @@ export function Footer() {
               <a href={SOCIAL_LINKS.instagram} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="Instagram"><Instagram className="h-4 w-4" /></a>
               <a href={SOCIAL_LINKS.linkedin} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="LinkedIn"><Linkedin className="h-4 w-4" /></a>
               <a href={SOCIAL_LINKS.x} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="X (Twitter)"><X className="h-4 w-4" /></a>
-              <a href="https://wa.me/917858967071" target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="WhatsApp"><WhatsAppIcon className="h-4 w-4" /></a>
+              <a href="https://wa.me/917004762654" target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="WhatsApp"><WhatsAppIcon className="h-4 w-4" /></a>
               <a href={SOCIAL_LINKS.youtube} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white transition" aria-label="YouTube"><Youtube className="h-4 w-4" /></a>
             </div>
           </div>
@@ -129,10 +129,7 @@ export function Footer() {
                 </span>
                 <div>
                   <p className="text-xs text-gray-500">Contact number</p>
-                  <div className="flex flex-col gap-0.5">
-                    <a href="tel:+917858967071" className="text-sm font-semibold text-white hover:text-primary-300 transition">7858967071</a>
-                    <a href="tel:+919341143791" className="text-sm font-semibold text-white hover:text-primary-300 transition">9341143791</a>
-                  </div>
+                  <a href="tel:+917004762654" className="text-sm font-semibold text-white hover:text-primary-300 transition">7004762654</a>
                 </div>
               </div>
               <div className="flex items-start gap-3">

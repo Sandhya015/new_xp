@@ -54,9 +54,9 @@ export function About() {
           <div className="grid gap-10 sm:gap-12 lg:grid-cols-2 lg:gap-16 items-stretch">
             <div className="order-2 lg:order-1 min-w-0 h-full min-h-[320px] sm:min-h-[400px]">
               <img
-                src="/images/about-us-banner.png"
-                alt="About Us — XpertIntern: students, mentors, India map, education and growth"
-                className="w-full h-full min-h-[320px] sm:min-h-[400px] rounded-2xl shadow-xl object-cover object-center"
+                src="/images/about-us-partner-universities.png"
+                alt="About Us — XpertIntern: 50,000+ students trained, 100+ programs offered, 30+ partner universities"
+                className="w-full h-full min-h-[320px] sm:min-h-[400px] rounded-2xl shadow-xl object-contain object-center bg-white"
               />
             </div>
             <div className="order-1 lg:order-2 min-w-0">

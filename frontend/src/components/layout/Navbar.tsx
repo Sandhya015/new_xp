@@ -19,11 +19,17 @@ export function Navbar() {
   const isActive = (path: string) => location.pathname === path || (path !== '/' && location.pathname.startsWith(path))
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur border-b border-gray-200">
+    <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200">
       <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex min-h-[4.5rem] sm:min-h-[5rem] items-center gap-2 py-2">
           <Link to="/" className="shrink-0 md:mr-0" aria-label="XpertIntern Home">
-            <img src="/logo.png" alt="XpertIntern" className="h-12 sm:h-14 md:h-16 w-auto object-contain" />
+            <img
+              src="/logo-navbar.png"
+              alt="XpertIntern"
+              className="h-14 sm:h-16 md:h-20 w-auto object-contain"
+              decoding="async"
+              fetchPriority="high"
+            />
           </Link>
           <div className="hidden md:flex flex-1 justify-center items-center min-w-0">
             <div className="flex items-center gap-5 lg:gap-6">

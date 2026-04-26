@@ -28,6 +28,10 @@ import {
 import { CourseCard } from '@/components/CourseCard'
 import { useCountUp } from '@/hooks/useCountUp'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
+import { courseService } from '@/services/courseService'
+import { REGISTRATION_UNIVERSITIES_LIST } from '@/constants/registrationUniversities'
+import { OTHER_OPTION_VALUE, BRANCHES_66, BRANCH_OTHERS_LABEL, subjectOptionsForCourse } from '@/constants/registrationLists'
+import { REGISTRATION_COLLEGES_BY_UNIVERSITY, collegeOptionsFromList, isOtherCollege } from '@/constants/registrationColleges'
 
 function useInView(once = true) {
   const ref = useRef<HTMLElement>(null)
@@ -141,8 +145,7 @@ const programsPreview = [
   { id: '3', title: 'Data Science', duration: '4 Weeks', tag: 'Python & Analytics' },
 ]
 
-const INLINE_CONTACT_COURSES = ['B.Tech', 'Diploma', 'BA', 'BSc', 'BCom', 'BBA', 'BCA']
-const INLINE_CONTACT_STREAMS = ['CSE', 'Civil', 'Electrical', 'ECE', 'Mechanical', 'IT']
+const INLINE_CONTACT_COURSES = ['B.Tech', 'Diploma', 'B.A.', 'B.Sc', 'B.Com', 'BBA', 'BCA', OTHER_OPTION_VALUE]
 type TestimonialCategory = 'student' | 'educator'
 
 type HomeTestimonial = {
@@ -163,7 +166,7 @@ const testimonials: HomeTestimonial[] = [
     initials: 'AP',
     roleType: 'STUDENT',
     roleDetail: 'B.Tech Student',
-    institution: 'Government Engineering College Sheikhpura, Katihar',
+    institution: 'Government Engineering College, Sheikhpura',
     quote:
       'XpertIntern gave me the skills and confidence I needed to kickstart my career. The Web Development training was practical and taught by real industry experts. I got an AICTE compliant certificate and secured my first internship through the platform within weeks. Highly recommended for every engineering student!',
     highlight: 'Secured first internship within weeks of completing the training!',
@@ -232,18 +235,29 @@ const testimonials: HomeTestimonial[] = [
   },
 ]
 
+type PopularProgram = { id: string; title: string; duration: string; tag: string }
+
 export function Home() {
   const [heroVisible, setHeroVisible] = useState(false)
   const [inlineContact, setInlineContact] = useState({
     fullName: '',
     contactNumber: '',
+    course: '',
+    courseOther: '',
+    branch: '',
+    branchOther: '',
+    subject: '',
+    subjectOther: '',
     university: '',
+    universityOther: '',
+    college: '',
+    collegeOther: '',
+    collegeNameText: '',
     collegeName: '',
     semester: '',
-    course: '',
-    stream: '',
     message: '',
   })
+  const [popularPrograms, setPopularPrograms] = useState<PopularProgram[]>(programsPreview)
   const [inlineContactSubmitted, setInlineContactSubmitted] = useState(false)
   const [testimonialFilter, setTestimonialFilter] = useState<'all' | 'students' | 'educators'>('all')
   const whoRef = useInView()
@@ -261,7 +275,40 @@ export function Home() {
 
   useEffect(() => setHeroVisible(true), [])
 
-  const showStream = inlineContact.course === 'B.Tech' || inlineContact.course === 'Diploma'
+  const showBranch = inlineContact.course === 'B.Tech' || inlineContact.course === 'Diploma'
+  const showSubject = ['B.Sc', 'B.Com', 'B.A.', 'BBA', 'BCA'].includes(inlineContact.course)
+  const collegeListForSelectedUni = inlineContact.university ? REGISTRATION_COLLEGES_BY_UNIVERSITY[inlineContact.university] : undefined
+  const showCollegeDropdown =
+    inlineContact.university &&
+    inlineContact.university !== OTHER_OPTION_VALUE &&
+    inlineContact.university !== 'Nalanda Open University (NOU), Nalanda' &&
+    Array.isArray(collegeListForSelectedUni)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const res = await courseService.list({ page: 1, limit: 12 })
+        const items = Array.isArray(res?.items) ? (res.items as Array<Record<string, unknown>>) : []
+        const active = items.filter((x) => {
+          const st = String((x.status ?? x.listingVisibility ?? 'active') || '').toLowerCase()
+          return st !== 'inactive' && st !== 'draft' && st !== 'archived'
+        })
+        const mapped = active.slice(0, 3).map((x, i) => ({
+          id: String(x.id || x._id || i + 1),
+          title: String(x.title || 'Training Program'),
+          duration: String(x.duration || x.durationValue || '4 Weeks'),
+          tag: String(x.category || x.tag || x.mode || 'Program'),
+        }))
+        if (alive && mapped.length) setPopularPrograms(mapped)
+      } catch {
+        /* keep fallback preview cards */
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
   const handleInlineContactSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setInlineContactSubmitted(true)
@@ -326,8 +373,8 @@ export function Home() {
             {/* Left: About Us illustration — same height as text column */}
             <div className="order-2 lg:order-1 min-w-0 h-full min-h-[300px] sm:min-h-[360px] flex items-center justify-center">
               <img
-                src="/images/about-us.png"
-                alt="About Us — XpertIntern: students, mentor, India map, 50,000+ students trained, 100+ programs, 16+ partner universities"
+                src="/images/about-us-partner-universities.png"
+                alt="About Us — XpertIntern: 50,000+ students trained, 100+ programs offered, 30+ partner universities"
                 className="max-w-full w-full h-full min-h-[280px] object-contain object-center rounded-2xl shadow-lg"
               />
             </div>
@@ -529,7 +576,7 @@ export function Home() {
           <h2 className="text-2xl font-bold text-brand-navy sm:text-3xl">Popular Programs</h2>
           <p className="mt-2 text-sm sm:text-base text-slate-gray">Transform your career with industry-leading courses</p>
           <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-6 lg:gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            {programsPreview.map((prog) => (
+            {popularPrograms.map((prog) => (
               <div key={prog.id} className="home-stagger-card">
                 <CourseCard id={prog.id} title={prog.title} duration={prog.duration} tag={prog.tag} />
               </div>
@@ -586,25 +633,54 @@ export function Home() {
                 <form className="space-y-3 sm:space-y-4" onSubmit={handleInlineContactSubmit}>
                   <input type="text" required placeholder="Full Name *" value={inlineContact.fullName} onChange={(e) => setInlineContact((c) => ({ ...c, fullName: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
                   <input type="tel" required placeholder="Contact Number (10-digit) *" maxLength={10} value={inlineContact.contactNumber} onChange={(e) => setInlineContact((c) => ({ ...c, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 10) }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
-                  <select required value={inlineContact.university} onChange={(e) => setInlineContact((c) => ({ ...c, university: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
-                    <option value="">University *</option>
-                    {universities.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
+                  <select required value={inlineContact.course} onChange={(e) => setInlineContact((c) => ({ ...c, course: e.target.value, courseOther: '', branch: '', branchOther: '', subject: '', subjectOther: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">Course *</option>
+                    {INLINE_CONTACT_COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
-                  <input type="text" required placeholder="College Name *" value={inlineContact.collegeName} onChange={(e) => setInlineContact((c) => ({ ...c, collegeName: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  {inlineContact.course === OTHER_OPTION_VALUE && (
+                    <input type="text" required placeholder="Specify Course Name *" value={inlineContact.courseOther} onChange={(e) => setInlineContact((c) => ({ ...c, courseOther: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  )}
+                  {showBranch && (
+                    <select required value={inlineContact.branch} onChange={(e) => setInlineContact((c) => ({ ...c, branch: e.target.value, branchOther: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                      <option value="">Branch *</option>
+                      {BRANCHES_66.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  )}
+                  {showBranch && inlineContact.branch === BRANCH_OTHERS_LABEL && (
+                    <input type="text" required placeholder="Specify Branch Name *" value={inlineContact.branchOther} onChange={(e) => setInlineContact((c) => ({ ...c, branchOther: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  )}
+                  {showSubject && (
+                    <select required value={inlineContact.subject} onChange={(e) => setInlineContact((c) => ({ ...c, subject: e.target.value, subjectOther: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                      <option value="">Subject *</option>
+                      {subjectOptionsForCourse(inlineContact.course).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  )}
+                  {showSubject && inlineContact.subject === OTHER_OPTION_VALUE && (
+                    <input type="text" required placeholder="Specify Subject Name *" value={inlineContact.subjectOther} onChange={(e) => setInlineContact((c) => ({ ...c, subjectOther: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  )}
+                  <select required value={inlineContact.university} onChange={(e) => setInlineContact((c) => ({ ...c, university: e.target.value, universityOther: '', college: '', collegeOther: '', collegeNameText: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                    <option value="">University *</option>
+                    {REGISTRATION_UNIVERSITIES_LIST.map((u) => <option key={u.name} value={u.name}>{u.shortForm} — {u.name}</option>)}
+                  </select>
+                  {inlineContact.university === OTHER_OPTION_VALUE && (
+                    <input type="text" required placeholder="Specify University Name *" value={inlineContact.universityOther} onChange={(e) => setInlineContact((c) => ({ ...c, universityOther: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  )}
+                  {inlineContact.university && (showCollegeDropdown ? (
+                    <select required value={inlineContact.college} onChange={(e) => setInlineContact((c) => ({ ...c, college: e.target.value, collegeOther: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
+                      <option value="">College Name *</option>
+                      {collegeOptionsFromList(collegeListForSelectedUni || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" required placeholder="College Name *" value={inlineContact.collegeNameText} onChange={(e) => setInlineContact((c) => ({ ...c, collegeNameText: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  ))}
+                  {showCollegeDropdown && isOtherCollege(inlineContact.college) && (
+                    <input type="text" required placeholder="Specify College Name *" value={inlineContact.collegeOther} onChange={(e) => setInlineContact((c) => ({ ...c, collegeOther: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
+                  )}
                   <select required value={inlineContact.semester} onChange={(e) => setInlineContact((c) => ({ ...c, semester: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
                     <option value="">Semester *</option>
                     {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <select required value={inlineContact.course} onChange={(e) => setInlineContact((c) => ({ ...c, course: e.target.value, stream: '' }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
-                    <option value="">Course *</option>
-                    {INLINE_CONTACT_COURSES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  {showStream && (
-                    <select required value={inlineContact.stream} onChange={(e) => setInlineContact((c) => ({ ...c, stream: e.target.value }))} className="block w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-slate-gray focus:border-brand-accent focus:ring-1 focus:ring-brand-accent">
-                      <option value="">Stream *</option>
-                      {INLINE_CONTACT_STREAMS.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  )}
+                  
                   <textarea required placeholder="Message / Query *" rows={3} value={inlineContact.message} onChange={(e) => setInlineContact((c) => ({ ...c, message: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
                   <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-navy py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition">
                     <Send className="h-4 w-4" /> Submit
@@ -662,17 +738,21 @@ export function Home() {
                     {t.initials}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-bold text-brand-navy">{t.name}</h3>
-                      <span className="rounded-md bg-primary-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-800">
-                        {t.roleType}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-slate-gray">{t.roleDetail}</p>
-                    <div className="mt-2 flex gap-0.5" aria-label="5 out of 5 stars">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <Star key={i} className="h-4 w-4 fill-amber-400 text-amber-400 shrink-0" strokeWidth={1.5} />
-                      ))}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-bold text-brand-navy">{t.name}</h3>
+                          <span className="rounded-md bg-primary-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-800">
+                            {t.roleType}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-slate-gray">{t.roleDetail}</p>
+                      </div>
+                      <div className="flex gap-0.5 pt-0.5" aria-label="5 out of 5 stars">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                          <Star key={i} className="h-4 w-4 fill-amber-400 text-amber-400 shrink-0" strokeWidth={1.5} />
+                        ))}
+                      </div>
                     </div>
                     <p className="mt-2 text-xs leading-snug text-slate-gray sm:text-sm">{t.institution}</p>
                   </div>
