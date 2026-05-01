@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
-import { BarChart3, Brain, Code2, Cpu, Filter, Loader2, Megaphone, Search, Smartphone, X } from 'lucide-react'
+import { BarChart3, Brain, Code2, Cpu, Filter, Loader2, Megaphone, Search, Smartphone, Star, X } from 'lucide-react'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
@@ -34,6 +34,8 @@ type CourseCard = {
   courses: string[]
   streams: string[]
   subjects: string[]
+  reviewAverage?: number
+  reviewCount?: number
 }
 
 const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
@@ -54,6 +56,8 @@ function courseFromApi(
     courses?: string[]
     streams?: string[]
     subjects?: string[]
+    reviewAverage?: number
+    reviewCount?: number
   },
   i: number,
 ): CourseCard {
@@ -80,6 +84,8 @@ function courseFromApi(
     courses,
     streams,
     subjects,
+    reviewAverage: typeof c.reviewAverage === 'number' ? c.reviewAverage : undefined,
+    reviewCount: typeof c.reviewCount === 'number' ? c.reviewCount : undefined,
   }
 }
 
@@ -391,6 +397,17 @@ export function StudentTraining() {
                 </div>
                 <h3 className="mt-3 font-semibold text-brand-navy line-clamp-2">{c.title}</h3>
                 <p className="mt-1 text-xs text-slate-gray line-clamp-2">{c.description}</p>
+                <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+                  {c.reviewCount && c.reviewCount > 0 ? (
+                    <>
+                      <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" aria-hidden />
+                      <span className="font-semibold text-gray-900">{Number(c.reviewAverage ?? 0).toFixed(1)}</span>
+                      <span className="text-gray-500">({c.reviewCount})</span>
+                    </>
+                  ) : (
+                    <span className="text-gray-400">No ratings yet</span>
+                  )}
+                </div>
                 <p className="mt-2 text-xs text-slate-gray">
                   {c.universities} · {c.duration} · {c.mode}
                 </p>

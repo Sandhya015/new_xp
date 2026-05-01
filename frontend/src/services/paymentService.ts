@@ -18,6 +18,7 @@ export type OrderItem = {
   status: string
   method?: string
   createdAt: string
+  invoiceNumber?: string
 }
 
 export const paymentService = {
@@ -62,8 +63,11 @@ export const paymentService = {
     })
     return data
   },
-  async getInvoice(invoiceId: string) {
-    const { data } = await api.get(`/api/payments/invoice/${invoiceId}`)
-    return data
+  async getInvoice(orderId: string, format: 'pdf' | 'html' = 'pdf'): Promise<Blob> {
+    const { data } = await api.get(`/api/payments/invoice/${encodeURIComponent(orderId)}`, {
+      params: { format },
+      responseType: 'blob',
+    })
+    return data as Blob
   },
 }

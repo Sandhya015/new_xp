@@ -5,6 +5,7 @@ When EMAIL_TRANSPORT=ses, sends through SES (see app/email_ses.py); otherwise SM
 """
 from __future__ import annotations
 
+import html as html_module
 import logging
 import smtplib
 import ssl
@@ -173,27 +174,47 @@ def send_payment_success_email(
     amount_display: str,
     payment_ref: str,
     new_enrollment: bool,
+    *,
+    invoice_number: str | None = None,
+    pdf_bytes: bytes | None = None,
+    pdf_filename: str | None = None,
+    html_invoice_bytes: bytes | None = None,
+    html_filename: str | None = None,
 ) -> bool:
     """Sent once when Razorpay payment is verified (includes enrollment line if we just created enrollment)."""
     name = student_name or "there"
     safe_title = course_title or "your course"
-    subject = f"Payment received — {safe_title}"
+    inv_raw = (invoice_number or "").strip()
+    inv_safe = html_module.escape(inv_raw) if inv_raw else ""
+    if inv_raw:
+        subject = f"Welcome to XpertIntern — Your tax invoice & course access (Invoice #{inv_raw})"
+    else:
+        subject = f"Payment received — {safe_title}"
     enroll_block = (
         "<p>Your enrollment is <strong>active</strong>. Open <strong>My Enrolled Courses</strong> in your dashboard for materials, quizzes, and your certificate path.</p>"
         if new_enrollment
         else "<p>If you were already enrolled, your payment is still recorded on your account.</p>"
     )
+    inv_line = ""
+    if inv_safe:
+        inv_line = f"<p>Your tax invoice number: <strong>{inv_safe}</strong>. A PDF copy is attached to this email.</p>"
     html = f"""
     <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
     <p>Hi {name},</p>
     <p>We have <strong>successfully received</strong> your payment for <strong>{safe_title}</strong>.</p>
     <p>Amount: <strong>{amount_display}</strong><br/>Payment reference: <strong>{payment_ref}</strong></p>
+    {inv_line}
     {enroll_block}
     <p>Thank you for choosing XpertIntern.</p>
     <p>— Team XpertIntern</p>
     </body></html>
     """
-    return send_email(config, to_email, subject, html)
+    attachments: list[tuple[str, bytes, str]] = []
+    if pdf_bytes and pdf_filename:
+        attachments.append((pdf_filename, pdf_bytes, "application/pdf"))
+    if html_invoice_bytes and html_filename:
+        attachments.append((html_filename, html_invoice_bytes, "text/html"))
+    return send_email(config, to_email, subject, html, attachments=attachments or None)
 
 
 def send_certificate_email(

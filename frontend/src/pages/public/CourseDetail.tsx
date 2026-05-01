@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
@@ -132,6 +132,7 @@ function parseLearnLine(line: string): { lead: string; rest: string | null } {
 export function CourseDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [course, setCourse] = useState<PublicCourse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -165,6 +166,16 @@ export function CourseDetail() {
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    if (!token || !course?.id || userIsEnrolled !== false) return
+    const q = new URLSearchParams(location.search)
+    if (q.get('enroll') !== '1') return
+    setEnrollOpen(true)
+    q.delete('enroll')
+    const s = q.toString()
+    navigate({ pathname: location.pathname, search: s ? `?${s}` : '' }, { replace: true })
+  }, [token, course?.id, userIsEnrolled, location.search, location.pathname, navigate])
 
   useEffect(() => {
     if (!course?.id) return
@@ -203,8 +214,7 @@ export function CourseDetail() {
     [course?.introVideoUrl],
   )
 
-  const audienceLines = useMemo(() => linesFromText(course?.targetAudience), [course?.targetAudience])
-
+  const instructionHtml = (course?.instructions || '').trim()
   const instructionLines = useMemo(() => linesFromText(course?.instructions), [course?.instructions])
 
   const toggleModule = (mid: string) => {
@@ -490,7 +500,7 @@ export function CourseDetail() {
                     onClick={() => {
                       clearError()
                       if (!token) {
-                        navigate(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
+                        navigate(`/login?next=${encodeURIComponent(`${location.pathname}?enroll=1`)}`)
                         return
                       }
                       setEnrollOpen(true)
@@ -708,25 +718,23 @@ export function CourseDetail() {
                   </section>
                 ) : null}
 
-                {audienceLines.length > 0 ? (
+                {instructionHtml ? (
                   <section>
-                    <h2 className="text-xl font-bold text-gray-900">Who is this course for?</h2>
-                    <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
-                      {audienceLines.map((line, i) => (
-                        <li key={i}>{line}</li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
-
-                {instructionLines.length > 0 ? (
-                  <section>
-                    <h2 className="text-xl font-bold text-gray-900">Instructions</h2>
-                    <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
-                      {instructionLines.map((line, i) => (
-                        <li key={i}>{line}</li>
-                      ))}
-                    </ul>
+                    <h2 className="text-xl font-bold text-gray-900">Instructions and Requirements</h2>
+                    {instructionHtml.includes('<') ? (
+                      <div
+                        className="mt-3 max-w-none text-sm leading-relaxed text-gray-700 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1"
+                        dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(instructionHtml) }}
+                      />
+                    ) : instructionLines.length > 0 ? (
+                      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-gray-700">
+                        {instructionLines.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-3 text-sm text-gray-700 whitespace-pre-wrap">{instructionHtml}</p>
+                    )}
                   </section>
                 ) : null}
 

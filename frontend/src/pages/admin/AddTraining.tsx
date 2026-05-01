@@ -802,7 +802,7 @@ export function AddTraining() {
           ? toScheduledIso(basic.scheduleDate, basic.scheduleTime)
           : undefined,
       whatYouWillLearn: linesToList(additional.whatYouWillLearn),
-      targetAudience: additional.targetAudience.trim(),
+      targetAudience: '',
       materialsIncluded: linesToList(additional.materialsIncluded),
       instructions: additional.instructions.trim(),
       trainingTags: tagsToList(basic.trainingTags),
@@ -2067,7 +2067,7 @@ export function AddTraining() {
           <div>
             <h3 className="font-semibold text-brand-navy">Step 3 — Additional</h3>
             <p className="text-sm text-slate-gray mt-1">
-              Optional training schedule and seat cap appear on listings and the public course page. Learning outcomes, requirements, materials, and instructions are shown as separate sections for students.
+              Optional training schedule and seat cap appear on listings and the public course page. Learning outcomes, materials, and instructions (with requirements) are shown on the course page for students.
             </p>
           </div>
 
@@ -2120,15 +2120,16 @@ export function AddTraining() {
               />
             </div>
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">Requirements / Who is this course for?</label>
+              <label className="block text-sm font-medium text-gray-700">Instructions and Requirements</label>
               <p className="text-xs text-slate-500 mt-0.5">
-                Each line becomes a bullet under <strong>Requirements</strong> on the course page. Include eligibility, prerequisites, and who should take this course.
+                One line per bullet on the course page — prerequisites, eligibility, software to install, hardware, and prep steps.
               </p>
               <textarea
-                rows={3}
-                value={additional.targetAudience}
-                onChange={(e) => setAdditional((a) => ({ ...a, targetAudience: e.target.value }))}
+                rows={4}
+                value={additional.instructions}
+                onChange={(e) => setAdditional((a) => ({ ...a, instructions: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder={'e.g. Install Python 3.11+\ne.g. Laptop with 8GB RAM'}
               />
             </div>
             <div className="sm:col-span-2">
@@ -2139,19 +2140,6 @@ export function AddTraining() {
                 value={additional.materialsIncluded}
                 onChange={(e) => setAdditional((a) => ({ ...a, materialsIncluded: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700">Instructions &amp; requirements (student prep)</label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Each line becomes a bullet under <strong>Instructions</strong> on the course page — e.g. software to install, hardware, things to prepare before the course starts.
-              </p>
-              <textarea
-                rows={3}
-                value={additional.instructions}
-                onChange={(e) => setAdditional((a) => ({ ...a, instructions: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                placeholder={'e.g. Install Python 3.11+\ne.g. Laptop with 8GB RAM'}
               />
             </div>
           </div>

@@ -87,9 +87,29 @@ export function Invoices() {
                       }`}>{p.status}</span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-brand-accent hover:underline">
-                        <Download className="h-4 w-4" /> Download
-                      </button>
+                      {p.status === 'success' || p.status === 'completed' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            paymentService
+                              .getInvoice(p.id, 'pdf')
+                              .then((blob) => {
+                                const url = URL.createObjectURL(blob)
+                                const a = document.createElement('a')
+                                a.href = url
+                                a.download = p.invoiceNumber ? `Tax-Invoice-${p.invoiceNumber.replace(/\//g, '-')}.pdf` : `invoice-${p.id}.pdf`
+                                a.click()
+                                URL.revokeObjectURL(url)
+                              })
+                              .catch(() => {})
+                          }}
+                          className="inline-flex items-center gap-1 text-sm font-medium text-brand-accent hover:underline"
+                        >
+                          <Download className="h-4 w-4" /> Download
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </td>
                   </tr>
                 ))

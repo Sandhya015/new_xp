@@ -1,19 +1,17 @@
 /**
- * Admin — Manage Existing Training (AD-WF-04). Tabs: Overview, Batches, Class Links, Materials, Assignments, Quizzes, Attendance, Announcements, Enrolled Students.
+ * Admin — Manage Existing Training (AD-WF-04). Tabs: Overview, Class Links, Materials, Assignments, Quizzes, Attendance, Announcements, Enrolled Students.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   BookOpen,
-  Calendar,
   Link2,
   FileText,
   ClipboardList,
   HelpCircle,
   UserCheck,
   Users,
-  Plus,
   Download,
   Send,
   Star,
@@ -28,7 +26,6 @@ import { courseListingBlurb } from '@/utils/sanitizeHtml'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
-  { id: 'batches', label: 'Batches', icon: Calendar },
   { id: 'class-links', label: 'Class Links', icon: Link2 },
   { id: 'materials', label: 'Study Materials', icon: FileText },
   { id: 'assignments', label: 'Assignments', icon: ClipboardList },
@@ -157,21 +154,8 @@ export function ManageTraining() {
     }
   }
 
-  const addBatch = () => {
-    const batches = [...(course?.batches || []), { name: '', startDate: '', endDate: '', maxSeats: '', mode: 'Online' }]
-    updateCourseSection('batches', batches)
-  }
-  const removeBatch = (index: number) => {
-    const batches = (course?.batches || []).filter((_, i) => i !== index)
-    updateCourseSection('batches', batches)
-  }
-  const updateBatch = (index: number, field: string, value: string) => {
-    const batches = (course?.batches || []).map((b, i) => (i === index ? { ...b, [field]: value } : b))
-    updateCourseSection('batches', batches)
-  }
-
   const addClassLink = (link: { title: string; date: string; time: string; platform: string; link: string; batch: string }) => {
-    const classLinks = [...(course?.classLinks || []), { ...link, id: `cl_${Date.now()}` }]
+    const classLinks = [...(course?.classLinks || []), { ...link, batch: link.batch || '', id: `cl_${Date.now()}` }]
     updateCourseSection('classLinks', classLinks)
   }
   const removeClassLink = (index: number) => {
@@ -247,7 +231,7 @@ export function ManageTraining() {
         </Link>
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold text-brand-navy truncate">{course.title || 'Manage Training'}</h2>
-          <p className="text-sm text-slate-gray">Edit content, batches, class links, materials, quizzes, attendance, and announcements.</p>
+          <p className="text-sm text-slate-gray">Edit content, class links, materials, quizzes, attendance, and announcements.</p>
         </div>
       </div>
 
@@ -299,7 +283,6 @@ export function ManageTraining() {
               </div>
             ) : null}
             <div className="flex flex-wrap gap-4 pt-2 border-t border-gray-200">
-              <span className="text-sm text-slate-500">Batches: {(course.batches || []).length}</span>
               <span className="text-sm text-slate-500">Curriculum modules: {(course.curriculum || []).length}</span>
               <span className="text-sm text-slate-500">Class links: {(course.classLinks || []).length}</span>
               <span className="text-sm text-slate-500">Materials: {(course.studyMaterials || []).length}</span>
@@ -307,34 +290,8 @@ export function ManageTraining() {
           </div>
         )}
 
-        {activeTab === 'batches' && (
-          <div className="space-y-4">
-            <button type="button" onClick={addBatch} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">
-              <Plus className="h-4 w-4" /> Add Batch
-            </button>
-            {(course.batches || []).length === 0 ? (
-              <p className="text-sm text-slate-gray">No batches. Add one above.</p>
-            ) : (
-              <ul className="space-y-3">
-                {(course.batches || []).map((batch, i) => (
-                  <li key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 p-3">
-                    <input value={batch.name} onChange={(e) => updateBatch(i, 'name', e.target.value)} placeholder="Batch name" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-32" />
-                    <input type="date" value={batch.startDate} onChange={(e) => updateBatch(i, 'startDate', e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm" />
-                    <input type="date" value={batch.endDate} onChange={(e) => updateBatch(i, 'endDate', e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm" />
-                    <input type="number" min={1} value={batch.maxSeats} onChange={(e) => updateBatch(i, 'maxSeats', e.target.value)} placeholder="Seats" className="rounded border border-gray-300 px-2 py-1.5 text-sm w-20" />
-                    <select value={batch.mode} onChange={(e) => updateBatch(i, 'mode', e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm">
-                      <option>Online</option><option>Offline</option><option>Hybrid</option>
-                    </select>
-                    <button type="button" onClick={() => removeBatch(i)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="h-4 w-4" /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
         {activeTab === 'class-links' && (
-          <ClassLinksTab classLinks={course.classLinks || []} onAdd={addClassLink} onRemove={removeClassLink} saving={saving} batches={course.batches || []} />
+          <ClassLinksTab classLinks={course.classLinks || []} onAdd={addClassLink} onRemove={removeClassLink} saving={saving} />
         )}
 
         {activeTab === 'materials' && (
@@ -368,17 +325,6 @@ export function ManageTraining() {
 
         {activeTab === 'enrolled' && (
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <select className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-                <option value="">All Batches</option>
-                {(course.batches || []).map((b, i) => (
-                  <option key={i} value={b.name}>{b.name || `Batch ${i + 1}`}</option>
-                ))}
-              </select>
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">
-                <Send className="h-4 w-4" /> Send Notification
-              </button>
-            </div>
             {enrollLoading ? (
               <p className="text-sm text-slate-gray">Loading enrollments…</p>
             ) : enrollments.length === 0 ? (
@@ -576,24 +522,21 @@ function ClassLinksTab({
   onAdd,
   onRemove,
   saving,
-  batches,
 }: {
   classLinks: Array<{ title: string; date: string; time: string; platform: string; link: string; batch: string }>
   onAdd: (l: { title: string; date: string; time: string; platform: string; link: string; batch: string }) => void
   onRemove: (i: number) => void
   saving: boolean
-  batches: Array<{ name: string }>
 }) {
   const [title, setTitle] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [platform, setPlatform] = useState('Zoom')
   const [link, setLink] = useState('')
-  const [batch, setBatch] = useState('')
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
-    onAdd({ title: title.trim(), date, time, platform, link: link.trim(), batch })
+    onAdd({ title: title.trim(), date, time, platform, link: link.trim(), batch: '' })
     setTitle(''); setDate(''); setTime(''); setLink('')
   }
   return (
@@ -603,18 +546,15 @@ function ClassLinksTab({
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm" />
         <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm" />
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm">
-          <option>Zoom</option><option>Meet</option><option>Teams</option>
+          <option>Zoom</option>
+          <option>Meet</option>
+          <option>Teams</option>
+          <option>YouTube</option>
         </select>
-        <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Meeting link" className="rounded border border-gray-300 px-2 py-1.5 text-sm min-w-[200px]" />
-        <select value={batch} onChange={(e) => setBatch(e.target.value)} className="rounded border border-gray-300 px-2 py-1.5 text-sm">
-          <option value="">Batch</option>
-          {batches.map((b, i) => (
-            <option key={i} value={b.name}>{b.name || `Batch ${i + 1}`}</option>
-          ))}
-        </select>
+        <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Meeting or YouTube URL" className="rounded border border-gray-300 px-2 py-1.5 text-sm min-w-[200px]" />
         <button type="submit" disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">Add</button>
       </form>
-      <p className="text-xs text-slate-500">Session Title, Date, Time, Platform, Meeting Link, Batch. Notify students optionally.</p>
+      <p className="text-xs text-slate-500">Sessions apply to all enrolled students. Use a youtube.com or youtu.be link when platform is YouTube.</p>
       {classLinks.length === 0 ? (
         <p className="text-sm text-slate-gray">No class links yet.</p>
       ) : (

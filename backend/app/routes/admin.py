@@ -47,6 +47,8 @@ from app.db import (
     get_followups_collection,
 )
 
+from app.course_legacy import migrate_legacy_course_fields
+
 admin_bp = Blueprint("admin", __name__)
 
 
@@ -527,6 +529,7 @@ def get_course(course_id):
     c = get_courses_collection().find_one({"_id": ObjectId(course_id)})
     if not c:
         return jsonify({"error": "Course not found"}), 404
+    c = migrate_legacy_course_fields(get_courses_collection(), c)
     return jsonify(_course_to_detail(c))
 
 

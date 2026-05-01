@@ -42,7 +42,7 @@ export function Login() {
           return
         }
         setSession(res.user as User, res.token)
-        const r = safeRedirect(searchParams.get('redirect'))
+        const r = safeRedirect(searchParams.get('redirect') || searchParams.get('next'))
         navigate(r || '/dashboard', { replace: true })
       } else {
         if (role !== 'company') {

@@ -1,12 +1,12 @@
 import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
-import { Search, Filter, Clock, Monitor, Building2, Laptop, X } from 'lucide-react'
+import { Search, Filter, Clock, Monitor, Building2, Laptop, X, Star } from 'lucide-react'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
 import { absoluteApiUrl } from '@/config/api'
 import { splitInrTaxInclusive, formatInr } from '@/utils/gstPricing'
@@ -36,6 +36,8 @@ interface Course {
   courses: string[]
   streams: string[]
   subjects: string[]
+  reviewAverage?: number
+  reviewCount?: number
 }
 
 function courseFromApi(c: Record<string, unknown>): Course {
@@ -63,6 +65,8 @@ function courseFromApi(c: Record<string, unknown>): Course {
     courses,
     streams,
     subjects,
+    reviewAverage: typeof c.reviewAverage === 'number' ? c.reviewAverage : undefined,
+    reviewCount: typeof c.reviewCount === 'number' ? c.reviewCount : undefined,
   }
 }
 
@@ -75,6 +79,7 @@ function ModeIcon({ mode }: { mode: string }) {
 
 export function Training() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [courses, setCourses] = useState<Course[]>([])
   const [coursesLoading, setCoursesLoading] = useState(true)
   const [coursesLoadError, setCoursesLoadError] = useState<string | null>(null)
@@ -352,7 +357,22 @@ export function Training() {
           {filteredCourses.map((course) => {
             const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
             const isCompleted = Boolean(token && completedCourseIds.has(course.id))
-            const detailTo = isEnrolled ? courseContentPath(course.id) : courseMarketingPath(course.id)
+            const marketingPath = courseMarketingPath(course.id)
+            const detailTo = isEnrolled ? courseContentPath(course.id) : marketingPath
+            const goDetails = () => {
+              if (!token) {
+                navigate(`/login?next=${encodeURIComponent(marketingPath)}`)
+                return
+              }
+              navigate(detailTo)
+            }
+            const goEnroll = () => {
+              if (!token) {
+                navigate(`/login?next=${encodeURIComponent(`${marketingPath}?enroll=1`)}`)
+                return
+              }
+              setEnrollCourse(course)
+            }
             const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}${courseMarketingPath(course.id)}` : ''
             const thumb = course.featuredImageUrl ? absoluteApiUrl(course.featuredImageUrl) : ''
             const catLabel = course.category === 'technical' ? 'Technical' : course.category === 'non-technical' ? 'Non-Technical' : 'Other'
@@ -388,11 +408,22 @@ export function Training() {
                 </div>
                 <div className="flex flex-1 flex-col p-4 sm:p-5">
                   <h2 className="text-base font-bold text-brand-navy line-clamp-2 leading-snug">
-                    <Link to={detailTo} className="hover:text-brand-accent transition">
+                    <button type="button" onClick={goDetails} className="text-left hover:text-brand-accent transition w-full">
                       {course.title}
-                    </Link>
+                    </button>
                   </h2>
                   <p className="mt-2 text-sm text-slate-gray line-clamp-2">{course.description}</p>
+                  <div className="mt-1.5 flex items-center gap-1.5 text-sm">
+                    {course.reviewCount && course.reviewCount > 0 ? (
+                      <>
+                        <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" aria-hidden />
+                        <span className="font-semibold text-gray-900">{Number(course.reviewAverage ?? 0).toFixed(1)}</span>
+                        <span className="text-gray-500">({course.reviewCount})</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-400">No ratings yet</span>
+                    )}
+                  </div>
                   <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
                     <span className="flex items-center gap-1">
                       <Building2 className="h-3.5 w-3.5 shrink-0" /> {course.universities}
@@ -422,12 +453,13 @@ export function Training() {
                     )}
                   </div>
                   <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Link
-                      to={detailTo}
+                    <button
+                      type="button"
+                      onClick={goDetails}
                       className="flex w-full items-center justify-center rounded-lg border-2 border-brand-accent px-4 py-2.5 text-sm font-semibold text-brand-accent hover:bg-brand-light-bg transition min-h-[44px]"
                     >
                       View Details
-                    </Link>
+                    </button>
                     {isEnrolled ? (
                       <span
                         className={`flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-semibold min-h-[44px] ${
@@ -439,7 +471,7 @@ export function Training() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setEnrollCourse(course)}
+                        onClick={goEnroll}
                         className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 min-h-[44px]"
                       >
                         Enroll Now

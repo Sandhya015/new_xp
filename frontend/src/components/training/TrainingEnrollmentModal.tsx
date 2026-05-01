@@ -48,15 +48,26 @@ function validEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
 }
 
-function applyCouponToGross(gross: number, code: string, coupons: TrainingCheckoutSettings['coupons']) {
+function applyCouponToSubtotal(
+  subtotalIncl: number,
+  code: string,
+  coupons: TrainingCheckoutSettings['coupons'],
+) {
   const c = (code || '').trim().toUpperCase()
-  if (!c) return { ok: true as const, gross, message: '' }
+  if (!c) return { ok: true as const, gross: subtotalIncl, message: '' }
   const row = coupons.find((x) => x.code === c)
-  if (!row) return { ok: false as const, gross, message: 'Invalid or expired coupon code.' }
-  let next = gross
-  if (row.percentOff != null) next = gross * Math.max(0, 1 - row.percentOff / 100)
-  else if (row.rupeesOff != null) next = Math.max(0, gross - row.rupeesOff)
-  return { ok: true as const, gross: next, message: '' }
+  if (!row) return { ok: false as const, gross: subtotalIncl, message: 'Invalid or expired coupon code.' }
+  let next = subtotalIncl
+  if (row.percentOff != null) {
+    let disc = (subtotalIncl * row.percentOff) / 100
+    if (row.maxDiscountInr != null && row.maxDiscountInr > 0) {
+      disc = Math.min(disc, row.maxDiscountInr)
+    }
+    next = Math.max(0, subtotalIncl - disc)
+  } else if (row.rupeesOff != null) {
+    next = Math.max(0, subtotalIncl - row.rupeesOff)
+  }
+  return { ok: true as const, gross: Math.round(next * 100) / 100, message: '' }
 }
 
 export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBusy, payError, clearPayError }: Props) {
@@ -128,19 +139,26 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
   const subjectOpts = useMemo(() => subjectOptionsForCourse(courseLevel), [courseLevel])
 
   const gstRate = (settings?.gstPercent ?? 18) / 100
+  const kitGstRate = 0.12
   const kitPrice = settings?.trainingKitPriceInr ?? 0
   const coupons = settings?.coupons ?? []
 
   const courseGross = course?.price ?? 0
-  const couponCheck = applyCouponToGross(courseGross, couponApplied, coupons)
-  const afterCourseGross = couponCheck.gross
   const kitGross = includeKit ? kitPrice : 0
-  const totalGross = Math.round((afterCourseGross + kitGross) * 100) / 100
+  const subtotalIncl = Math.round((courseGross + kitGross) * 100) / 100
+  const couponCheck = applyCouponToSubtotal(subtotalIncl, couponApplied, coupons)
+  const afterSubIncl = couponCheck.gross
+  const rawDiscount = Math.round((subtotalIncl - afterSubIncl) * 100) / 100
+  const courseOff = Math.min(rawDiscount, courseGross)
+  const kitOff = Math.min(Math.round((rawDiscount - courseOff) * 100) / 100, kitGross)
+  const afterCourseGross = Math.round((courseGross - courseOff) * 100) / 100
+  const afterKitGross = Math.round((kitGross - kitOff) * 100) / 100
+  const totalGross = Math.round((afterCourseGross + afterKitGross) * 100) / 100
 
   const courseSplit = splitInrTaxInclusive(courseGross, gstRate)
   const afterCouponSplit = splitInrTaxInclusive(afterCourseGross, gstRate)
-  const kitSplit = kitGross > 0 ? splitInrTaxInclusive(kitGross, gstRate) : { base: 0, gst: 0, total: 0, gstRate }
-  const totalSplit = splitInrTaxInclusive(totalGross, gstRate)
+  const kitSplit = kitGross > 0 ? splitInrTaxInclusive(kitGross, kitGstRate) : { base: 0, gst: 0, total: 0, gstRate: kitGstRate }
+  const afterKitSplit = afterKitGross > 0 ? splitInrTaxInclusive(afterKitGross, kitGstRate) : { base: 0, gst: 0, total: 0, gstRate: kitGstRate }
 
   const thumb = course?.featuredImageUrl ? absoluteApiUrl(course.featuredImageUrl) : ''
 
@@ -269,7 +287,8 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
 
   const onApplyCoupon = () => {
     setCouponError(null)
-    const r = applyCouponToGross(courseGross, couponCode, coupons)
+    const sub = Math.round(((course?.price ?? 0) + (includeKit ? kitPrice : 0)) * 100) / 100
+    const r = applyCouponToSubtotal(sub, couponCode, coupons)
     if (!r.ok) {
       setCouponError(r.message || 'Invalid or expired coupon code.')
       setCouponApplied('')
@@ -525,23 +544,35 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm space-y-2">
                   <div className="flex justify-between text-gray-700">
-                    <span>Base price (excl. GST)</span>
-                    <span>{formatInr(afterCouponSplit.base + (includeKit ? kitSplit.base : 0))}</span>
+                    <span>Taxable value (excl. GST)</span>
+                    <span>{formatInr(afterCouponSplit.base + afterKitSplit.base)}</span>
                   </div>
                   <div className="flex justify-between text-gray-700">
-                    <span>GST ({settings?.gstPercent ?? 18}%)</span>
-                    <span>{formatInr(afterCouponSplit.gst + (includeKit ? kitSplit.gst : 0))}</span>
+                    <span>GST — Course ({settings?.gstPercent ?? 18}%)</span>
+                    <span>{formatInr(afterCouponSplit.gst)}</span>
                   </div>
+                  {afterKitGross > 0 ? (
+                    <div className="flex justify-between text-gray-700">
+                      <span>GST — Training kit (12%)</span>
+                      <span>{formatInr(afterKitSplit.gst)}</span>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between font-bold text-gray-900 pt-2 border-t border-gray-100">
-                    <span>Total</span>
+                    <span>Total (incl. GST)</span>
                     <span>{formatInr(totalGross)}</span>
                   </div>
                   <p className="text-xs text-gray-500 pt-1">
-                    List price {formatInr(courseGross)} (incl. GST): taxable {formatInr(courseSplit.base)}, GST{' '}
+                    Course list {formatInr(courseGross)} (incl. GST): taxable {formatInr(courseSplit.base)}, GST{' '}
                     {formatInr(courseSplit.gst)}
+                    {kitGross > 0 ? (
+                      <span className="block mt-1">
+                        Kit list {formatInr(kitGross)} (incl. GST): taxable {formatInr(kitSplit.base)}, GST{' '}
+                        {formatInr(kitSplit.gst)} @ 12%
+                      </span>
+                    ) : null}
                     {couponApplied ? (
                       <span className="block mt-1 text-emerald-700">
-                        Coupon applied — course after discount {formatInr(afterCourseGross)} (incl. GST).
+                        Coupon applied to order total — payable {formatInr(totalGross)} (incl. GST).
                       </span>
                     ) : null}
                   </p>
@@ -623,7 +654,11 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                 <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm">
                   <p className="font-semibold text-gray-900">Pay {formatInr(totalGross)}</p>
                   <p className="text-xs text-gray-600 mt-1">
-                    Taxable {formatInr(totalSplit.base)} + GST ({settings?.gstPercent ?? 18}%) {formatInr(totalSplit.gst)}
+                    Taxable {formatInr(afterCouponSplit.base + afterKitSplit.base)} + GST: course{' '}
+                    {formatInr(afterCouponSplit.gst)} ({settings?.gstPercent ?? 18}%)
+                    {afterKitGross > 0 ? (
+                      <>, kit {formatInr(afterKitSplit.gst)} (12%)</>
+                    ) : null}
                   </p>
                 </div>
               </>
@@ -661,7 +696,8 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                   onClick={() => {
                     setCouponError(null)
                     if (couponCode.trim() && couponCode.trim().toUpperCase() !== couponApplied) {
-                      const r = applyCouponToGross(courseGross, couponCode, coupons)
+                      const sub = Math.round((courseGross + (includeKit ? kitPrice : 0)) * 100) / 100
+                      const r = applyCouponToSubtotal(sub, couponCode, coupons)
                       if (!r.ok) {
                         setCouponError('Invalid or expired coupon code.')
                         return

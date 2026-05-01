@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Pencil, Eye, Power, PowerOff } from 'lucide-react'
+import { Plus, Pencil, Power, PowerOff } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -91,8 +91,7 @@ export function CourseManager() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Link to={`/admin/courses/${row.id}/manage`} className="rounded p-1.5 text-gray-500 hover:bg-gray-100" title="View / Manage"><Eye className="h-4 w-4" /></Link>
-                      <Link to={`/admin/courses/${row.id}/edit`} className="rounded p-1.5 text-gray-500 hover:bg-gray-100" title="Edit in wizard"><Pencil className="h-4 w-4" /></Link>
+                      <Link to={`/admin/courses/${row.id}/manage`} className="rounded p-1.5 text-gray-500 hover:bg-gray-100" title="Manage training"><Pencil className="h-4 w-4" /></Link>
                       {row.active && <button type="button" className="rounded p-1.5 text-amber-600 hover:bg-amber-50" title="Deactivate"><PowerOff className="h-4 w-4" /></button>}
                       {!row.active && <button type="button" className="rounded p-1.5 text-emerald-600 hover:bg-emerald-50" title="Activate"><Power className="h-4 w-4" /></button>}
                     </div>

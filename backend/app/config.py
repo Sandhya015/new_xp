@@ -27,7 +27,8 @@ class Config:
     """Base config."""
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY", "dev-jwt-secret-change-in-production")
-    JWT_ACCESS_TOKEN_EXPIRES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 86400))  # 24h default
+    # Default 7 days (spec P-1); override via JWT_ACCESS_TOKEN_EXPIRES seconds in env.
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 7 * 86400))
     CORS_ORIGINS: List[str] = []
     MONGODB_URI = os.environ.get("MONGODB_URI", "") or os.environ.get("MONGO_URI", "")
     # Razorpay (test/live keys from https://dashboard.razorpay.com/app/keys)

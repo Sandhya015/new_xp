@@ -31,6 +31,12 @@ import { migrateQuizQuestion, type QuizQuestionDraft } from '@/components/admin/
 
 const CERTIFICATE_PDF_DOWNLOAD_LIMIT = 2
 
+function classLinkIsYoutube(cl: { platform?: string; link?: string }) {
+  const p = (cl.platform || '').toLowerCase()
+  const u = (cl.link || '').toLowerCase()
+  return p === 'youtube' || u.includes('youtube.com') || u.includes('youtu.be')
+}
+
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
   { id: 'curriculum', label: 'Curriculum', icon: ListOrdered },
@@ -1438,24 +1444,36 @@ export function CourseContent() {
             {(!course.classLinks || course.classLinks.length === 0) ? (
               <p className="text-slate-gray">No class links yet.</p>
             ) : (
-              course.classLinks.map((cl, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
-                  <div>
-                    <p className="font-medium text-gray-800">{cl.title || 'Session'}</p>
-                    <p className="text-xs text-slate-gray">{cl.date} {cl.time} · {cl.platform}</p>
+              course.classLinks.map((cl, i) => {
+                const yt = classLinkIsYoutube(cl)
+                return (
+                <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-100 p-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    {yt ? (
+                      <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xs font-bold text-white" aria-hidden>
+                        ▶
+                      </span>
+                    ) : null}
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800">{cl.title || 'Session'}</p>
+                      <p className="text-xs text-slate-gray">{cl.date} {cl.time} · {cl.platform}</p>
+                    </div>
                   </div>
                   {cl.link && (
                     <a
                       href={cl.link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg bg-brand-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600"
+                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium text-white hover:opacity-95 shrink-0 ${
+                        yt ? 'bg-red-600' : 'bg-brand-accent hover:bg-primary-600'
+                      }`}
                     >
-                      Join <ExternalLink className="h-3.5 w-3.5" />
+                      {yt ? 'Watch on YouTube' : 'Join'} <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}
                 </div>
-              ))
+                )
+              })
             )}
           </div>
         )}

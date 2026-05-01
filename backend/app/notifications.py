@@ -120,8 +120,14 @@ def schedule_payment_success_email(
     amount_rupees: float,
     payment_ref: str,
     new_enrollment: bool,
+    *,
+    invoice_number: str | None = None,
+    pdf_bytes: bytes | None = None,
+    pdf_filename: str | None = None,
+    html_invoice_bytes: bytes | None = None,
+    html_filename: str | None = None,
 ) -> None:
-    """After Razorpay verify — payment receipt (+ enrollment note if new)."""
+    """After Razorpay verify — payment receipt (+ enrollment note if new) + tax invoice attachments."""
 
     def job():
         db = get_db()
@@ -149,14 +155,29 @@ def schedule_payment_success_email(
             amount_display = "₹—"
         ref = (payment_ref or "").strip() or "—"
         ok = send_payment_success_email(
-            app.config, name, email, title, amount_display, ref, new_enrollment
+            app.config,
+            name,
+            email,
+            title,
+            amount_display,
+            ref,
+            new_enrollment,
+            invoice_number=invoice_number,
+            pdf_bytes=pdf_bytes,
+            pdf_filename=pdf_filename,
+            html_invoice_bytes=html_invoice_bytes,
+            html_filename=html_filename,
         )
         if ok:
             logger.info("Payment success email sent to %s", email)
         else:
             logger.warning("Payment success email not sent to %s (SMTP disabled or failed)", email)
 
-    _dispatch_email_job(app, job)
+    # On Lambda, daemon threads often never run; match certificate / welcome behaviour.
+    if welcome_email_uses_request_thread():
+        _run_in_app_context(app, job)
+    else:
+        _dispatch_email_job(app, job)
 
 
 def schedule_certificate_email(

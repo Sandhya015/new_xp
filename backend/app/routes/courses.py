@@ -11,7 +11,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from pathlib import Path
 
 from app.course_features import course_has_completion_quiz
-from app.db import get_db, get_courses_collection, get_enrollments_collection
+from app.db import get_db, get_courses_collection, get_enrollments_collection, get_course_reviews_collection
+from app.course_legacy import migrate_legacy_course_fields, review_stats_for_course_ids
 from app.services.course_media_storage import (
     course_media_object_exists,
     featured_s3_object_head_exists,
@@ -237,6 +238,14 @@ def list_courses():
     total_bits = doc.get("total") or []
     total = int(total_bits[0]["c"]) if total_bits else 0
     items = [_course_to_item(c) for c in rows]
+    ids = [str(i["id"]) for i in items if i.get("id")]
+    stats = review_stats_for_course_ids(get_course_reviews_collection(), ids)
+    for it in items:
+        sid = str(it.get("id") or "")
+        st = stats.get(sid)
+        if st and st.get("total", 0) > 0:
+            it["reviewAverage"] = st["average"]
+            it["reviewCount"] = st["total"]
     return jsonify({"items": items, "page": page, "limit": limit, "total": total})
 
 
@@ -355,6 +364,7 @@ def get_course(course_id):
     c = coll.find_one({"_id": ObjectId(course_id), **_PUBLIC_ACTIVE_OR_LEGACY})
     if not c:
         return jsonify({"error": "Course not found"}), 404
+    c = migrate_legacy_course_fields(coll, c)
     enroll_coll = get_enrollments_collection()
     ec = enroll_coll.count_documents(course_id_enrollment_filter(course_id))
     return jsonify(_course_to_public_detail(c, ec))

@@ -42,6 +42,11 @@ def training_checkout_settings():
                 continue
         else:
             continue
+        if c.get("maxDiscountInr") is not None:
+            try:
+                entry["maxDiscountInr"] = float(c.get("maxDiscountInr"))
+            except (TypeError, ValueError):
+                pass
         safe_coupons.append(entry)
     try:
         kit = float(doc.get("trainingKitPriceInr") or 0)

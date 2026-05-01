@@ -4,7 +4,7 @@ import { getApiBase } from '@/config/api'
 export type TrainingCheckoutSettings = {
   trainingKitPriceInr: number
   gstPercent: number
-  coupons: Array<{ code: string; label?: string; percentOff?: number; rupeesOff?: number }>
+  coupons: Array<{ code: string; label?: string; percentOff?: number; rupeesOff?: number; maxDiscountInr?: number }>
 }
 
 export async function fetchTrainingCheckoutSettings(): Promise<TrainingCheckoutSettings> {
