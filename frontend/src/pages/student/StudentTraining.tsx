@@ -16,6 +16,7 @@ import {
   type CatalogModeFilter,
 } from '@/components/training/trainingCatalogFilters'
 import { TrainingFiltersControls } from '@/components/training/TrainingFiltersControls'
+import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
 
 type Mode = 'Online' | 'Offline' | 'Hybrid'
 
@@ -101,11 +102,12 @@ export function StudentTraining() {
   const [durVal, setDurVal] = useState(ALL)
   const [mode, setMode] = useState<CatalogModeFilter>(ALL)
   const [filtersSheetOpen, setFiltersSheetOpen] = useState(false)
+  const [enrollCourse, setEnrollCourse] = useState<CourseCard | null>(null)
 
   const [courses, setCourses] = useState<CourseCard[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const { user, token } = useAuth()
+  const { token } = useAuth()
   const { startCheckout, busy: payBusy, checkoutCourseId, error: payError, clearError: clearPayError } =
     useRazorpayCheckout()
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
@@ -235,6 +237,19 @@ export function StudentTraining() {
       setMode={setMode}
     />
   )
+
+  const enrollLite = (c: CourseCard | null): EnrollCourseLite | null =>
+    c
+      ? {
+          id: c.id,
+          title: c.title,
+          price: c.price,
+          universities: c.universities,
+          mode: c.mode,
+          duration: c.duration,
+          shortDescription: c.description,
+        }
+      : null
 
   return (
     <div className="space-y-6 w-full min-w-0">
@@ -435,18 +450,10 @@ export function StudentTraining() {
                     <button
                       type="button"
                       disabled={!token || (payBusy && checkoutCourseId === c.id)}
-                      onClick={() =>
-                        startCheckout({
-                          courseId: c.id,
-                          courseTitle: c.title,
-                          price: c.price,
-                          prefill: {
-                            name: user?.name,
-                            email: user?.email,
-                            contact: user?.mobile,
-                          },
-                        })
-                      }
+                      onClick={() => {
+                        if (!token) return
+                        setEnrollCourse(c)
+                      }}
                       className="flex-1 rounded-lg bg-brand-accent py-2 text-center text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
                     >
                       {payBusy && checkoutCourseId === c.id ? 'Please wait…' : 'Enroll Now'}
@@ -458,6 +465,15 @@ export function StudentTraining() {
           })}
         </div>
       )}
+
+      <TrainingEnrollmentModal
+        course={enrollLite(enrollCourse)}
+        onClose={() => setEnrollCourse(null)}
+        startCheckout={startCheckout}
+        payBusy={payBusy}
+        payError={payError}
+        clearPayError={clearPayError}
+      />
     </div>
   )
 }
