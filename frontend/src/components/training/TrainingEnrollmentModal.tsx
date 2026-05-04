@@ -11,6 +11,8 @@ import {
 import { REGISTRATION_COLLEGES_BY_UNIVERSITY, collegeOptionsFromList, isOtherCollege } from '@/constants/registrationColleges'
 import { INDIAN_STATES_UTS } from '@/constants/indianRegions'
 import { fetchTrainingCheckoutSettings, type TrainingCheckoutSettings } from '@/services/settingsService'
+import { courseService } from '@/services/courseService'
+import { paymentService } from '@/services/paymentService'
 import { splitInrTaxInclusive, formatInr } from '@/utils/gstPricing'
 import { absoluteApiUrl } from '@/config/api'
 
@@ -48,32 +50,38 @@ function validEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
 }
 
-function applyCouponToSubtotal(
-  subtotalIncl: number,
+function applyCouponToCourseLine(
+  courseGross: number,
   code: string,
   coupons: TrainingCheckoutSettings['coupons'],
 ) {
   const c = (code || '').trim().toUpperCase()
-  if (!c) return { ok: true as const, gross: subtotalIncl, message: '' }
+  if (!c) return { ok: true as const, gross: courseGross, message: '' }
   const row = coupons.find((x) => x.code === c)
-  if (!row) return { ok: false as const, gross: subtotalIncl, message: 'Invalid or expired coupon code.' }
-  let next = subtotalIncl
+  if (!row) return { ok: false as const, gross: courseGross, message: 'Invalid or expired coupon code.' }
+  let disc = 0
   if (row.percentOff != null) {
-    let disc = (subtotalIncl * row.percentOff) / 100
+    let d = (courseGross * row.percentOff) / 100
     if (row.maxDiscountInr != null && row.maxDiscountInr > 0) {
-      disc = Math.min(disc, row.maxDiscountInr)
+      d = Math.min(d, row.maxDiscountInr)
     }
-    next = Math.max(0, subtotalIncl - disc)
+    disc = d
   } else if (row.rupeesOff != null) {
-    next = Math.max(0, subtotalIncl - row.rupeesOff)
+    disc = row.rupeesOff
   }
-  return { ok: true as const, gross: Math.round(next * 100) / 100, message: '' }
+  disc = Math.min(disc, courseGross)
+  const next = Math.round(Math.max(0, courseGross - disc) * 100) / 100
+  return { ok: true as const, gross: next, message: '' }
 }
+
+type KitMeta = { name: string; shortDescription: string; thumbnailUrl: string }
 
 export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBusy, payError, clearPayError }: Props) {
   const { user } = useAuth()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [settings, setSettings] = useState<TrainingCheckoutSettings | null>(null)
+  const [kitMeta, setKitMeta] = useState<KitMeta | null>(null)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
 
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -101,15 +109,94 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!course) {
-      setStep(1)
+    if (!course?.id) {
+      setSettings(null)
+      setKitMeta(null)
       return
     }
-    fetchTrainingCheckoutSettings().then(setSettings).catch(() =>
-      setSettings({ trainingKitPriceInr: 0, gstPercent: 18, coupons: [] }),
-    )
+    let cancelled = false
+    setCheckoutLoading(true)
+    courseService
+      .getById(course.id)
+      .then((detail: Record<string, unknown>) => {
+        if (cancelled) return
+        const ch = detail.checkout as
+          | {
+              gstPercent?: number
+              trainingKit?: { priceInr?: number; name?: string; shortDescription?: string; thumbnailUrl?: string } | null
+              coupons?: TrainingCheckoutSettings['coupons']
+            }
+          | undefined
+        if (ch) {
+          const tk = ch.trainingKit
+          const price = typeof tk?.priceInr === 'number' ? tk.priceInr : 0
+          setSettings({
+            trainingKitPriceInr: price > 0 ? price : 0,
+            gstPercent: typeof ch.gstPercent === 'number' ? ch.gstPercent : 18,
+            coupons: Array.isArray(ch.coupons) ? ch.coupons : [],
+          })
+          if (tk && price > 0) {
+            setKitMeta({
+              name: (tk.name || 'Training kit').trim(),
+              shortDescription: (tk.shortDescription || '').trim(),
+              thumbnailUrl: (tk.thumbnailUrl || '').trim(),
+            })
+          } else {
+            setKitMeta(null)
+          }
+        } else {
+          return fetchTrainingCheckoutSettings().then((s) => {
+            if (!cancelled) {
+              setSettings(s)
+              setKitMeta(null)
+            }
+          })
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        return fetchTrainingCheckoutSettings()
+          .then((s) => {
+            if (!cancelled) {
+              setSettings(s)
+              setKitMeta(null)
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setSettings({ trainingKitPriceInr: 0, gstPercent: 18, coupons: [] })
+          })
+      })
+      .finally(() => {
+        if (!cancelled) setCheckoutLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [course?.id])
 
+  useEffect(() => {
+    if (step !== 3 || !course) return
+    let cancelled = false
+    paymentService
+      .fetchLastBilling()
+      .then((snap) => {
+        if (cancelled || !snap) return
+        const streetVal = typeof snap.street === 'string' ? snap.street : ''
+        if (streetVal.trim()) setStreet(streetVal)
+        const apt = typeof snap.apartment === 'string' ? snap.apartment : ''
+        if (apt.trim()) setApartment(apt)
+        const c = typeof snap.city === 'string' ? snap.city : ''
+        if (c.trim()) setCity(c)
+        const st = typeof snap.state === 'string' ? snap.state : ''
+        if (st.trim()) setState(st)
+        const pin = typeof snap.pincode === 'string' ? snap.pincode : ''
+        if (pin.trim()) setPincode(pin)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [step, course?.id])
   useEffect(() => {
     if (!course) return
     setFullName((user?.name || '').trim())
@@ -120,6 +207,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
     setCourseLevel((user?.course || '').trim())
     setBranchOrSubject((user?.stream || '').trim())
     setSemester((user?.semester || '1st').trim() || '1st')
+    setRegistrationNumber((user?.collegeRegNo || '').trim())
     setCouponCode('')
     setCouponApplied('')
     setCouponError(null)
@@ -146,13 +234,10 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
   const courseGross = course?.price ?? 0
   const kitGross = includeKit ? kitPrice : 0
   const subtotalIncl = Math.round((courseGross + kitGross) * 100) / 100
-  const couponCheck = applyCouponToSubtotal(subtotalIncl, couponApplied, coupons)
-  const afterSubIncl = couponCheck.gross
-  const rawDiscount = Math.round((subtotalIncl - afterSubIncl) * 100) / 100
-  const courseOff = Math.min(rawDiscount, courseGross)
-  const kitOff = Math.min(Math.round((rawDiscount - courseOff) * 100) / 100, kitGross)
-  const afterCourseGross = Math.round((courseGross - courseOff) * 100) / 100
-  const afterKitGross = Math.round((kitGross - kitOff) * 100) / 100
+  const couponCheck = applyCouponToCourseLine(courseGross, couponApplied, coupons)
+  const afterCourseGross = couponCheck.gross
+  const afterKitGross = kitGross
+  const rawDiscount = Math.round((courseGross - afterCourseGross) * 100) / 100
   const totalGross = Math.round((afterCourseGross + afterKitGross) * 100) / 100
 
   const courseSplit = splitInrTaxInclusive(courseGross, gstRate)
@@ -287,8 +372,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
 
   const onApplyCoupon = () => {
     setCouponError(null)
-    const sub = Math.round(((course?.price ?? 0) + (includeKit ? kitPrice : 0)) * 100) / 100
-    const r = applyCouponToSubtotal(sub, couponCode, coupons)
+    const r = applyCouponToCourseLine(course?.price ?? 0, couponCode, coupons)
     if (!r.ok) {
       setCouponError(r.message || 'Invalid or expired coupon code.')
       setCouponApplied('')
@@ -446,6 +530,71 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Branch / Subject</label>
+                    {courseLevel === 'B.Tech' || courseLevel === 'Diploma' ? (
+                      <>
+                        <select
+                          value={branchOrSubject}
+                          onChange={(e) => setBranchOrSubject(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                        >
+                          <option value="">Select branch</option>
+                          {BRANCHES_66.map((b) => (
+                            <option key={b} value={b}>
+                              {b}
+                            </option>
+                          ))}
+                          <option value={OTHER_OPTION_VALUE}>Other</option>
+                        </select>
+                        {branchOrSubject === OTHER_OPTION_VALUE ? (
+                          <input
+                            value={branchOther}
+                            onChange={(e) => setBranchOther(e.target.value)}
+                            placeholder="Specify branch"
+                            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                          />
+                        ) : null}
+                      </>
+                    ) : ['B.Sc', 'B.Com', 'B.A.', 'BBA', 'BCA'].includes(courseLevel) ? (
+                      <>
+                        <select
+                          value={branchOrSubject}
+                          onChange={(e) => setBranchOrSubject(e.target.value)}
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                        >
+                          <option value="">Select subject</option>
+                          {subjectOpts.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                          <option value={OTHER_OPTION_VALUE}>Other</option>
+                        </select>
+                        {branchOrSubject === OTHER_OPTION_VALUE ? (
+                          <input
+                            value={branchOther}
+                            onChange={(e) => setBranchOther(e.target.value)}
+                            placeholder="Specify subject"
+                            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                          />
+                        ) : null}
+                      </>
+                    ) : courseLevel === OTHER_OPTION_VALUE ? (
+                      <input
+                        value={branchOther}
+                        onChange={(e) => setBranchOther(e.target.value)}
+                        placeholder="Course / branch or subject"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                      />
+                    ) : !courseLevel ? (
+                      <p className="text-sm text-gray-400 py-2">Select your course first</p>
+                    ) : (
+                      <p className="text-sm text-gray-400 py-2">No branch or subject required for this course type.</p>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
                     <select value={semester} onChange={(e) => setSemester(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm">
                       {['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'].map((s) => (
@@ -455,80 +604,21 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                       ))}
                     </select>
                   </div>
-                </div>
-                {courseLevel === 'B.Tech' || courseLevel === 'Diploma' ? (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-                    <select
-                      value={branchOrSubject}
-                      onChange={(e) => setBranchOrSubject(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
-                    >
-                      <option value="">Select branch</option>
-                      {BRANCHES_66.map((b) => (
-                        <option key={b} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </select>
-                    {branchOrSubject === OTHER_OPTION_VALUE ? (
-                      <input
-                        value={branchOther}
-                        onChange={(e) => setBranchOther(e.target.value)}
-                        placeholder="Specify branch"
-                        className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-                {['B.Sc', 'B.Com', 'B.A.', 'BBA', 'BCA'].includes(courseLevel) ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
-                    <select
-                      value={branchOrSubject}
-                      onChange={(e) => setBranchOrSubject(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
-                    >
-                      <option value="">Select subject</option>
-                      {subjectOpts.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    {branchOrSubject === OTHER_OPTION_VALUE ? (
-                      <input
-                        value={branchOther}
-                        onChange={(e) => setBranchOther(e.target.value)}
-                        placeholder="Specify subject"
-                        className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-                {courseLevel === OTHER_OPTION_VALUE ? (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Specify course / branch</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Registration Number</label>
                     <input
-                      value={branchOther}
-                      onChange={(e) => setBranchOther(e.target.value)}
+                      value={registrationNumber}
+                      onChange={(e) => setRegistrationNumber(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
                     />
                   </div>
-                ) : null}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Registration Number</label>
-                  <input
-                    value={registrationNumber}
-                    onChange={(e) => setRegistrationNumber(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
-                  />
                 </div>
               </>
             ) : null}
 
             {step === 2 ? (
               <>
+                {checkoutLoading ? <p className="text-xs text-gray-500">Loading checkout options…</p> : null}
                 <div className="flex gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
                   {thumb ? (
                     <img src={thumb} alt="" className="h-20 w-28 shrink-0 rounded-md object-cover" />
@@ -544,21 +634,25 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm space-y-2">
                   <div className="flex justify-between text-gray-700">
-                    <span>Taxable value (excl. GST)</span>
+                    <span>Subtotal (course + kit, incl. GST)</span>
+                    <span>{formatInr(subtotalIncl)}</span>
+                  </div>
+                  {couponApplied && rawDiscount > 0 ? (
+                    <div className="flex justify-between text-emerald-800">
+                      <span>Coupon discount ({couponApplied})</span>
+                      <span>−{formatInr(rawDiscount)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between text-gray-700 pt-1 border-t border-dashed border-gray-100">
+                    <span>Net taxable value (excl. GST)</span>
                     <span>{formatInr(afterCouponSplit.base + afterKitSplit.base)}</span>
                   </div>
                   <div className="flex justify-between text-gray-700">
-                    <span>GST — Course ({settings?.gstPercent ?? 18}%)</span>
-                    <span>{formatInr(afterCouponSplit.gst)}</span>
+                    <span>Total GST (course @ {settings?.gstPercent ?? 18}% + kit @ 12%)</span>
+                    <span>{formatInr(afterCouponSplit.gst + afterKitSplit.gst)}</span>
                   </div>
-                  {afterKitGross > 0 ? (
-                    <div className="flex justify-between text-gray-700">
-                      <span>GST — Training kit (12%)</span>
-                      <span>{formatInr(afterKitSplit.gst)}</span>
-                    </div>
-                  ) : null}
                   <div className="flex justify-between font-bold text-gray-900 pt-2 border-t border-gray-100">
-                    <span>Total (incl. GST)</span>
+                    <span>Grand total (incl. GST)</span>
                     <span>{formatInr(totalGross)}</span>
                   </div>
                   <p className="text-xs text-gray-500 pt-1">
@@ -572,7 +666,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                     ) : null}
                     {couponApplied ? (
                       <span className="block mt-1 text-emerald-700">
-                        Coupon applied to order total — payable {formatInr(totalGross)} (incl. GST).
+                        Payable after coupon {formatInr(totalGross)} — matches Razorpay at checkout when applied on the server.
                       </span>
                     ) : null}
                   </p>
@@ -590,10 +684,33 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                 </div>
                 {couponError ? <p className="text-sm text-red-600">{couponError}</p> : null}
                 {kitPrice > 0 ? (
-                  <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
-                    <input type="checkbox" checked={includeKit} onChange={(e) => setIncludeKit(e.target.checked)} />
-                    Add Training Kit — {formatInr(kitPrice)}
-                  </label>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/90 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-900 mb-2">XpertIntern recommends</p>
+                    <div className="flex gap-3">
+                      {kitMeta?.thumbnailUrl ? (
+                        <img
+                          src={absoluteApiUrl(kitMeta.thumbnailUrl)}
+                          alt=""
+                          className="h-16 w-20 shrink-0 rounded object-cover bg-white"
+                        />
+                      ) : (
+                        <div className="h-16 w-20 shrink-0 rounded bg-amber-100" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-gray-900 text-sm">{kitMeta?.name || 'Training kit'}</p>
+                        {kitMeta?.shortDescription ? (
+                          <p className="text-xs text-gray-600 mt-1 line-clamp-3">{kitMeta.shortDescription}</p>
+                        ) : null}
+                        <p className="text-sm font-bold text-brand-navy mt-2">
+                          {formatInr(kitPrice)} <span className="text-xs font-normal text-gray-600">incl. GST (12%)</span>
+                        </p>
+                        <label className="mt-2 flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                          <input type="checkbox" checked={includeKit} onChange={(e) => setIncludeKit(e.target.checked)} />
+                          Add to order
+                        </label>
+                      </div>
+                    </div>
+                  </div>
                 ) : null}
               </>
             ) : null}
@@ -696,8 +813,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                   onClick={() => {
                     setCouponError(null)
                     if (couponCode.trim() && couponCode.trim().toUpperCase() !== couponApplied) {
-                      const sub = Math.round((courseGross + (includeKit ? kitPrice : 0)) * 100) / 100
-                      const r = applyCouponToSubtotal(sub, couponCode, coupons)
+                      const r = applyCouponToCourseLine(courseGross, couponCode, coupons)
                       if (!r.ok) {
                         setCouponError('Invalid or expired coupon code.')
                         return

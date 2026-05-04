@@ -20,6 +20,8 @@ MAX_OPTIONS_PER_QUESTION = 24
 MAX_LESSON_CONTENT_CHARS = 600_000
 MAX_TOPIC_TITLE_LEN = 500
 MAX_TOPIC_DETAILS_CHARS = 50_000
+MAX_ASSIGNMENT_QUESTIONS = 40
+MAX_ASSIGNMENT_ATTACHMENTS = 20
 
 
 QUIZ_SETTINGS_DEFAULTS: Dict[str, Any] = {
@@ -176,24 +178,55 @@ def normalize_quiz_question(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _normalize_assignment_questions(raw: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for q in raw[:MAX_ASSIGNMENT_QUESTIONS]:
+        if not isinstance(q, dict):
+            continue
+        prompt = _optional_str(q.get("prompt"), 8_000)
+        if not prompt:
+            continue
+        out.append({"prompt": prompt})
+    return out
+
+
+def _normalize_assignment_attachments(raw: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for a in raw[:MAX_ASSIGNMENT_ATTACHMENTS]:
+        if not isinstance(a, dict):
+            continue
+        name = _optional_str(a.get("name"), 512)
+        url = _optional_str(a.get("url"), 2000)
+        if not name and not url:
+            continue
+        out.append({"name": name, "url": url})
+    return out
+
+
 def normalize_assignment(raw: Any) -> Dict[str, Any]:
     """Assignment topic payload for curriculum (admin / student metadata)."""
+    empty: Dict[str, Any] = {
+        "title": "",
+        "instructions": "",
+        "maxMarks": "10",
+        "deadline": "",
+        "allowText": True,
+        "allowPdf": False,
+        "allowDoc": False,
+        "allowZip": False,
+        "maxFileSizeMb": "25",
+        "modelAnswer": "",
+        "allowResubmission": False,
+        "resubmissionDeadline": "",
+        "published": True,
+    }
     if not isinstance(raw, dict):
-        return {
-            "title": "",
-            "instructions": "",
-            "maxMarks": "10",
-            "deadline": "",
-            "allowText": True,
-            "allowPdf": False,
-            "allowDoc": False,
-            "allowZip": False,
-            "maxFileSizeMb": "25",
-            "modelAnswer": "",
-            "allowResubmission": False,
-            "resubmissionDeadline": "",
-        }
-    return {
+        return dict(empty)
+    out: Dict[str, Any] = {
         "title": _optional_str(raw.get("title"), MAX_TOPIC_TITLE_LEN),
         "instructions": _optional_str(raw.get("instructions"), MAX_TOPIC_DETAILS_CHARS),
         "maxMarks": _optional_str(raw.get("maxMarks"), 12) or "10",
@@ -206,7 +239,15 @@ def normalize_assignment(raw: Any) -> Dict[str, Any]:
         "modelAnswer": _optional_str(raw.get("modelAnswer"), 20_000),
         "allowResubmission": _bool(raw.get("allowResubmission"), False),
         "resubmissionDeadline": _optional_str(raw.get("resubmissionDeadline"), 64),
+        "published": _bool(raw.get("published"), True),
     }
+    qs = _normalize_assignment_questions(raw.get("questions"))
+    if qs:
+        out["questions"] = qs
+    ats = _normalize_assignment_attachments(raw.get("attachments"))
+    if ats:
+        out["attachments"] = ats
+    return out
 
 
 def normalize_topic(raw: Any, topic_index: int) -> Dict[str, Any]:
@@ -293,6 +334,9 @@ def normalize_topic(raw: Any, topic_index: int) -> Dict[str, Any]:
 
     if ttype == "Assignment":
         base["assignment"] = normalize_assignment(raw.get("assignment"))
+
+    if ttype in ("Quiz", "Assignment"):
+        base["published"] = _bool(raw.get("published"), True)
 
     # Optional: gate some topics until payment is recorded (orderId on enrollment). Student UI can read this.
     if "lockedUntilPayment" in raw:

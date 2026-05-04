@@ -3,7 +3,7 @@
  * Tabs: Overview, Curriculum, Class Links, Study Materials, Assignments, Quizzes, Announcements, Certificate.
  */
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   BookOpen,
   ListOrdered,
@@ -19,6 +19,7 @@ import {
   Loader2,
   Lock,
   Unlock,
+  UserCheck,
 } from 'lucide-react'
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
 import type { EnrollmentItem } from '@/services/enrollmentService'
@@ -44,6 +45,7 @@ const TABS = [
   { id: 'materials', label: 'Study Materials', icon: FileText },
   { id: 'assignments', label: 'Assignments', icon: ClipboardList },
   { id: 'quizzes', label: 'Quizzes', icon: HelpCircle },
+  { id: 'attendance', label: 'Attendance', icon: UserCheck },
   { id: 'announcements', label: 'Announcements', icon: Send },
   { id: 'certificate', label: 'Certificate', icon: Award },
 ] as const
@@ -63,6 +65,25 @@ function materialDownloadHref(url: string): string {
   return absoluteApiUrl(u.startsWith('/') ? u : `/${u.replace(/^\/+/, '')}`)
 }
 
+function findMatchingFlatAssignment(
+  course: CourseContent | null,
+  topicTitle: string,
+  assignMeta?: { title?: string },
+): { id: string; title: string; dueDate?: string; description?: string } | null {
+  if (!course?.assignments?.length) return null
+  const want = (assignMeta?.title || topicTitle || '').trim().toLowerCase()
+  if (!want) return null
+  const list = course.assignments
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i]
+    const t = (a.title || '').trim().toLowerCase()
+    if (!t || t !== want) continue
+    const aid = a.id?.trim() ? String(a.id) : `idx_${i}`
+    return { id: aid, title: a.title || topicTitle, dueDate: a.dueDate, description: a.description }
+  }
+  return null
+}
+
 type EnrolledCurriculumTopic = {
   id?: string
   title?: string
@@ -73,11 +94,27 @@ type EnrolledCurriculumTopic = {
   lessonVideoUrl?: string
   lessonContent?: string
   lessonVideoAttachMode?: string
+  lessonExerciseFileName?: string
+  lessonVideoFileName?: string
+  assignment?: {
+    title?: string
+    instructions?: string
+    maxMarks?: string
+    deadline?: string
+    allowText?: boolean
+    allowPdf?: boolean
+    allowDoc?: boolean
+    allowZip?: boolean
+    questions?: Array<{ prompt?: string }>
+    attachments?: Array<{ name?: string; url?: string }>
+  }
+  quizQuestions?: unknown[]
+  quizSettings?: unknown
 }
 
 const ADDITIONAL_QUIZ_DEFAULT_PASS = 60
 
-type AdditionalQuizRow = { title: string; dueDate?: string }
+type AdditionalQuizRow = { title: string; dueDate?: string; flatQuiz?: { quizQuestions?: unknown[]; quizSettings?: unknown } }
 
 /**
  * Names come from curriculum Quiz topics (what admins author in the builder).
@@ -103,7 +140,14 @@ function listQuizTopicsFromCurriculum(curriculum: unknown): AdditionalQuizRow[] 
 
 function buildAdditionalQuizList(
   curriculum: unknown,
-  courseQuizzes: Array<{ title?: string; dueDate?: string }> | undefined,
+  courseQuizzes:
+    | Array<{
+        title?: string
+        dueDate?: string
+        quizQuestions?: unknown[]
+        quizSettings?: unknown
+      }>
+    | undefined,
 ): AdditionalQuizRow[] {
   const fromCurriculum = listQuizTopicsFromCurriculum(curriculum)
   const map = new Map<string, AdditionalQuizRow>()
@@ -118,12 +162,19 @@ function buildAdditionalQuizList(
     if (!title) continue
     const k = title.toLowerCase()
     const existing = map.get(k)
+    const flatPayload =
+      Array.isArray(q.quizQuestions) && q.quizQuestions.length > 0
+        ? { quizQuestions: q.quizQuestions, quizSettings: q.quizSettings }
+        : undefined
     if (existing) {
       if (q.dueDate && !existing.dueDate) {
         existing.dueDate = q.dueDate
       }
+      if (flatPayload && !existing.flatQuiz) {
+        existing.flatQuiz = flatPayload
+      }
     } else {
-      map.set(k, { title, dueDate: q.dueDate })
+      map.set(k, { title, dueDate: q.dueDate, ...(flatPayload ? { flatQuiz: flatPayload } : {}) })
     }
   }
   return Array.from(map.values())
@@ -315,6 +366,16 @@ function findCurriculumQuizTopic(
   return null
 }
 
+function passingGradePercentFromQuizSettings(settings: unknown): number {
+  if (!settings || typeof settings !== 'object') return ADDITIONAL_QUIZ_DEFAULT_PASS
+  const p = (settings as { passingGradePercent?: string }).passingGradePercent
+  if (typeof p === 'string' && p.trim()) {
+    const n = parseInt(p, 10)
+    if (!Number.isNaN(n) && n >= 0 && n <= 100) return n
+  }
+  return ADDITIONAL_QUIZ_DEFAULT_PASS
+}
+
 /** MCQ + True/False only for in-browser additional quizzes (same shape as completion quiz). */
 function buildAdditionalQuizPlayerPayload(rawQuestions: unknown[]): { questions: PythonQuizQuestion[]; correctIndices: number[] } {
   const questions: PythonQuizQuestion[] = []
@@ -341,6 +402,7 @@ function StudentAdditionalCurriculumQuiz({
   onRecorded,
   enrollment,
   onToast,
+  flatQuiz,
 }: {
   curriculum: unknown
   quizTitle: string
@@ -349,12 +411,21 @@ function StudentAdditionalCurriculumQuiz({
   onRecorded?: () => void | Promise<void>
   enrollment?: EnrollmentItem | null
   onToast?: (message: string, tone?: 'success' | 'info') => void
+  flatQuiz?: { quizQuestions?: unknown[]; quizSettings?: unknown }
 }) {
-  const found = findCurriculumQuizTopic(curriculum, quizTitle)
-  const { questions, correctIndices } = found
-    ? buildAdditionalQuizPlayerPayload(found.quizQuestions)
-    : { questions: [] as PythonQuizQuestion[], correctIndices: [] as number[] }
-  const passPercent = found?.passPercent ?? ADDITIONAL_QUIZ_DEFAULT_PASS
+  const fromCurriculum = findCurriculumQuizTopic(curriculum, quizTitle)
+  const flatQs = flatQuiz?.quizQuestions
+  const useFlat =
+    Array.isArray(flatQs) &&
+    flatQs.length > 0 &&
+    (!fromCurriculum ||
+      !Array.isArray(fromCurriculum.quizQuestions) ||
+      fromCurriculum.quizQuestions.length === 0)
+  const passPercent = useFlat
+    ? passingGradePercentFromQuizSettings(flatQuiz?.quizSettings)
+    : (fromCurriculum?.passPercent ?? ADDITIONAL_QUIZ_DEFAULT_PASS)
+  const rawQuestions = useFlat ? flatQs! : (fromCurriculum?.quizQuestions ?? [])
+  const { questions, correctIndices } = buildAdditionalQuizPlayerPayload(rawQuestions)
   const att = useMemo(() => {
     const k = quizTitle.trim().toLowerCase()
     return enrollment?.curriculumQuizAttempts?.find((a) => String(a.quizTitle || '').trim().toLowerCase() === k) ?? null
@@ -461,12 +532,13 @@ function StudentAdditionalCurriculumQuiz({
     }
   }
 
-  if (!found) {
+  const hasCurriculumTopic = fromCurriculum != null
+  const hasFlatQuestions = Array.isArray(flatQs) && flatQs.length > 0
+  if (!hasCurriculumTopic && !hasFlatQuestions) {
     return (
       <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-        No matching <strong>Quiz</strong> topic was found in the course curriculum for &quot;{quizTitle}&quot;. Add a curriculum
-        topic of type <strong>Quiz</strong> with the <strong>same title</strong> as this row, and add questions in the quiz
-        builder.
+        No quiz content is available for &quot;{quizTitle}&quot; yet. Add a <strong>Quiz</strong> topic in the course curriculum with this
+        title, or open <strong>Manage Training → Quizzes</strong> and use <strong>Questions &amp; settings</strong> for this quiz row.
       </p>
     )
   }
@@ -1062,16 +1134,36 @@ function AssignmentTurnInCard({
 
 export function CourseContent() {
   const { id: courseId } = useParams<{ id: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [course, setCourse] = useState<CourseContent | null>(null)
   const [enrollment, setEnrollment] = useState<EnrollmentItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<string>('overview')
+
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t !== 'certificate') return
+    setActiveTab('certificate')
+    setSearchParams(
+      (prev) => {
+        const n = new URLSearchParams(prev)
+        n.delete('tab')
+        return n
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams])
   const [certBusy, setCertBusy] = useState(false)
   const [certMessage, setCertMessage] = useState<string | null>(null)
   const [certMessageTone, setCertMessageTone] = useState<'success' | 'error' | 'info'>('success')
   const [openAdditionalQuizTitle, setOpenAdditionalQuizTitle] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'info' } | null>(null)
+  const [attendanceOverview, setAttendanceOverview] = useState<{
+    sessions: Array<{ sessionKey: string; title: string; sessionDate: string; time: string; platform: string; status: string; note: string }>
+    summary: { markedSessions: number; attended: number; percent: number | null }
+  } | null>(null)
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
 
   useEffect(() => {
     if (!toast) return
@@ -1105,6 +1197,16 @@ export function CourseContent() {
   useEffect(() => {
     refreshEnrollment()
   }, [refreshEnrollment])
+
+  useEffect(() => {
+    if (!courseId || activeTab !== 'attendance') return
+    setAttendanceLoading(true)
+    enrollmentService
+      .getAttendanceForCourse(courseId)
+      .then(setAttendanceOverview)
+      .catch(() => setAttendanceOverview(null))
+      .finally(() => setAttendanceLoading(false))
+  }, [courseId, activeTab])
 
   useEffect(() => {
     setOpenAdditionalQuizTitle(null)
@@ -1412,16 +1514,148 @@ export function CourseContent() {
                                   dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(notesHtml) }}
                                 />
                               ) : null}
+                              {!gated && isLecture && (topic.lessonExerciseFileName || topic.lessonVideoFileName) ? (
+                                <div className="mt-3 space-y-2">
+                                  <p className="text-xs font-semibold text-gray-700">Attachments</p>
+                                  <ul className="space-y-1">
+                                    {topic.lessonExerciseFileName ? (
+                                      <li>
+                                        <a
+                                          href={materialDownloadHref(`api/courses/media/lesson/${topic.lessonExerciseFileName}`)}
+                                          className="inline-flex items-center gap-1 text-sm text-brand-accent hover:underline"
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                        >
+                                          <Download className="h-3.5 w-3.5" /> Exercise / handout
+                                        </a>
+                                      </li>
+                                    ) : null}
+                                    {topic.lessonVideoFileName ? (
+                                      <li>
+                                        <a
+                                          href={materialDownloadHref(`api/courses/media/lesson/${topic.lessonVideoFileName}`)}
+                                          className="inline-flex items-center gap-1 text-sm text-brand-accent hover:underline"
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                        >
+                                          <Download className="h-3.5 w-3.5" /> Lesson video file
+                                        </a>
+                                      </li>
+                                    ) : null}
+                                  </ul>
+                                </div>
+                              ) : null}
                               {!gated && isQuiz ? (
-                                <p className="mt-2 text-xs leading-relaxed text-slate-600">
-                                  This topic is a <strong>curriculum quiz</strong> (study checklist). For scored completion
-                                  and certificates (when enabled), use the <strong>Quizzes</strong> tab.
-                                </p>
+                                <div className="mt-3 space-y-2">
+                                  {Array.isArray(topic.quizQuestions) && topic.quizQuestions.length > 0 ? (
+                                    <>
+                                      <p className="text-sm text-gray-700">This lesson includes a quiz ({topic.quizQuestions.length} questions).</p>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const qt = title.trim()
+                                          setActiveTab('quizzes')
+                                          window.setTimeout(() => setOpenAdditionalQuizTitle(qt), 0)
+                                        }}
+                                        className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
+                                      >
+                                        Attempt quiz
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs leading-relaxed text-slate-600">
+                                      This topic is a <strong>curriculum quiz</strong>. Open the <strong>Quizzes</strong> tab when your trainer has published questions.
+                                    </p>
+                                  )}
+                                </div>
                               ) : null}
                               {!gated && topic.type === 'Assignment' ? (
-                                <p className="mt-2 text-xs text-slate-600">
-                                  Assignment instructions appear here when your trainer publishes them in full.
-                                </p>
+                                <div className="mt-3 space-y-3">
+                                  {topic.assignment?.instructions ? (
+                                    <div
+                                      className="prose prose-sm prose-slate max-w-none text-gray-700 [&_a]:text-brand-accent"
+                                      dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(topic.assignment.instructions) }}
+                                    />
+                                  ) : null}
+                                  <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+                                    {topic.assignment?.deadline ? <span>Due: {topic.assignment.deadline}</span> : null}
+                                    {topic.assignment?.maxMarks ? <span>Max marks: {topic.assignment.maxMarks}</span> : null}
+                                  </div>
+                                  {Array.isArray(topic.assignment?.questions) && (topic.assignment?.questions?.length ?? 0) > 0 ? (
+                                    <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Questions</p>
+                                      <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-gray-800">
+                                        {(topic.assignment?.questions ?? []).map((q, qi) =>
+                                          q?.prompt?.trim() ? <li key={qi}>{q.prompt}</li> : null,
+                                        )}
+                                      </ol>
+                                    </div>
+                                  ) : null}
+                                  {Array.isArray(topic.assignment?.attachments) &&
+                                  (topic.assignment?.attachments ?? []).some((x) => String(x?.url || '').trim()) ? (
+                                    <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Attachments</p>
+                                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                                        {(topic.assignment?.attachments ?? []).map((att, ai) => {
+                                          const url = String(att?.url || '').trim()
+                                          const name = String(att?.name || '').trim() || url || 'Link'
+                                          if (!url) return null
+                                          return (
+                                            <li key={ai}>
+                                              <a
+                                                href={url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-brand-accent hover:underline"
+                                              >
+                                                {name}
+                                              </a>
+                                            </li>
+                                          )
+                                        })}
+                                      </ul>
+                                    </div>
+                                  ) : null}
+                                  {(() => {
+                                    const match = findMatchingFlatAssignment(course, title, topic.assignment)
+                                    if (!match || !courseId) {
+                                      return (
+                                        <p className="text-xs text-amber-800">
+                                          Your trainer will link this lesson to a course assignment for uploads. You can also use the Assignments tab.
+                                        </p>
+                                      )
+                                    }
+                                    const existing = enrollment?.assignmentSubmissions?.find((s) => s.assignmentId === match.id)
+                                    return (
+                                      <AssignmentTurnInCard
+                                        courseId={courseId}
+                                        assignmentId={match.id}
+                                        title={match.title}
+                                        dueDate={match.dueDate}
+                                        description={match.description}
+                                        existing={existing}
+                                        onUpdated={() => void refreshEnrollment()}
+                                      />
+                                    )
+                                  })()}
+                                </div>
+                              ) : null}
+                              {!gated && topic.id ? (
+                                <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-gray-800">
+                                  <input
+                                    type="checkbox"
+                                    className="rounded border-gray-300"
+                                    checked={enrollment?.completedCurriculumTopicIds?.includes(topic.id) ?? false}
+                                    onChange={(e) => {
+                                      if (!courseId || !topic.id) return
+                                      void enrollmentService
+                                        .setCurriculumTopicComplete(courseId, topic.id, e.target.checked)
+                                        .then(setEnrollment)
+                                        .catch(() => showToast('Could not update progress', 'info'))
+                                    }}
+                                  />
+                                  Mark this lesson as complete
+                                </label>
                               ) : null}
                             </li>
                           )
@@ -1437,6 +1671,54 @@ export function CourseContent() {
                 )
               })
             )}
+          </div>
+        )}
+        {activeTab === 'attendance' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-gray">
+              Attendance for your class sessions. Status appears after your trainer saves attendance for a session.
+            </p>
+            {attendanceLoading ? (
+              <p className="text-sm inline-flex items-center gap-2 text-slate-gray">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </p>
+            ) : attendanceOverview && attendanceOverview.summary.markedSessions > 0 ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900">
+                <span className="font-semibold">
+                  {attendanceOverview.summary.attended} / {attendanceOverview.summary.markedSessions} sessions attended
+                </span>
+                {attendanceOverview.summary.percent != null ? (
+                  <span className="ml-2">({attendanceOverview.summary.percent}%)</span>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-gray">No marked sessions yet. Check back after your trainer records attendance.</p>
+            )}
+            {attendanceOverview && attendanceOverview.sessions.length > 0 ? (
+              <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+                {attendanceOverview.sessions.map((s) => (
+                  <li key={s.sessionKey} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                    <div>
+                      <p className="font-medium text-gray-900">{s.title}</p>
+                      <p className="text-xs text-slate-gray">
+                        {s.sessionDate} {s.time} · {s.platform}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs font-medium capitalize ${
+                        s.status === 'present' || s.status === 'late'
+                          ? 'text-emerald-700'
+                          : s.status === 'absent'
+                            ? 'text-red-700'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {s.status === 'not_marked' ? 'Not marked' : s.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         )}
         {activeTab === 'class-links' && (
@@ -1601,6 +1883,7 @@ export function CourseContent() {
                               curriculum={course.curriculum}
                               quizTitle={t}
                               dueDate={q.dueDate}
+                              flatQuiz={q.flatQuiz}
                               courseId={courseId}
                               enrollment={enrollment}
                               onRecorded={refreshEnrollment}

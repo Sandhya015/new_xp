@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { paymentService } from '@/services/paymentService'
 import { enrollmentService } from '@/services/enrollmentService'
+import { showAppToast } from '@/components/AppToastHost'
 import { loadRazorpayScript } from '@/utils/loadRazorpay'
 import { courseContentPath } from '@/utils/courseStudyLink'
 
@@ -46,7 +47,8 @@ export function useRazorpayCheckout() {
       setError(null)
 
       if (!token) {
-        navigate(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`)
+        const qs = window.location.pathname + window.location.search
+        navigate(`/login?next=${encodeURIComponent(qs)}`)
         return
       }
 
@@ -67,9 +69,11 @@ export function useRazorpayCheckout() {
           })
           setError(null)
           goToCourse()
+          showAppToast('Welcome aboard! Your course is now active.')
         } catch (e: unknown) {
           if (axios.isAxiosError(e) && e.response?.status === 409) {
             setError(null)
+            showAppToast('Welcome aboard! Your course is now active.')
             goToCourse()
           } else {
             setError('Could not enroll. Check your connection and try again.')
@@ -111,6 +115,7 @@ export function useRazorpayCheckout() {
                 response.razorpay_signature
               )
               setCheckoutCourseId(null)
+              showAppToast('Welcome aboard! Your course is now active.')
               try {
                 onSuccess?.()
               } catch {

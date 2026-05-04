@@ -2,6 +2,21 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { BookOpen, Play, CheckCircle, Award } from 'lucide-react'
 import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
+import { absoluteApiUrl } from '@/config/api'
+
+function categoryBadgeClass(cat: string | undefined) {
+  const c = (cat || '').toLowerCase()
+  if (c === 'technical') return 'bg-emerald-500/95 text-white'
+  if (c === 'non-technical') return 'bg-orange-500/95 text-white'
+  return 'bg-slate-600/95 text-white'
+}
+
+function categoryLabel(cat: string | undefined) {
+  const c = (cat || '').toLowerCase()
+  if (c === 'technical') return 'Technical'
+  if (c === 'non-technical') return 'Non-Technical'
+  return c ? 'Other' : 'Course'
+}
 
 /**
  * Student Dashboard — My Enrolled Courses (SD-WF-09). Ongoing / Completed tabs. API wired.
@@ -68,36 +83,75 @@ export function MyCourses() {
               </Link>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {ongoing.map((c) => (
-                <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-semibold text-brand-navy">{c.courseTitle || 'Course'}</h3>
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                      <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {ongoing.map((c) => {
+                const thumb = (c.courseFeaturedImageUrl || '').trim()
+                  ? absoluteApiUrl(c.courseFeaturedImageUrl!.trim())
+                  : ''
+                const pct =
+                  typeof c.curriculumProgressPercent === 'number' && !Number.isNaN(c.curriculumProgressPercent)
+                    ? Math.min(100, Math.max(0, c.curriculumProgressPercent))
+                    : null
+                return (
+                  <article
+                    key={c.id}
+                    className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                  >
+                    <div className="relative aspect-video w-full overflow-hidden bg-gray-100">
+                      {thumb ? (
+                        <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">No thumbnail</div>
+                      )}
+                      <span
+                        className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-semibold shadow ${categoryBadgeClass(c.courseCategory)}`}
+                      >
+                        {categoryLabel(c.courseCategory)}
+                      </span>
+                      <span className="absolute right-2 top-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 shadow">
                         Enrolled
                       </span>
-                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{c.mode || 'Online'}</span>
                     </div>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-gray">Started {c.createdAt}</p>
-                  <div className="mt-3">
-                    <div className="flex justify-between text-xs text-slate-gray">
-                      <span>Progress</span>
-                      <span>In progress</span>
+                    <div className="flex flex-1 flex-col p-4">
+                      <h3 className="font-semibold text-brand-navy line-clamp-2 text-base">{c.courseTitle || 'Course'}</h3>
+                      <p className="mt-1 text-xs text-slate-gray">Started {c.createdAt}</p>
+                      {c.lastAccessedAt ? (
+                        <p className="mt-0.5 text-xs text-slate-gray">
+                          Last accessed{' '}
+                          {new Date(c.lastAccessedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-gray">
+                        <span>{c.courseDuration || '—'}</span>
+                        <span className="text-gray-300">·</span>
+                        <span>{c.courseMode || '—'}</span>
+                        <span className="text-gray-300">·</span>
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
+                          {pct != null && pct > 0 ? 'In progress' : 'Not started'}
+                        </span>
+                      </p>
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs text-slate-gray">
+                          <span>Progress</span>
+                          <span>{pct != null ? `${pct}%` : '—'}</span>
+                        </div>
+                        <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full rounded-full bg-brand-accent transition-all"
+                            style={{ width: pct != null ? `${pct}%` : '0%' }}
+                          />
+                        </div>
+                      </div>
+                      <Link
+                        to={`/dashboard/my-courses/${c.courseId}`}
+                        className="mt-4 inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+                      >
+                        <Play className="h-4 w-4" /> Continue
+                      </Link>
                     </div>
-                    <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                      <div className="h-full rounded-full bg-brand-accent" style={{ width: '50%' }} />
-                    </div>
-                  </div>
-                  <Link
-                    to={`/dashboard/my-courses/${c.courseId}`}
-                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600"
-                  >
-                    <Play className="h-4 w-4" /> Continue
-                  </Link>
-                </div>
-              ))}
+                  </article>
+                )
+              })}
             </div>
           )}
         </>
@@ -113,29 +167,82 @@ export function MyCourses() {
               <p className="mt-2 font-medium text-gray-600">No completed trainings yet.</p>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {completed.map((c) => (
-                <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-semibold text-brand-navy">{c.courseTitle || 'Course'}</h3>
-                    <span className="shrink-0 rounded border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-900">
-                      Completed
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-gray">Completed {c.completedAt || c.createdAt}</p>
-                  <div className="mt-4 flex gap-2">
-                    <Link to={`/dashboard/my-courses/${c.courseId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                      View Details
-                    </Link>
-                    <Link
-                      to={`/dashboard/my-courses/${c.courseId}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2 text-sm font-semibold text-white hover:bg-primary-600"
-                    >
-                      <Award className="h-4 w-4" /> Generate certificate
-                    </Link>
-                  </div>
-                </div>
-              ))}
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {completed.map((c) => {
+                const thumb = (c.courseFeaturedImageUrl || '').trim()
+                  ? absoluteApiUrl(c.courseFeaturedImageUrl!.trim())
+                  : ''
+                const pct =
+                  typeof c.curriculumProgressPercent === 'number' && !Number.isNaN(c.curriculumProgressPercent)
+                    ? Math.min(100, Math.max(0, c.curriculumProgressPercent))
+                    : 100
+                return (
+                  <article
+                    key={c.id}
+                    className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                  >
+                    <div className="relative aspect-video w-full overflow-hidden bg-gray-100">
+                      {thumb ? (
+                        <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">No thumbnail</div>
+                      )}
+                      <span
+                        className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-semibold shadow ${categoryBadgeClass(c.courseCategory)}`}
+                      >
+                        {categoryLabel(c.courseCategory)}
+                      </span>
+                      <span className="absolute right-2 top-2 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-900 shadow">
+                        Completed
+                      </span>
+                    </div>
+                    <div className="flex flex-1 flex-col p-4">
+                      <h3 className="font-semibold text-brand-navy line-clamp-2 text-base">{c.courseTitle || 'Course'}</h3>
+                      <p className="mt-1 text-xs text-slate-gray">Started {c.createdAt}</p>
+                      {c.lastAccessedAt ? (
+                        <p className="mt-0.5 text-xs text-slate-gray">
+                          Last accessed{' '}
+                          {new Date(c.lastAccessedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-slate-gray">Completed {c.completedAt || c.createdAt}</p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-gray">
+                        <span>{c.courseDuration || '—'}</span>
+                        <span className="text-gray-300">·</span>
+                        <span>{c.courseMode || '—'}</span>
+                        <span className="text-gray-300">·</span>
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-900">Completed</span>
+                      </p>
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs text-slate-gray">
+                          <span>Progress</span>
+                          <span>{pct}%</span>
+                        </div>
+                        <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full rounded-full bg-brand-accent transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <Link
+                          to={`/dashboard/my-courses/${c.courseId}`}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+                        >
+                          <Play className="h-4 w-4" /> View course
+                        </Link>
+                        <Link
+                          to={`/dashboard/my-courses/${c.courseId}?tab=certificate`}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          <Award className="h-4 w-4" /> Certificate
+                        </Link>
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           )}
         </>

@@ -3,8 +3,9 @@ Server-side order / tax invoice pricing per Tax Invoice Working Documentation.
 
 - Course catalogue price is GST-inclusive at 18% (SAC 999293).
 - Training kit optional add-on is GST-inclusive at 12% (HSN 4820).
-- Coupons apply to inclusive subtotal; discount is allocated to the course line first,
-  then any remainder reduces the kit (highest-value-first for typical carts).
+- Coupons apply to the course line only (GST-inclusive catalogue price). The training kit
+  line is not discounted. Percent-off is computed on the course inclusive amount; flat
+  rupees-off is capped at the course inclusive amount.
 """
 from __future__ import annotations
 
@@ -48,7 +49,7 @@ def allocate_coupon_inclusive_discount(
     coupon: dict[str, Any] | None,
     coupon_code: str,
 ) -> AllocatedCouponResult:
-    """Apply coupon to inclusive (course + kit) subtotal; reduce course first, then kit."""
+    """Apply coupon to the course inclusive line only; kit gross is unchanged."""
     cg = max(0.0, round(float(course_gross), 2))
     kg = max(0.0, round(float(kit_gross), 2))
     sub = round(cg + kg, 2)
@@ -58,7 +59,7 @@ def allocate_coupon_inclusive_discount(
         if coupon.get("percentOff") is not None:
             try:
                 pct = max(0.0, float(coupon.get("percentOff")))
-                disc = round(sub * (pct / 100.0), 2)
+                disc = round(cg * (pct / 100.0), 2)
             except (TypeError, ValueError):
                 disc = 0.0
             cap = coupon.get("maxDiscountInr")
@@ -72,14 +73,10 @@ def allocate_coupon_inclusive_discount(
                 disc = max(0.0, float(coupon.get("rupeesOff")))
             except (TypeError, ValueError):
                 disc = 0.0
-        disc = min(disc, sub)
+        disc = min(disc, cg)
 
-    remaining = round(disc, 2)
-    course_off = min(remaining, cg)
-    remaining = round(remaining - course_off, 2)
-    kit_off = min(remaining, kg)
-    course_after = round(cg - course_off, 2)
-    kit_after = round(kg - kit_off, 2)
+    course_after = round(cg - disc, 2)
+    kit_after = kg
     return AllocatedCouponResult(
         coupon_code=code if disc > 0 else "",
         inclusive_subtotal_before=sub,

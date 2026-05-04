@@ -166,6 +166,42 @@ def send_enrollment_confirmation(
     return send_email(config, to_email, subject, html_body, text_body=text_body)
 
 
+def send_learning_content_published_email(
+    config: Mapping[str, Any],
+    student_name: str,
+    to_email: str,
+    course_title: str,
+    item_lines: list[str],
+) -> bool:
+    """Email enrolled learners when an assignment, quiz, or curriculum item is newly published."""
+    name = html_module.escape((student_name or "there").strip() or "there")
+    raw_title = (course_title or "").strip() or "your course"
+    safe_title = html_module.escape(raw_title)
+    lines = [x for x in item_lines if str(x).strip()][:50]
+    if not lines:
+        return False
+    items_html = "".join(f"<li>{html_module.escape(str(x).strip())}</li>" for x in lines)
+    bullet_text = "\n".join(f"- {str(x).strip()}" for x in lines)
+    sub = f"New content in {raw_title} — XpertIntern"
+    html = f"""
+    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
+    <p>Hi {name},</p>
+    <p>New content is available in <strong>{safe_title}</strong>:</p>
+    <ul style="margin:12px 0;padding-left:20px;">
+    {items_html}
+    </ul>
+    <p>Open <strong>My Enrolled Courses</strong> in your student dashboard to continue learning.</p>
+    <p>— Team XpertIntern</p>
+    </body></html>
+    """
+    text_body = (
+        f"Hi {student_name or 'there'},\n\n"
+        f"New content in {raw_title}:\n{bullet_text}\n\n"
+        f"Open My Enrolled Courses in your dashboard.\n\n— Team XpertIntern"
+    )
+    return send_email(config, to_email, sub, html, text_body=text_body)
+
+
 def send_payment_success_email(
     config: Mapping[str, Any],
     student_name: str,
@@ -215,6 +251,67 @@ def send_payment_success_email(
     if html_invoice_bytes and html_filename:
         attachments.append((html_filename, html_invoice_bytes, "text/html"))
     return send_email(config, to_email, subject, html, attachments=attachments or None)
+
+
+def send_support_ticket_staff_reply(
+    config: Mapping[str, Any],
+    student_name: str,
+    to_email: str,
+    ticket_id: str,
+    subject: str,
+    reply_excerpt: str,
+) -> bool:
+    """Notify student when support staff replies to their ticket."""
+    import html as html_module
+
+    name = student_name or "there"
+    safe_subj = html_module.escape((subject or "Support").strip() or "Support")
+    safe_tid = html_module.escape((ticket_id or "").strip())
+    excerpt = (reply_excerpt or "").strip()
+    if len(excerpt) > 2000:
+        excerpt = excerpt[:2000] + "…"
+    safe_body = html_module.escape(excerpt).replace("\n", "<br/>")
+    sub = f"Re: Your support ticket {ticket_id} — XpertIntern"
+    html = f"""
+    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
+    <p>Hi {html_module.escape(name)},</p>
+    <p>Our team has replied to your support request <strong>{safe_tid}</strong>
+    ({safe_subj}).</p>
+    <div style="border-left:4px solid #2563eb;padding:12px 16px;background:#f8fafc;margin:16px 0;">
+    {safe_body}
+    </div>
+    <p>Open <strong>Help &amp; Support</strong> in your student dashboard to view the full thread and send a follow-up.</p>
+    <p>— Team XpertIntern</p>
+    </body></html>
+    """
+    return send_email(config, to_email, sub, html, text_body=excerpt)
+
+
+def send_support_ticket_status_update(
+    config: Mapping[str, Any],
+    student_name: str,
+    to_email: str,
+    ticket_id: str,
+    subject: str,
+    status_label: str,
+) -> bool:
+    import html as html_module
+
+    name = student_name or "there"
+    safe_tid = html_module.escape((ticket_id or "").strip())
+    safe_subj = html_module.escape((subject or "Support").strip() or "Support")
+    label = html_module.escape((status_label or "").strip())
+    sub = f"Ticket {ticket_id} — {status_label} — XpertIntern"
+    html = f"""
+    <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
+    <p>Hi {html_module.escape(name)},</p>
+    <p>Your support ticket <strong>{safe_tid}</strong> ({safe_subj}) is now marked
+    as <strong>{label}</strong>.</p>
+    <p>Visit <strong>Help &amp; Support</strong> in your dashboard for details.</p>
+    <p>— Team XpertIntern</p>
+    </body></html>
+    """
+    return send_email(config, to_email, sub, html, text_body=f"Ticket {ticket_id} is now {status_label}.")
 
 
 def send_certificate_email(

@@ -38,9 +38,14 @@ export function absoluteApiUrl(pathOrUrl: string): string {
       // Old saves may embed a full API Gateway URL for course media; always use the
       // currently configured API base so dev/stage/prod renames do not break <img src>.
       if (isAwsExecuteApiHost(u.hostname)) {
-        const idx = u.pathname.indexOf('/api/courses/media/')
-        if (idx >= 0) {
-          const path = `${u.pathname.slice(idx)}${u.search || ''}${u.hash || ''}`
+        const idxCourses = u.pathname.indexOf('/api/courses/media/')
+        if (idxCourses >= 0) {
+          const path = `${u.pathname.slice(idxCourses)}${u.search || ''}${u.hash || ''}`
+          return `${base}${path}`
+        }
+        const idxAuth = u.pathname.indexOf('/api/auth/media/')
+        if (idxAuth >= 0) {
+          const path = `${u.pathname.slice(idxAuth)}${u.search || ''}${u.hash || ''}`
           return `${base}${path}`
         }
       }

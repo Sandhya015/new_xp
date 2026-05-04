@@ -1,6 +1,7 @@
 import axios from 'axios'
-import { useAuthStore } from '@/store/authStore'
+import { useAuthStore, type User } from '@/store/authStore'
 import { getApiBase } from '@/config/api'
+import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
 
 const api = axios.create({
   baseURL: getApiBase(),
@@ -8,8 +9,8 @@ const api = axios.create({
   withCredentials: true,
 })
 
-// Attach JWT to requests when present
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  await runBeforeAuthorizedRequest(config)
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
@@ -18,12 +19,12 @@ api.interceptors.request.use((config) => {
 export const authService = {
   async login(email: string, password: string) {
     const { data } = await api.post('/api/auth/login', { email, password })
-    return data
+    return data as { token: string; user: User; expiresIn?: number }
   },
   /** Super-admin panel only; backend enforces allowed email + admin role + password. */
   async loginAdmin(email: string, password: string) {
     const { data } = await api.post('/api/auth/admin/login', { email, password })
-    return data as { token: string; user: Record<string, unknown> }
+    return data as { token: string; user: User; expiresIn?: number }
   },
   async register(body: Record<string, unknown>) {
     const { data } = await api.post('/api/auth/register', body)
@@ -37,7 +38,7 @@ export const authService = {
   },
   async verifyRegisterOtp(verificationId: string, otp: string) {
     const { data } = await api.post('/api/auth/register/verify-otp', { verificationId, otp })
-    return data as { message?: string; token: string; user: unknown }
+    return data as { message?: string; token: string; user: unknown; expiresIn?: number }
   },
   async resendRegisterOtp(verificationId: string) {
     const { data } = await api.post('/api/auth/register/resend-otp', { verificationId })
@@ -80,6 +81,12 @@ export const authService = {
   },
   async refresh() {
     const { data } = await api.post('/api/auth/refresh')
-    return data
+    return data as { token: string; expiresIn?: number }
+  },
+  async uploadProfilePhoto(file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await api.post('/api/auth/me/profile-photo', fd)
+    return data as Record<string, unknown>
   },
 }

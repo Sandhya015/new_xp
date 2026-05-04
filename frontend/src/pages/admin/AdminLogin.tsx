@@ -25,7 +25,7 @@ export function AdminLogin() {
         setError('This account is not authorized for the admin panel.')
         return
       }
-      setSession(user, data.token)
+      setSession(user, data.token, typeof data.expiresIn === 'number' ? data.expiresIn : undefined)
       navigate('/admin')
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err

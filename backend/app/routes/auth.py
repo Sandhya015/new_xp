@@ -6,9 +6,10 @@ import hashlib
 import os
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from urllib.parse import quote
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file, Response
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -45,8 +46,12 @@ from app.registration_otp import (
     verify_otp_constant_time,
 )
 from app.registration_validate import normalized_to_user_doc, validate_student_registration
+from app.services.course_media_storage import featured_image_bytes_are_raster, normalize_featured_image_body
 
 auth_bp = Blueprint("auth", __name__)
+
+_PROFILE_PHOTO_NAME_RE = re.compile(r"^[a-f0-9]{32}\.(jpe?g|png)$", re.IGNORECASE)
+_MAX_PROFILE_PHOTO_BYTES = 2 * 1024 * 1024
 
 # Werkzeug method (pbkdf2:sha256) — no native deps, works on Lambda
 _PASSWORD_METHOD = "pbkdf2:sha256"
@@ -56,6 +61,37 @@ _MAX_FORGOT_ATTEMPTS_PER_HOUR = 5
 _FORGOT_GENERIC_MESSAGE = (
     "If an account exists for that email, you will receive password reset instructions shortly."
 )
+
+
+def _jwt_expires_seconds() -> int:
+    v = current_app.config.get("JWT_ACCESS_TOKEN_EXPIRES") if current_app else None
+    if v is None:
+        return 7 * 86400
+    if hasattr(v, "total_seconds"):
+        return max(60, int(v.total_seconds()))
+    try:
+        return max(60, int(v))
+    except (TypeError, ValueError):
+        return 7 * 86400
+
+
+def _delete_local_profile_photo_file(url: str) -> None:
+    if not url or not isinstance(url, str):
+        return
+    marker = "/api/auth/media/profile/"
+    i = url.find(marker)
+    if i < 0:
+        return
+    fname = (url[i + len(marker) :].split("?")[0] or "").strip()
+    if not _PROFILE_PHOTO_NAME_RE.match(fname):
+        return
+    try:
+        root = Path(current_app.instance_path) / "user_uploads" / "profile"
+        p = root / fname
+        if p.is_file():
+            p.unlink()
+    except Exception:
+        pass
 
 
 def _hash_password_reset_token(raw_token: str) -> str:
@@ -99,9 +135,28 @@ def _user_to_response(user: dict) -> dict:
         out["semester"] = user.get("semester") or ""
         out["stream"] = user.get("stream") or ""
         out["collegeName"] = user.get("collegeName") or ""
+        out["collegeRegNo"] = user.get("collegeRegNo") or ""
+        dob = user.get("dateOfBirth")
+        if isinstance(dob, datetime):
+            out["dateOfBirth"] = dob.strftime("%Y-%m-%d")
+        elif isinstance(dob, date):
+            out["dateOfBirth"] = dob.isoformat()
+        else:
+            out["dateOfBirth"] = str(dob).strip() if dob else ""
+        out["gender"] = user.get("gender") or ""
+        out["yearOfJoining"] = user.get("yearOfJoining") or ""
+        out["addressLine1"] = user.get("addressLine1") or ""
+        out["addressApartment"] = user.get("addressApartment") or ""
+        out["addressCity"] = user.get("addressCity") or ""
+        out["addressState"] = user.get("addressState") or ""
+        out["addressPincode"] = user.get("addressPincode") or ""
+        out["addressCountry"] = user.get("addressCountry") or ""
         m = user.get("mobile")
         if m:
             out["mobile"] = str(m)
+        ph = (user.get("profilePhotoUrl") or "").strip()
+        if ph:
+            out["profilePhotoUrl"] = ph
     return out
 
 
@@ -562,6 +617,7 @@ def register_verify_otp():
     return jsonify({
         "message": "Account created successfully! Welcome to XpertIntern.",
         "token": token,
+        "expiresIn": _jwt_expires_seconds(),
         "user": _user_to_response(user),
     }), 201
 
@@ -807,6 +863,7 @@ def login():
         )
         return jsonify({
             "token": token,
+            "expiresIn": _jwt_expires_seconds(),
             "user": _user_to_response(user),
         })
     except Exception as e:
@@ -852,7 +909,7 @@ def admin_login():
                 "admin_portal": True,
             },
         )
-        return jsonify({"token": token, "user": _user_to_response(user)})
+        return jsonify({"token": token, "expiresIn": _jwt_expires_seconds(), "user": _user_to_response(user)})
     except Exception as e:
         current_app.logger.exception("Admin login error")
         err_msg = "Login failed. Please try again."
@@ -892,13 +949,20 @@ def update_me():
     user_id = get_jwt_identity()
     data = request.get_json() or {}
     users = get_users_collection()
+    user = users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
     allowed = {
         "name", "fullName", "mobile", "university", "universityOther", "collegeName", "semester",
         "course", "courseOther", "stream", "branch", "branchOther", "subject", "subjectOther",
-        "collegeRegNo", "linkedin", "dateOfBirth", "gender",
+        "collegeRegNo", "linkedin", "dateOfBirth", "gender", "yearOfJoining",
+        "addressLine1", "addressApartment", "addressCity", "addressState", "addressPincode", "addressCountry",
         "alternateContact", "cgpa", "percentage",
     }
     updates = {k: (data.get(k) if data.get(k) is not None else None) for k in allowed if k in data}
+    if "profilePhotoUrl" in data and data.get("profilePhotoUrl") is None:
+        _delete_local_profile_photo_file(str(user.get("profilePhotoUrl") or ""))
+        updates["profilePhotoUrl"] = None
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400
     if "name" in updates and updates["name"]:
@@ -906,6 +970,67 @@ def update_me():
     users.update_one({"_id": ObjectId(user_id)}, {"$set": updates})
     user = users.find_one({"_id": ObjectId(user_id)})
     return jsonify(_user_to_response(user))
+
+
+@auth_bp.route("/me/profile-photo", methods=["POST"])
+@jwt_required()
+def upload_me_profile_photo():
+    """Multipart: file (JPEG/PNG, max 2 MB). Stores under instance_path and sets profilePhotoUrl."""
+    from bson import ObjectId
+
+    uf = request.files.get("file") or request.files.get("photo")
+    if not uf or not getattr(uf, "filename", None):
+        return jsonify({"error": "file is required"}), 400
+    raw = uf.read()
+    if len(raw) > _MAX_PROFILE_PHOTO_BYTES:
+        return jsonify({"error": "Image too large (max 2 MB)"}), 400
+    body = normalize_featured_image_body(raw)
+    if not featured_image_bytes_are_raster(body):
+        return jsonify({"error": "Invalid image (use JPEG or PNG)"}), 400
+    ext = ".jpg" if body.startswith(b"\xff\xd8\xff") else ".png"
+    fn = f"{secrets.token_hex(16)}{ext}"
+    root = Path(current_app.instance_path) / "user_uploads" / "profile"
+    root.mkdir(parents=True, exist_ok=True)
+    dest = root / fn
+    dest.write_bytes(body)
+
+    user_id = get_jwt_identity()
+    users = get_users_collection()
+    try:
+        user = users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        return jsonify({"error": "Invalid user"}), 400
+    if not user:
+        try:
+            dest.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return jsonify({"error": "User not found"}), 404
+    prev = str(user.get("profilePhotoUrl") or "").strip()
+    if prev:
+        _delete_local_profile_photo_file(prev)
+    url_path = f"/api/auth/media/profile/{fn}"
+    users.update_one({"_id": ObjectId(user_id)}, {"$set": {"profilePhotoUrl": url_path}})
+    user = users.find_one({"_id": ObjectId(user_id)})
+    return jsonify(_user_to_response(user)), 200
+
+
+@auth_bp.route("/media/profile/<path:fname>", methods=["GET", "HEAD"])
+def serve_profile_photo(fname):
+    if not _PROFILE_PHOTO_NAME_RE.match(fname or ""):
+        if request.method == "HEAD":
+            return Response(status=404)
+        return jsonify({"error": "Not found"}), 404
+    root = Path(current_app.instance_path) / "user_uploads" / "profile"
+    path = root / fname
+    if not path.is_file():
+        if request.method == "HEAD":
+            return Response(status=404)
+        return jsonify({"error": "Not found"}), 404
+    mime = "image/jpeg" if fname.lower().endswith((".jpg", ".jpeg")) else "image/png"
+    if request.method == "HEAD":
+        return Response(status=200)
+    return send_file(path, mimetype=mime)
 
 
 @auth_bp.route("/change-password", methods=["POST"])
@@ -948,4 +1073,4 @@ def refresh():
     if claims.get("admin_portal") is True:
         extra["admin_portal"] = True
     token = create_access_token(identity=identity, additional_claims=extra)
-    return jsonify({"token": token})
+    return jsonify({"token": token, "expiresIn": _jwt_expires_seconds()})

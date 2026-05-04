@@ -5,7 +5,7 @@ import base64
 import os
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from werkzeug.utils import secure_filename
@@ -15,7 +15,7 @@ from io import BytesIO
 from flask import Blueprint, current_app, request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
-from app.routes.enrollments import _serialize_submission
+from app.routes.enrollments import _serialize_curriculum_quiz_attempts, _serialize_submission
 from app.services.course_media_storage import (
     course_media_object_exists,
     parse_stored_course_media_url,
@@ -25,8 +25,10 @@ from app.certificate_pdf import build_course_certificate_pdf
 from app.certificate_quiz_pass import apply_quiz_pass_certificate
 from app.services.curriculum import normalize_curriculum
 from app.services.enrollment_excel import (
+    assignment_submissions_submitted_count,
     build_enrollment_workbook_bytes,
     export_row_for_enrollment,
+    merged_student_fields_for_admin,
     norm_approve_certificate_cell,
     parse_workbook_rows,
     row_email,
@@ -45,9 +47,20 @@ from app.db import (
     get_internships_collection,
     get_certificates_collection,
     get_followups_collection,
+    get_support_tickets_collection,
+    get_app_settings_collection,
 )
 
+from app.attendance_util import class_link_session_key, norm_attendance_status, parse_class_link_date
+from app.email_smtp import send_support_ticket_staff_reply, send_support_ticket_status_update
 from app.course_legacy import migrate_legacy_course_fields
+from app.course_publish_notify import (
+    newly_published_curriculum_topic_titles,
+    newly_published_flat_assignments,
+    newly_published_flat_quizzes,
+    notify_enrolled_content_published,
+)
+from app.checkout_coupon import count_successful_redemptions_for_course
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -196,7 +209,8 @@ def _course_to_detail(c):
     out["quizzes"] = c.get("quizzes", [])
     out["announcements"] = c.get("announcements", [])
     out["completionQuizTitle"] = (c.get("completionQuizTitle") or "") or ""
-    out["certificateEmailOnly"] = bool(c.get("certificateEmailOnly"))
+    out["trainingKit"] = c.get("trainingKit") if isinstance(c.get("trainingKit"), dict) else {}
+    out["enrollmentCoupons"] = c.get("enrollmentCoupons") if isinstance(c.get("enrollmentCoupons"), list) else []
     return out
 
 
@@ -659,10 +673,34 @@ def update_course(course_id):
         updates["completionQuizTitle"] = raw_ct[:500]
     if "certificateEmailOnly" in data:
         updates["certificateEmailOnly"] = bool(data.get("certificateEmailOnly"))
+    if "trainingKit" in data and isinstance(data.get("trainingKit"), dict):
+        updates["trainingKit"] = data["trainingKit"]
+    if "enrollmentCoupons" in data and isinstance(data.get("enrollmentCoupons"), list):
+        updates["enrollmentCoupons"] = data["enrollmentCoupons"]
+    pub_assignments: list[str] = []
+    pub_quizzes: list[str] = []
+    pub_curriculum: list[str] = []
+    if "assignments" in updates and isinstance(updates.get("assignments"), list):
+        pub_assignments = newly_published_flat_assignments(c.get("assignments"), updates["assignments"])
+    if "quizzes" in updates and isinstance(updates.get("quizzes"), list):
+        pub_quizzes = newly_published_flat_quizzes(c.get("quizzes"), updates["quizzes"])
+    if "curriculum" in updates:
+        pub_curriculum = newly_published_curriculum_topic_titles(c.get("curriculum"), updates["curriculum"])
     if updates:
         updates["updatedAt"] = datetime.utcnow()
         coll.update_one({"_id": ObjectId(course_id)}, {"$set": updates})
     updated = coll.find_one({"_id": ObjectId(course_id)})
+    if pub_assignments or pub_quizzes or pub_curriculum:
+        try:
+            notify_enrolled_content_published(
+                course_id=course_id,
+                course_title=str((updated or c).get("title") or ""),
+                assignment_titles=pub_assignments,
+                quiz_titles=pub_quizzes,
+                curriculum_titles=pub_curriculum,
+            )
+        except Exception:
+            current_app.logger.exception("notify_enrolled_content_published")
     return jsonify(_course_to_detail(updated))
 
 
@@ -688,11 +726,146 @@ def put_course_curriculum(course_id):
     norm, terr = normalize_curriculum(data.get("curriculum"))
     if terr:
         return jsonify({"error": terr}), 400
+    pub_curriculum = newly_published_curriculum_topic_titles(c.get("curriculum"), norm)
     coll.update_one(
         {"_id": ObjectId(course_id)},
         {"$set": {"curriculum": norm, "updatedAt": datetime.utcnow()}},
     )
+    if pub_curriculum:
+        try:
+            notify_enrolled_content_published(
+                course_id=course_id,
+                course_title=str(c.get("title") or ""),
+                assignment_titles=[],
+                quiz_titles=[],
+                curriculum_titles=pub_curriculum,
+            )
+        except Exception:
+            current_app.logger.exception("notify_enrolled_content_published curriculum")
     return jsonify({"ok": True, "curriculum": norm}), 200
+
+
+@admin_bp.route("/courses/<course_id>/coupon-redemptions", methods=["GET"])
+@jwt_required()
+def admin_course_coupon_redemptions(course_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    c = get_courses_collection().find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    rows = c.get("enrollmentCoupons") if isinstance(c.get("enrollmentCoupons"), list) else []
+    orders_coll = get_orders_collection()
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("code") or "").strip().upper()
+        if not code:
+            continue
+        used = count_successful_redemptions_for_course(orders_coll, course_id, code)
+        max_u = row.get("maxUses")
+        try:
+            max_uses = int(max_u) if max_u is not None and str(max_u).strip() != "" else None
+        except (TypeError, ValueError):
+            max_uses = None
+        out.append({"code": code, "used": used, "maxUses": max_uses})
+    return jsonify({"items": out})
+
+
+@admin_bp.route("/courses/<course_id>/curriculum-quiz-attempts", methods=["GET"])
+@jwt_required()
+def admin_course_curriculum_quiz_attempts(course_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not get_courses_collection().find_one({"_id": ObjectId(course_id)}):
+        return jsonify({"error": "Course not found"}), 404
+    enroll_coll = get_enrollments_collection()
+    users_coll = get_users_collection()
+    items = []
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)).sort("createdAt", -1):
+        raw_attempts = e.get("curriculumQuizAttempts")
+        if not isinstance(raw_attempts, list) or not raw_attempts:
+            continue
+        uid = str(e.get("userId") or "")
+        u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(uid) else None
+        name = (u.get("name") or u.get("fullName") or "") if u else ""
+        email = (u.get("email") or "") if u else ""
+        items.append({
+            "enrollmentId": str(e.get("_id")),
+            "userId": uid,
+            "studentName": name,
+            "email": email,
+            "attempts": _serialize_curriculum_quiz_attempts(e),
+        })
+    return jsonify({"items": items})
+
+
+def _enrollment_list_filters_from_request():
+    return {
+        "university": (request.args.get("university") or "").strip(),
+        "college": (request.args.get("college") or "").strip(),
+        "course": (request.args.get("course") or "").strip(),
+        "branch": (request.args.get("branch") or "").strip(),
+        "date_from": (request.args.get("dateFrom") or "").strip(),
+        "date_to": (request.args.get("dateTo") or "").strip(),
+        "search": (request.args.get("search") or "").strip().lower(),
+    }
+
+
+def _enrollment_created_date_only(e):
+    ca = e.get("createdAt")
+    if ca is None:
+        return None
+    if hasattr(ca, "date"):
+        return ca.date()
+    return None
+
+
+def _parse_ymd_date(s):
+    if not s or len(s) < 10:
+        return None
+    try:
+        return datetime.strptime(s.strip()[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _enrollment_matches_filters(e, u, flt):
+    if not any(flt.values()):
+        return True
+    m = merged_student_fields_for_admin(e, u)
+    if flt["university"] and flt["university"].lower() not in m["university"].lower():
+        return False
+    if flt["college"] and flt["college"].lower() not in m["collegeName"].lower():
+        return False
+    if flt["course"] and flt["course"].lower() not in m["course"].lower():
+        return False
+    if flt["branch"] and flt["branch"].lower() not in m["branch"].lower():
+        return False
+    ed = _enrollment_created_date_only(e)
+    df = _parse_ymd_date(flt["date_from"])
+    dt = _parse_ymd_date(flt["date_to"])
+    if df and ed and ed < df:
+        return False
+    if dt and ed and ed > dt:
+        return False
+    if flt["search"]:
+        hay = f"{m['name']} {m['email']} {m['registrationNo']} {m['mobile']}".lower()
+        if flt["search"] not in hay:
+            return False
+    return True
 
 
 @admin_bp.route("/courses/<course_id>/enrollments", methods=["GET"])
@@ -708,24 +881,32 @@ def course_enrollments(course_id):
         return jsonify({"items": []}), 503
     enroll_coll = get_enrollments_collection()
     users_coll = get_users_collection()
+    flt = _enrollment_list_filters_from_request()
     cursor = enroll_coll.find(course_id_enrollment_filter(course_id)).sort("createdAt", -1)
     items = []
     for e in cursor:
         uid = e.get("userId")
-        u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(uid) else None
+        uids = str(uid).strip() if uid is not None else ""
+        u = users_coll.find_one({"_id": ObjectId(uids)}) if uids and ObjectId.is_valid(uids) else None
+        if not _enrollment_matches_filters(e, u, flt):
+            continue
+        m = merged_student_fields_for_admin(e, u)
         subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
         items.append({
             "id": str(e["_id"]),
             "userId": e.get("userId", ""),
-            "name": (u.get("name") or u.get("fullName", "")) if u else "",
-            "email": (u.get("email", "")) if u else "",
-            "mobile": (u.get("mobile", "")) if u else "",
-            "university": (u.get("university", "")) if u else "",
-            "collegeName": (u.get("collegeName", "")) if u else "",
-            "course": (u.get("course", "")) if u else "",
-            "stream": (u.get("stream", "")) if u else "",
-            "semester": (u.get("semester", "")) if u else "",
+            "name": m["name"],
+            "email": m["email"],
+            "mobile": m["mobile"],
+            "university": m["university"],
+            "collegeName": m["collegeName"],
+            "course": m["course"],
+            "stream": m["branch"],
+            "branch": m["branch"],
+            "semester": m["semester"],
+            "registrationNumber": m["registrationNo"],
             "enrolledAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else "",
+            "submissionsCount": assignment_submissions_submitted_count(e),
             "batch": e.get("batch", ""),
             "orderId": e.get("orderId", ""),
             "assignmentSubmissions": [_serialize_submission(x) for x in subs if isinstance(x, dict)],
@@ -814,10 +995,14 @@ def export_course_enrollments_xlsx(course_id):
         return jsonify({"error": "Course not found"}), 404
     enroll_coll = get_enrollments_collection()
     users_coll = get_users_collection()
+    flt = _enrollment_list_filters_from_request()
     rows = []
     for e in enroll_coll.find(course_id_enrollment_filter(course_id)).sort("createdAt", 1):
         uid = e.get("userId")
-        u = users_coll.find_one({"_id": ObjectId(uid)}) if uid and ObjectId.is_valid(str(uid)) else None
+        uids = str(uid).strip() if uid is not None else ""
+        u = users_coll.find_one({"_id": ObjectId(uids)}) if uids and ObjectId.is_valid(uids) else None
+        if not _enrollment_matches_filters(e, u, flt):
+            continue
         rows.append(export_row_for_enrollment(c, e, u))
     try:
         blob = build_enrollment_workbook_bytes(c, rows)
@@ -1746,3 +1931,421 @@ def upload_course_media():
         return jsonify({"error": "Could not store file"}), 502
     url_path = f"/api/courses/media/{kind}/{fn}"
     return jsonify({"url": url_path})
+
+
+@admin_bp.route("/courses/<course_id>/attendance", methods=["GET"])
+@jwt_required()
+def admin_get_course_attendance(course_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    links = c.get("classLinks") if isinstance(c.get("classLinks"), list) else []
+    session_att = c.get("sessionAttendance") if isinstance(c.get("sessionAttendance"), dict) else {}
+    today = date.today()
+    enroll_coll = get_enrollments_collection()
+    users_coll = get_users_collection()
+    students = []
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)):
+        uid = e.get("userId")
+        uids = str(uid).strip() if uid is not None else ""
+        u = users_coll.find_one({"_id": ObjectId(uids)}) if uids and ObjectId.is_valid(uids) else None
+        m = merged_student_fields_for_admin(e, u)
+        students.append({
+            "userId": uids,
+            "name": m["name"] or ((u.get("name") or u.get("fullName") or "") if u else ""),
+            "email": m["email"] or ((u.get("email") or "") if u else ""),
+        })
+    sessions_out = []
+    for i, link in enumerate(links):
+        if not isinstance(link, dict):
+            continue
+        sk = class_link_session_key(link, i)
+        sd = parse_class_link_date(link.get("date"))
+        can_mark = sd is not None and sd <= today
+        block = session_att.get(sk) if isinstance(session_att.get(sk), dict) else {}
+        recs = block.get("records") if isinstance(block.get("records"), list) else []
+        by_uid = {}
+        for r in recs:
+            if not isinstance(r, dict):
+                continue
+            uu = str(r.get("userId") or "").strip()
+            if uu:
+                by_uid[uu] = {
+                    "status": norm_attendance_status(r.get("status")),
+                    "note": str(r.get("note") or "").strip()[:500],
+                }
+        sessions_out.append({
+            "sessionKey": sk,
+            "title": (link.get("title") or "Session").strip(),
+            "sessionDate": sd.isoformat() if sd else "",
+            "time": str(link.get("time") or "").strip(),
+            "platform": str(link.get("platform") or "").strip(),
+            "canMark": can_mark,
+            "records": by_uid,
+            "updatedAt": block.get("updatedAt").strftime("%Y-%m-%dT%H:%M:%SZ") if block.get("updatedAt") else "",
+        })
+    return jsonify({"sessions": sessions_out, "students": students})
+
+
+@admin_bp.route("/courses/<course_id>/attendance/<path:session_key>", methods=["PUT"])
+@jwt_required()
+def admin_put_course_attendance_session(course_id, session_key):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    sk = (session_key or "").strip()
+    if not sk:
+        return jsonify({"error": "Invalid session"}), 400
+    data = request.get_json() or {}
+    mark_all = bool(data.get("markAllPresent"))
+    records_in = data.get("records") if isinstance(data.get("records"), list) else []
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    links = c.get("classLinks") if isinstance(c.get("classLinks"), list) else []
+    target = None
+    for i, link in enumerate(links):
+        if not isinstance(link, dict):
+            continue
+        if class_link_session_key(link, i) == sk:
+            target = link
+            break
+    if not target:
+        return jsonify({"error": "Session not found for this course"}), 404
+    sd = parse_class_link_date(target.get("date"))
+    today = date.today()
+    if sd is None or sd > today:
+        return jsonify({"error": "Attendance can be marked only on or after the session date"}), 400
+    enroll_coll = get_enrollments_collection()
+    allowed_uids = set()
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)):
+        uid = e.get("userId")
+        if uid is not None:
+            allowed_uids.add(str(uid).strip())
+    records_out = []
+    if mark_all:
+        for uu in sorted(allowed_uids):
+            if uu:
+                records_out.append({"userId": uu, "status": "present", "note": ""})
+    else:
+        for r in records_in:
+            if not isinstance(r, dict):
+                continue
+            uu = str(r.get("userId") or "").strip()
+            if not uu or uu not in allowed_uids:
+                continue
+            records_out.append({
+                "userId": uu,
+                "status": norm_attendance_status(r.get("status")),
+                "note": str(r.get("note") or "").strip()[:500],
+            })
+    now = datetime.utcnow()
+    coll.update_one(
+        {"_id": ObjectId(course_id)},
+        {"$set": {f"sessionAttendance.{sk}": {"records": records_out, "updatedAt": now}}},
+    )
+    return jsonify({"ok": True, "count": len(records_out)}), 200
+
+
+_DEFAULT_SUPPORT_FAQS = [
+    {"id": "faq_invoice", "question": "How do I download my invoice?", "answer": "Open Payments & Invoices in your dashboard. For completed orders, use Download next to the transaction to get your GST tax invoice PDF (same file emailed after payment).", "sortOrder": 0},
+    {"id": "faq_certificate", "question": "How do I get a certificate?", "answer": "Complete your course requirements, including any completion quiz set by your trainer. When eligible, you can download or receive your certificate from the Certificate section of the course.", "sortOrder": 1},
+    {"id": "faq_change_course", "question": "Can I change my course after enrolling?", "answer": "Contact support through Raise a Ticket with your enrollment details. Our team will check eligibility and guide you on any transfer or refund policy.", "sortOrder": 2},
+]
+
+
+@admin_bp.route("/support-content", methods=["GET"])
+@jwt_required()
+def admin_get_support_content():
+    err = _admin_required()
+    if err:
+        return err
+    db = get_db()
+    if db is None:
+        return jsonify({"faqs": _DEFAULT_SUPPORT_FAQS}), 503
+    coll = get_app_settings_collection()
+    doc = coll.find_one({"_id": "global"}) or {}
+    raw = doc.get("supportFaqs")
+    faqs = raw if isinstance(raw, list) else []
+    safe = []
+    for i, x in enumerate(faqs[:80]):
+        if not isinstance(x, dict):
+            continue
+        q = str(x.get("question") or "").strip()
+        if not q:
+            continue
+        safe.append({
+            "id": str(x.get("id") or f"faq_{i}"),
+            "question": q[:500],
+            "answer": str(x.get("answer") or "").strip()[:20000],
+            "sortOrder": int(x.get("sortOrder") if x.get("sortOrder") is not None else i),
+        })
+    safe.sort(key=lambda z: z["sortOrder"])
+    return jsonify({"faqs": safe})
+
+
+@admin_bp.route("/support-content", methods=["PUT"])
+@jwt_required()
+def admin_put_support_content():
+    err = _admin_required()
+    if err:
+        return err
+    data = request.get_json() or {}
+    raw = data.get("faqs")
+    if not isinstance(raw, list):
+        return jsonify({"error": "faqs must be an array"}), 400
+    out = []
+    for i, x in enumerate(raw[:80]):
+        if not isinstance(x, dict):
+            continue
+        q = str(x.get("question") or "").strip()
+        if not q:
+            continue
+        out.append({
+            "id": str(x.get("id") or f"faq_{i}")[:80],
+            "question": q[:500],
+            "answer": str(x.get("answer") or "").strip()[:20000],
+            "sortOrder": int(x.get("sortOrder") if x.get("sortOrder") is not None else i),
+        })
+    out.sort(key=lambda z: z["sortOrder"])
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_app_settings_collection()
+    coll.update_one(
+        {"_id": "global"},
+        {"$set": {"supportFaqs": out, "supportFaqsUpdatedAt": datetime.utcnow()}, "$setOnInsert": {"_id": "global"}},
+        upsert=True,
+    )
+    return jsonify({"ok": True, "faqs": out})
+
+
+def _ticket_serialize(t: dict, user_lookup: dict | None = None) -> dict:
+    uid = str(t.get("userId") or "")
+    uname = ""
+    uemail = ""
+    if user_lookup and uid in user_lookup:
+        u = user_lookup[uid]
+        uname = (u.get("fullName") or u.get("name") or "").strip()
+        uemail = (u.get("email") or "").strip()
+    msgs = t.get("messages") if isinstance(t.get("messages"), list) else []
+    safe_msgs = []
+    for m in msgs[-50:]:
+        if not isinstance(m, dict):
+            continue
+        safe_msgs.append({
+            "from": m.get("from", "student"),
+            "body": (m.get("body") or "")[:20000],
+            "createdAt": m.get("createdAt").strftime("%Y-%m-%dT%H:%M:%SZ") if m.get("createdAt") else "",
+        })
+    return {
+        "id": str(t["_id"]),
+        "ticketId": t.get("ticketId", ""),
+        "userId": uid,
+        "studentName": uname,
+        "studentEmail": uemail,
+        "subject": t.get("subject", ""),
+        "category": t.get("category", ""),
+        "description": t.get("description", ""),
+        "status": t.get("status", "open"),
+        "priority": t.get("priority", "medium"),
+        "createdAt": t.get("createdAt").strftime("%Y-%m-%dT%H:%M:%SZ") if t.get("createdAt") else "",
+        "updatedAt": t.get("updatedAt").strftime("%Y-%m-%dT%H:%M:%SZ") if t.get("updatedAt") else "",
+        "messages": safe_msgs,
+    }
+
+
+@admin_bp.route("/support-tickets", methods=["GET"])
+@jwt_required()
+def admin_list_support_tickets():
+    err = _admin_required()
+    if err:
+        return err
+    db = get_db()
+    if db is None:
+        return jsonify({"items": []}), 503
+    status_f = (request.args.get("status") or "").strip().lower()
+    cat_f = (request.args.get("category") or "").strip()
+    pri_f = (request.args.get("priority") or "").strip().lower()
+    date_from = (request.args.get("dateFrom") or "").strip()
+    date_to = (request.args.get("dateTo") or "").strip()
+    coll = get_support_tickets_collection()
+    q: dict = {}
+    if status_f:
+        q["status"] = status_f
+    if cat_f:
+        q["category"] = cat_f
+    if pri_f:
+        q["priority"] = pri_f
+    if date_from or date_to:
+        rq: dict = {}
+        try:
+            if date_from:
+                rq["$gte"] = datetime.strptime(date_from[:10], "%Y-%m-%d")
+            if date_to:
+                rq["$lte"] = datetime.strptime(date_to[:10], "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except ValueError:
+            rq = {}
+        if rq:
+            q["createdAt"] = rq
+    rows = list(coll.find(q).sort("createdAt", -1).limit(200))
+    uids = [str(r.get("userId")) for r in rows if r.get("userId")]
+    users_coll = get_users_collection()
+    lookup = {}
+    if uids:
+        oids = []
+        for u in uids:
+            try:
+                if ObjectId.is_valid(u):
+                    oids.append(ObjectId(u))
+            except Exception:
+                pass
+        if oids:
+            for udoc in users_coll.find({"_id": {"$in": oids}}):
+                lookup[str(udoc["_id"])] = udoc
+    items = [_ticket_serialize(r, lookup) for r in rows]
+    return jsonify({"items": items})
+
+
+@admin_bp.route("/support-tickets/<ticket_id>", methods=["GET"])
+@jwt_required()
+def admin_get_support_ticket(ticket_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(ticket_id):
+        return jsonify({"error": "Invalid ticket id"}), 400
+    coll = get_support_tickets_collection()
+    t = coll.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        return jsonify({"error": "Not found"}), 404
+    uid = str(t.get("userId") or "")
+    lookup = {}
+    if uid:
+        udoc = get_users_collection().find_one({"_id": ObjectId(uid)})
+        if udoc:
+            lookup[uid] = udoc
+    return jsonify(_ticket_serialize(t, lookup))
+
+
+@admin_bp.route("/support-tickets/<ticket_id>/reply", methods=["POST"])
+@jwt_required()
+def admin_reply_support_ticket(ticket_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(ticket_id):
+        return jsonify({"error": "Invalid ticket id"}), 400
+    data = request.get_json() or {}
+    body = (data.get("message") or data.get("body") or "").strip()
+    if len(body) < 2:
+        return jsonify({"error": "Message is required"}), 400
+    coll = get_support_tickets_collection()
+    t = coll.find_one({"_id": ObjectId(ticket_id)})
+    if not t:
+        return jsonify({"error": "Not found"}), 404
+    if str(t.get("status", "")).lower() == "closed":
+        return jsonify({"error": "Ticket is closed"}), 400
+    msgs = t.get("messages") if isinstance(t.get("messages"), list) else []
+    now = datetime.utcnow()
+    msgs = list(msgs) + [{"from": "staff", "body": body, "createdAt": now}]
+    coll.update_one(
+        {"_id": t["_id"]},
+        {"$set": {
+            "messages": msgs,
+            "updatedAt": now,
+            "status": "in_progress" if str(t.get("status")) == "open" else t.get("status"),
+        }},
+    )
+    t2 = coll.find_one({"_id": t["_id"]})
+    uid = str(t2.get("userId") or "")
+    lookup = {}
+    udoc = None
+    if uid:
+        udoc = get_users_collection().find_one({"_id": ObjectId(uid)})
+        if udoc:
+            lookup[uid] = udoc
+    if udoc:
+        to_email = (udoc.get("email") or "").strip()
+        stu_name = (udoc.get("name") or udoc.get("fullName") or "").strip()
+        if to_email:
+            try:
+                send_support_ticket_staff_reply(
+                    current_app.config,
+                    stu_name,
+                    to_email,
+                    str(t2.get("ticketId") or ""),
+                    str(t2.get("subject") or ""),
+                    body,
+                )
+            except Exception:
+                current_app.logger.exception("send_support_ticket_staff_reply")
+
+    return jsonify(_ticket_serialize(t2, lookup))
+
+
+@admin_bp.route("/support-tickets/<ticket_id>/status", methods=["PATCH"])
+@jwt_required()
+def admin_support_ticket_status(ticket_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(ticket_id):
+        return jsonify({"error": "Invalid ticket id"}), 400
+    data = request.get_json() or {}
+    st = (data.get("status") or "").strip().lower()
+    if st not in ("open", "in_progress", "resolved", "closed"):
+        return jsonify({"error": "Invalid status"}), 400
+    coll = get_support_tickets_collection()
+    t_prev = coll.find_one({"_id": ObjectId(ticket_id)})
+    prev_st = str(t_prev.get("status") or "").lower() if t_prev else ""
+    now = datetime.utcnow()
+    r = coll.update_one({"_id": ObjectId(ticket_id)}, {"$set": {"status": st, "updatedAt": now}})
+    if r.matched_count == 0:
+        return jsonify({"error": "Not found"}), 404
+    t = coll.find_one({"_id": ObjectId(ticket_id)})
+    uid = str(t.get("userId") or "")
+    lookup = {}
+    udoc = None
+    if uid:
+        udoc = get_users_collection().find_one({"_id": ObjectId(uid)})
+        if udoc:
+            lookup[uid] = udoc
+    _ticket_status_labels = {
+        "open": "Open",
+        "in_progress": "In progress",
+        "resolved": "Resolved",
+        "closed": "Closed",
+    }
+    if udoc and st != prev_st:
+        to_email = (udoc.get("email") or "").strip()
+        stu_name = (udoc.get("name") or udoc.get("fullName") or "").strip()
+        label = _ticket_status_labels.get(st, st.replace("_", " ").title())
+        if to_email:
+            try:
+                send_support_ticket_status_update(
+                    current_app.config,
+                    stu_name,
+                    to_email,
+                    str(t.get("ticketId") or ""),
+                    str(t.get("subject") or ""),
+                    label,
+                )
+            except Exception:
+                current_app.logger.exception("send_support_ticket_status_update")
+    return jsonify(_ticket_serialize(t, lookup))

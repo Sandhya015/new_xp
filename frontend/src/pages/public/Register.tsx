@@ -391,7 +391,7 @@ export function Register() {
     setOtpSubmitting(true)
     try {
       const res = await authService.verifyRegisterOtp(verificationId, otp)
-      setSession(res.user as AuthUser, res.token)
+      setSession(res.user as AuthUser, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
       resetOtpUi()
       setSuccessToastText('Account created successfully! Welcome to XpertIntern.')
       setShowSuccessToast(true)

@@ -9,12 +9,15 @@ import uuid
 from dataclasses import asdict, fields
 from datetime import datetime
 
+from typing import Any
+
 import razorpay
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import Blueprint, Response, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from app.checkout_coupon import kit_price_from_course_and_settings, lookup_coupon_pricing_only, resolve_checkout_coupon
 from app.checkout_pricing import OrderPricingBreakdown, build_order_pricing_breakdown, breakdown_to_pricing_dict
 from app.db import (
     get_app_settings_collection,
@@ -30,17 +33,6 @@ from app.notifications import schedule_payment_success_email
 from app.tax_invoice import allocate_invoice_serial, render_invoice_html
 
 payments_bp = Blueprint("payments", __name__)
-
-
-def _find_coupon(settings_doc: dict, code: str):
-    coupons = settings_doc.get("coupons") if isinstance(settings_doc.get("coupons"), list) else []
-    cu = (code or "").strip().upper()
-    for c in coupons:
-        if not isinstance(c, dict) or not c.get("active", True):
-            continue
-        if str(c.get("code") or "").strip().upper() == cu:
-            return c
-    return None
 
 
 def _razorpay_client():
@@ -67,12 +59,9 @@ def _recompute_breakdown(order: dict, course: dict, settings_doc: dict) -> Order
         course_gross = float(course.get("price") or 0)
     except (TypeError, ValueError):
         course_gross = 0.0
-    try:
-        kit_price = max(0.0, float(settings_doc.get("trainingKitPriceInr") or 0))
-    except (TypeError, ValueError):
-        kit_price = 0.0
+    kit_price = kit_price_from_course_and_settings(course, settings_doc)
     coupon_code = (order.get("couponCode") or (order.get("pricing") or {}).get("couponCode") or "").strip()
-    coupon = _find_coupon(settings_doc, coupon_code) if coupon_code else None
+    coupon = lookup_coupon_pricing_only(coupon_code, course=course, settings_doc=settings_doc) if coupon_code else None
     return build_order_pricing_breakdown(
         course_gross=course_gross,
         kit_gross_if_included=kit_price,
@@ -226,18 +215,83 @@ def list_my_orders():
     for o in orders_rows:
         course_id = o.get("courseId")
         course_title = titles.get(str(course_id), "") if course_id else ""
+        st = str(o.get("status", "pending") or "").lower()
         items.append({
             "id": str(o["_id"]),
             "transactionId": o.get("transactionId", o.get("razorpayPaymentId", o.get("orderId", str(o["_id"])))),
-            "courseId": course_id,
+            "courseId": str(course_id) if course_id else "",
             "courseTitle": course_title,
             "amount": o.get("amount", 0),
-            "status": o.get("status", "pending"),
+            "amountPaise": o.get("amountPaise"),
+            "razorpayOrderId": o.get("orderId") or "",
+            "status": st,
             "method": o.get("method", o.get("lastPaymentMethod", "")),
             "createdAt": o.get("createdAt").strftime("%Y-%m-%dT%H:%M:%S") if o.get("createdAt") else "",
             "invoiceNumber": o.get("invoiceNumber") or "",
         })
     return jsonify({"items": items})
+
+
+@payments_bp.route("/last-billing", methods=["GET"])
+@jwt_required()
+def last_billing_snapshot():
+    """Most recent successful order billing address (P-10)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"billingSnapshot": None}), 503
+    user_id = get_jwt_identity()
+    o = get_orders_collection().find_one(
+        {"userId": user_id, "status": "success"},
+        sort=[("createdAt", -1)],
+    )
+    if not o or not isinstance(o.get("billingSnapshot"), dict):
+        return jsonify({"billingSnapshot": None})
+    return jsonify({"billingSnapshot": o.get("billingSnapshot")})
+
+@payments_bp.route("/resume-checkout", methods=["POST"])
+@jwt_required()
+def resume_checkout():
+    """Re-open Razorpay Checkout for an existing unpaid order (same order id + amount)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    oid = (data.get("internalOrderId") or data.get("orderId") or "").strip()
+    if not oid or not ObjectId.is_valid(oid):
+        return jsonify({"error": "Valid internalOrderId is required"}), 400
+    coll = get_orders_collection()
+    order = coll.find_one({"_id": ObjectId(oid), "userId": user_id})
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    st = str(order.get("status") or "").lower()
+    if st not in ("created", "pending"):
+        return jsonify({"error": "This order is not awaiting payment", "status": st}), 400
+    rz_id = (order.get("orderId") or "").strip()
+    if not rz_id:
+        return jsonify({"error": "Missing payment session"}), 400
+    amount_paise = order.get("amountPaise")
+    try:
+        ap = int(amount_paise) if amount_paise is not None else 0
+    except (TypeError, ValueError):
+        ap = 0
+    if ap < 100:
+        return jsonify({"error": "Invalid order amount"}), 400
+    course_id = order.get("courseId")
+    title = ""
+    if course_id and ObjectId.is_valid(str(course_id)):
+        c = get_courses_collection().find_one({"_id": ObjectId(str(course_id))})
+        if c:
+            title = str(c.get("title") or "")
+    key_id = current_app.config.get("RAZORPAY_KEY_ID", "")
+    return jsonify({
+        "internalOrderId": oid,
+        "keyId": key_id,
+        "orderId": rz_id,
+        "amount": ap,
+        "currency": (order.get("currency") or "INR").strip().upper() or "INR",
+        "courseTitle": title,
+    }), 200
 
 
 @payments_bp.route("/create-order", methods=["POST"])
@@ -292,16 +346,20 @@ def create_order():
 
     settings_coll = get_app_settings_collection()
     settings_doc = settings_coll.find_one({"_id": "global"}) or {}
-    try:
-        kit_price = max(0.0, float(settings_doc.get("trainingKitPriceInr") or 0))
-    except (TypeError, ValueError):
-        kit_price = 0.0
+    kit_price = kit_price_from_course_and_settings(course, settings_doc)
 
+    orders_coll = get_orders_collection()
     matched_coupon = None
     if coupon_code:
-        matched_coupon = _find_coupon(settings_doc, coupon_code)
-        if not matched_coupon:
-            return jsonify({"error": "Invalid or expired coupon code."}), 400
+        matched_coupon, cerr = resolve_checkout_coupon(
+            coupon_code,
+            course=course,
+            settings_doc=settings_doc,
+            user_id=str(user_id),
+            orders_coll=orders_coll,
+        )
+        if cerr:
+            return jsonify({"error": cerr}), 400
 
     bd = build_order_pricing_breakdown(
         course_gross=course_gross,
@@ -336,7 +394,7 @@ def create_order():
         return jsonify({"error": "Could not create payment order", "detail": str(e)}), 502
 
     razorpay_order_id = rz_order.get("id")
-    coll = get_orders_collection()
+    coll = orders_coll
     doc = {
         "userId": user_id,
         "courseId": course_id,

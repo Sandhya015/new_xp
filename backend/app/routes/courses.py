@@ -11,7 +11,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from pathlib import Path
 
 from app.course_features import course_has_completion_quiz
-from app.db import get_db, get_courses_collection, get_enrollments_collection, get_course_reviews_collection
+from app.checkout_coupon import public_checkout_block
+from app.db import get_app_settings_collection, get_db, get_courses_collection, get_enrollments_collection, get_course_reviews_collection
 from app.course_legacy import migrate_legacy_course_fields, review_stats_for_course_ids
 from app.services.course_media_storage import (
     course_media_object_exists,
@@ -151,6 +152,8 @@ def _sanitize_curriculum_public(curriculum):
         for j, t in enumerate(mod.get("topics") or []):
             if not isinstance(t, dict):
                 continue
+            if not _topic_visible_to_student(t):
+                continue
             topics.append({
                 "id": str(t.get("id", f"{i}_{j}")),
                 "title": (t.get("title", "") or "").strip() or "Untitled",
@@ -167,7 +170,7 @@ def _sanitize_curriculum_public(curriculum):
     return out
 
 
-def _course_to_public_detail(c, enrollment_count=0):
+def _course_to_public_detail(c, enrollment_count=0, settings_doc=None):
     """Rich course payload for public marketing page (GET /api/courses/:id)."""
     base = _course_to_item(c) or {}
     tms = c.get("trainingMaxSeats")
@@ -200,6 +203,7 @@ def _course_to_public_detail(c, enrollment_count=0):
         "trainingMaxSeats": training_max_seats,
         "enrollmentCount": int(enrollment_count or 0),
         "updatedAt": _iso_utc(c.get("updatedAt")) or _iso_utc(c.get("createdAt")),
+        "checkout": public_checkout_block(c, settings_doc),
     })
     return base
 
@@ -367,7 +371,47 @@ def get_course(course_id):
     c = migrate_legacy_course_fields(coll, c)
     enroll_coll = get_enrollments_collection()
     ec = enroll_coll.count_documents(course_id_enrollment_filter(course_id))
-    return jsonify(_course_to_public_detail(c, ec))
+    settings_doc = get_app_settings_collection().find_one({"_id": "global"}) or {}
+    return jsonify(_course_to_public_detail(c, ec, settings_doc))
+
+
+def _topic_visible_to_student(t) -> bool:
+    if isinstance(t, str):
+        return True
+    if not isinstance(t, dict):
+        return True
+    typ = str(t.get("type") or "").strip().lower()
+    if typ in ("quiz", "assignment"):
+        if t.get("published") is False:
+            return False
+    return True
+
+
+def _filter_curriculum_for_student(curriculum):
+    if not isinstance(curriculum, list):
+        return curriculum or []
+    out = []
+    for mod in curriculum:
+        if not isinstance(mod, dict):
+            continue
+        m = dict(mod)
+        topics = m.get("topics")
+        if isinstance(topics, list):
+            m["topics"] = [t for t in topics if _topic_visible_to_student(t)]
+        out.append(m)
+    return out
+
+
+def _filter_assignments_for_student(assigns):
+    if not isinstance(assigns, list):
+        return []
+    return [a for a in assigns if isinstance(a, dict) and a.get("published") is not False]
+
+
+def _filter_quizzes_for_student(quizzes):
+    if not isinstance(quizzes, list):
+        return []
+    return [q for q in quizzes if isinstance(q, dict) and q.get("published") is not False]
 
 
 def _course_to_content(c):
@@ -392,11 +436,11 @@ def _course_to_content(c):
         "slug": (c.get("slug") or "") or "",
         "introVideoUrl": (c.get("introVideoUrl") or "") or "",
         "whatYouWillLearn": c.get("whatYouWillLearn") if isinstance(c.get("whatYouWillLearn"), list) else [],
-        "curriculum": c.get("curriculum", []),
+        "curriculum": _filter_curriculum_for_student(c.get("curriculum", [])),
         "classLinks": c.get("classLinks", []),
         "studyMaterials": c.get("studyMaterials", []),
-        "assignments": c.get("assignments", []),
-        "quizzes": c.get("quizzes", []),
+        "assignments": _filter_assignments_for_student(c.get("assignments", [])),
+        "quizzes": _filter_quizzes_for_student(c.get("quizzes", [])),
         "announcements": c.get("announcements", []),
         "completionQuizTitle": (c.get("completionQuizTitle") or "") or "",
         "certificateEmailOnly": bool(c.get("certificateEmailOnly")),

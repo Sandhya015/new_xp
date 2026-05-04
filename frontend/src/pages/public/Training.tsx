@@ -1,16 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
-import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
-import { Search, Filter, Clock, Monitor, Building2, Laptop, X, Star } from 'lucide-react'
+import { Search, Filter, X } from 'lucide-react'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
-import { absoluteApiUrl } from '@/config/api'
-import { splitInrTaxInclusive, formatInr } from '@/utils/gstPricing'
-import { ShareCourseMenu } from '@/components/training/ShareCourseMenu'
+import { TrainingProgramCard } from '@/components/training/TrainingProgramCard'
 import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
 import {
   catalogCourseMatchesFilters,
@@ -70,16 +67,8 @@ function courseFromApi(c: Record<string, unknown>): Course {
   }
 }
 
-function ModeIcon({ mode }: { mode: string }) {
-  const m = mode.toLowerCase()
-  if (m.includes('online')) return <Laptop className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-  if (m.includes('offline')) return <Building2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-  return <Monitor className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-}
-
 export function Training() {
   const location = useLocation()
-  const navigate = useNavigate()
   const [courses, setCourses] = useState<Course[]>([])
   const [coursesLoading, setCoursesLoading] = useState(true)
   const [coursesLoadError, setCoursesLoadError] = useState<string | null>(null)
@@ -357,129 +346,16 @@ export function Training() {
           {filteredCourses.map((course) => {
             const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
             const isCompleted = Boolean(token && completedCourseIds.has(course.id))
-            const marketingPath = courseMarketingPath(course.id)
-            const detailTo = isEnrolled ? courseContentPath(course.id) : marketingPath
-            const goDetails = () => {
-              if (!token) {
-                navigate(`/login?next=${encodeURIComponent(marketingPath)}`)
-                return
-              }
-              navigate(detailTo)
-            }
-            const goEnroll = () => {
-              if (!token) {
-                navigate(`/login?next=${encodeURIComponent(`${marketingPath}?enroll=1`)}`)
-                return
-              }
-              setEnrollCourse(course)
-            }
-            const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}${courseMarketingPath(course.id)}` : ''
-            const thumb = course.featuredImageUrl ? absoluteApiUrl(course.featuredImageUrl) : ''
-            const catLabel = course.category === 'technical' ? 'Technical' : course.category === 'non-technical' ? 'Non-Technical' : 'Other'
-            const catClass =
-              course.category === 'technical'
-                ? 'bg-emerald-500/95 text-white'
-                : course.category === 'non-technical'
-                  ? 'bg-orange-500/95 text-white'
-                  : 'bg-slate-600/95 text-white'
-            const listPrice = course.originalPrice > course.price ? course.originalPrice : null
-            const gstLine = course.price > 0 ? splitInrTaxInclusive(course.price, 0.18) : null
             return (
-              <article
+              <TrainingProgramCard
                 key={course.id}
-                className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg min-w-0"
-              >
-                <div className="relative aspect-video w-full overflow-hidden bg-gray-100">
-                  {thumb ? (
-                    <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-gray-400 text-sm">No thumbnail</div>
-                  )}
-                  <span className={`absolute right-2 top-2 rounded-full px-2.5 py-0.5 text-xs font-semibold shadow ${catClass}`}>{catLabel}</span>
-                  <div className="absolute left-2 top-2">
-                    <ShareCourseMenu
-                      iconOnly
-                      url={shareUrl}
-                      title={course.title}
-                      description={course.description}
-                      university={course.universities}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-1 flex-col p-4 sm:p-5">
-                  <h2 className="text-base font-bold text-brand-navy line-clamp-2 leading-snug">
-                    <button type="button" onClick={goDetails} className="text-left hover:text-brand-accent transition w-full">
-                      {course.title}
-                    </button>
-                  </h2>
-                  <p className="mt-2 text-sm text-slate-gray line-clamp-2">{course.description}</p>
-                  <div className="mt-1.5 flex items-center gap-1.5 text-sm">
-                    {course.reviewCount && course.reviewCount > 0 ? (
-                      <>
-                        <Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" aria-hidden />
-                        <span className="font-semibold text-gray-900">{Number(course.reviewAverage ?? 0).toFixed(1)}</span>
-                        <span className="text-gray-500">({course.reviewCount})</span>
-                      </>
-                    ) : (
-                      <span className="text-xs text-gray-400">No ratings yet</span>
-                    )}
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
-                    <span className="flex items-center gap-1">
-                      <Building2 className="h-3.5 w-3.5 shrink-0" /> {course.universities}
-                    </span>
-                    <span className="text-gray-300">·</span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5 shrink-0" /> {course.duration}
-                    </span>
-                    <span className="text-gray-300">·</span>
-                    <span className="flex items-center gap-1">
-                      <ModeIcon mode={course.mode} /> {course.mode}
-                    </span>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-baseline gap-2">
-                    {course.price > 0 ? (
-                      <>
-                        <span className="text-lg font-bold text-brand-navy">{formatInr(course.price)}</span>
-                        {listPrice ? <span className="text-sm text-gray-400 line-through">{formatInr(listPrice)}</span> : null}
-                        {gstLine ? (
-                          <span className="w-full text-xs text-gray-500">
-                            Incl. GST (taxable {formatInr(gstLine.base)} + GST {formatInr(gstLine.gst)})
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-sm font-bold text-emerald-800">Free</span>
-                    )}
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={goDetails}
-                      className="flex w-full items-center justify-center rounded-lg border-2 border-brand-accent px-4 py-2.5 text-sm font-semibold text-brand-accent hover:bg-brand-light-bg transition min-h-[44px]"
-                    >
-                      View Details
-                    </button>
-                    {isEnrolled ? (
-                      <span
-                        className={`flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-semibold min-h-[44px] ${
-                          isCompleted ? 'border-violet-200 bg-violet-50 text-violet-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                        }`}
-                      >
-                        {isCompleted ? 'Completed' : 'Enrolled'}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={goEnroll}
-                        className="flex w-full items-center justify-center rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 min-h-[44px]"
-                      >
-                        Enroll Now
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </article>
+                course={course}
+                isLoggedIn={Boolean(token)}
+                isEnrolled={isEnrolled}
+                isCompleted={isCompleted}
+                onEnroll={() => setEnrollCourse(course)}
+                payBusy={payBusy}
+              />
             )
           })}
         </div>

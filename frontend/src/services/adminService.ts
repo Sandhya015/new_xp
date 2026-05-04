@@ -1,9 +1,11 @@
 import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
+import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  await runBeforeAuthorizedRequest(config)
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
@@ -210,6 +212,33 @@ export const adminService = {
     return data
   },
 
+  async getCourseCouponRedemptions(courseId: string) {
+    const { data } = await api.get<{
+      items: Array<{ code: string; used: number; maxUses: number | null }>
+    }>(`/api/admin/courses/${courseId}/coupon-redemptions`)
+    return data
+  },
+
+  async getCourseCurriculumQuizAttempts(courseId: string) {
+    const { data } = await api.get<{
+      items: Array<{
+        enrollmentId: string
+        userId: string
+        studentName: string
+        email: string
+        attempts: Array<{
+          quizTitle: string
+          passed: boolean
+          scorePercent?: number
+          attempts?: number
+          attemptsMax?: number
+          updatedAt?: string
+        }>
+      }>
+    }>(`/api/admin/courses/${courseId}/curriculum-quiz-attempts`)
+    return data
+  },
+
   async createCourse(payload: Record<string, unknown>) {
     const { data } = await api.post('/api/admin/courses', payload)
     return data
@@ -281,7 +310,11 @@ export const adminService = {
     await api.patch(`/api/admin/courses/${courseId}/reviews/${reviewId}/flag`, { flagged })
   },
 
-  async getCourseEnrollments(courseId: string) {
+  async getCourseEnrollments(courseId: string, query?: Record<string, string>) {
+    const params =
+      query && Object.keys(query).length
+        ? Object.fromEntries(Object.entries(query).filter(([, v]) => String(v ?? '').trim() !== ''))
+        : undefined
     const { data } = await api.get<{
       items: Array<{
         id: string
@@ -293,8 +326,11 @@ export const adminService = {
         collegeName: string
         course: string
         stream: string
+        branch?: string
         semester: string
+        registrationNumber?: string
         enrolledAt: string
+        submissionsCount?: number
         batch: string
         orderId: string
         assignmentSubmissions?: Array<{
@@ -308,13 +344,18 @@ export const adminService = {
           submittedAt?: string
         }>
       }>
-    }>(`/api/admin/courses/${courseId}/enrollments`)
+    }>(`/api/admin/courses/${courseId}/enrollments`, { params })
     return data
   },
 
   /** Excel: enrollments, assignment submission columns, completion quiz flags, ApproveCertificate (for re-upload). */
-  async downloadEnrollmentsCertificateSheet(courseId: string): Promise<Blob> {
+  async downloadEnrollmentsCertificateSheet(courseId: string, query?: Record<string, string>): Promise<Blob> {
+    const params =
+      query && Object.keys(query).length
+        ? Object.fromEntries(Object.entries(query).filter(([, v]) => String(v ?? '').trim() !== ''))
+        : undefined
     const { data } = await api.get(`/api/admin/courses/${courseId}/enrollments/export.xlsx`, {
+      params,
       responseType: 'arraybuffer',
       headers: {
         Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -505,6 +546,100 @@ export const adminService = {
 
   async getCertificateTrainings() {
     const { data } = await api.get<{ items: Array<{ id: string; title: string }> }>('/api/admin/certificates/trainings')
+    return data
+  },
+
+  async listSupportTickets(params?: {
+    status?: string
+    category?: string
+    priority?: string
+    dateFrom?: string
+    dateTo?: string
+  }) {
+    const { data } = await api.get<{
+      items: Array<{
+        id: string
+        ticketId: string
+        studentName: string
+        studentEmail: string
+        subject: string
+        category: string
+        status: string
+        priority: string
+        createdAt: string
+        updatedAt?: string
+        messages?: Array<{ from: string; body: string; createdAt: string }>
+      }>
+    }>('/api/admin/support-tickets', { params })
+    return data
+  },
+
+  async getSupportTicket(id: string) {
+    const { data } = await api.get<{
+      id: string
+      ticketId: string
+      studentName: string
+      studentEmail: string
+      subject: string
+      category: string
+      description: string
+      status: string
+      priority: string
+      createdAt: string
+      updatedAt?: string
+      messages?: Array<{ from: string; body: string; createdAt: string }>
+    }>(`/api/admin/support-tickets/${id}`)
+    return data
+  },
+
+  async replySupportTicket(id: string, message: string) {
+    const { data } = await api.post(`/api/admin/support-tickets/${id}/reply`, { message })
+    return data
+  },
+
+  async setSupportTicketStatus(id: string, status: string) {
+    const { data } = await api.patch(`/api/admin/support-tickets/${id}/status`, { status })
+    return data
+  },
+
+  async getCourseAttendance(courseId: string) {
+    const { data } = await api.get<{
+      sessions: Array<{
+        sessionKey: string
+        title: string
+        sessionDate: string
+        time: string
+        platform: string
+        canMark: boolean
+        records: Record<string, { status: string; note: string }>
+        updatedAt: string
+      }>
+      students: Array<{ userId: string; name: string; email: string }>
+    }>(`/api/admin/courses/${courseId}/attendance`)
+    return data
+  },
+
+  async putCourseAttendanceSession(
+    courseId: string,
+    sessionKey: string,
+    body: { markAllPresent?: boolean; records?: Array<{ userId: string; status: string; note?: string }> },
+  ) {
+    const { data } = await api.put<{ ok: boolean; count?: number }>(
+      `/api/admin/courses/${courseId}/attendance/${encodeURIComponent(sessionKey)}`,
+      body,
+    )
+    return data
+  },
+
+  async getSupportContentAdmin() {
+    const { data } = await api.get<{
+      faqs: Array<{ id: string; question: string; answer: string; sortOrder: number }>
+    }>('/api/admin/support-content')
+    return data
+  },
+
+  async putSupportContentAdmin(faqs: Array<{ id: string; question: string; answer: string; sortOrder: number }>) {
+    const { data } = await api.put<{ ok: boolean; faqs: typeof faqs }>('/api/admin/support-content', { faqs })
     return data
   },
 }

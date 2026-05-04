@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 from bson import ObjectId
-from datetime import datetime
+from datetime import date, datetime
 from flask import Blueprint, abort, current_app, jsonify, request, send_from_directory
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from werkzeug.utils import secure_filename
@@ -22,6 +22,7 @@ from app.certificate_quiz_pass import try_auto_email_certificate_on_quiz_pass
 from app.python_quiz import completion_quiz_pass_percent, find_quiz_topic_by_title, grade_quiz
 from app.quiz_attempt_limits import QUIZ_MAX_ATTEMPTS
 from app.enrollment_lookup import user_course_enrollment_filter
+from app.attendance_util import class_link_session_key, norm_attendance_status, parse_class_link_date
 
 enrollments_bp = Blueprint("enrollments", __name__)
 
@@ -109,14 +110,38 @@ def _resolve_assignment(course, assignment_id: str):
         try:
             i = int(aid.split("_", 1)[1])
             if 0 <= i < len(assigns) and isinstance(assigns[i], dict):
-                return assigns[i], aid
+                a = assigns[i]
+                if a.get("published") is False:
+                    return None, None
+                return a, aid
         except (ValueError, IndexError):
             return None, None
         return None, None
     for a in assigns:
         if isinstance(a, dict) and str(a.get("id", "")) == aid:
+            if a.get("published") is False:
+                return None, None
             return a, aid
     return None, None
+
+
+def _curriculum_topic_ids(course) -> list:
+    if not course or not isinstance(course.get("curriculum"), list):
+        return []
+    ids = []
+    for mod in course["curriculum"]:
+        if not isinstance(mod, dict):
+            continue
+        topics = mod.get("topics")
+        if not isinstance(topics, list):
+            continue
+        for t in topics:
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or "").strip()
+            if tid:
+                ids.append(tid)
+    return ids
 
 
 def _enrollment_to_item(e, course=None):
@@ -134,6 +159,7 @@ def _enrollment_to_item(e, course=None):
         "batch": e.get("batch", ""),
         "mode": e.get("mode", ""),
         "createdAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else "",
+        "lastAccessedAt": _iso_utc(e.get("lastAccessedAt")),
         "completedAt": e.get("completedAt").strftime("%Y-%m-%d") if e.get("completedAt") else None,
         "pythonQuizPassed": bool(pq.get("passedAt")),
         "pythonQuizScore": pq.get("scorePercent"),
@@ -148,8 +174,47 @@ def _enrollment_to_item(e, course=None):
         "pythonQuizLastScorePercent": pq.get("lastScorePercent"),
         "curriculumQuizAttempts": _serialize_curriculum_quiz_attempts(e),
     }
-    subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
-    out["assignmentSubmissions"] = [_serialize_submission(x) for x in subs if isinstance(x, dict)]
+    raw_done = e.get("completedCurriculumTopicIds")
+    out["completedCurriculumTopicIds"] = [str(x) for x in raw_done] if isinstance(raw_done, list) else []
+    if course:
+        ids = _curriculum_topic_ids(course)
+        if ids:
+            done_set = set(out["completedCurriculumTopicIds"])
+            n_done = sum(1 for tid in ids if tid in done_set)
+            out["curriculumProgressPercent"] = min(100, int(round(100.0 * n_done / len(ids))))
+        else:
+            out["curriculumProgressPercent"] = None
+        out["courseFeaturedImageUrl"] = (course.get("featuredImageUrl") or "") or ""
+        out["courseOriginalPrice"] = int(course.get("originalPrice") or 0)
+        out["courseDuration"] = (course.get("duration") or "") or ""
+        out["courseMode"] = (course.get("mode") or "") or ""
+        out["courseUniversities"] = (course.get("universities") or "") or ""
+        out["courseCategory"] = (course.get("category") or "") or ""
+        out["courseShortDescription"] = (course.get("shortDescription") or "") or ""
+    else:
+        out["curriculumProgressPercent"] = None
+        out["courseFeaturedImageUrl"] = ""
+        out["courseOriginalPrice"] = 0
+        out["courseDuration"] = ""
+        out["courseMode"] = ""
+        out["courseUniversities"] = ""
+        out["courseCategory"] = ""
+        out["courseShortDescription"] = ""
+    cp = e.get("certificateProfile")
+    if isinstance(cp, dict):
+        out["enrollmentProfileSnapshot"] = {
+            "fullName": str(cp.get("fullName") or "").strip(),
+            "university": str(cp.get("university") or "").strip(),
+            "collegeName": str(cp.get("collegeName") or "").strip(),
+            "course": str(cp.get("course") or "").strip(),
+            "branchOrSubject": str(cp.get("branchOrSubject") or "").strip(),
+            "semester": str(cp.get("semester") or "").strip(),
+            "registrationNumber": str(cp.get("registrationNumber") or "").strip(),
+            "mobile": str(cp.get("mobile") or "").strip(),
+            "email": str(cp.get("email") or "").strip(),
+        }
+    else:
+        out["enrollmentProfileSnapshot"] = None
     return out
 
 
@@ -199,8 +264,105 @@ def get_enrollment_by_course(course_id):
     e = coll.find_one(user_course_enrollment_filter(user_id, course_id))
     if not e:
         return jsonify({"error": "Not enrolled in this course"}), 404
+    now = datetime.utcnow()
+    coll.update_one({"_id": e["_id"]}, {"$set": {"lastAccessedAt": now}})
+    e = coll.find_one({"_id": e["_id"]})
     c = courses_coll.find_one({"_id": ObjectId(course_id)})
     return jsonify(_enrollment_to_item(e, c))
+
+
+@enrollments_bp.route("/by-course/<course_id>/attendance", methods=["GET"])
+@jwt_required()
+def student_course_attendance(course_id):
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = str(get_jwt_identity() or "")
+    enroll_coll = get_enrollments_collection()
+    courses_coll = get_courses_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    c = courses_coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    links = c.get("classLinks") if isinstance(c.get("classLinks"), list) else []
+    session_att = c.get("sessionAttendance") if isinstance(c.get("sessionAttendance"), dict) else {}
+    today = date.today()
+    items = []
+    marked_sessions = 0
+    attended = 0
+    for i, link in enumerate(links):
+        if not isinstance(link, dict):
+            continue
+        sk = class_link_session_key(link, i)
+        sd = parse_class_link_date(link.get("date"))
+        block = session_att.get(sk) if isinstance(session_att.get(sk), dict) else None
+        recs = block.get("records") if isinstance(block, dict) and isinstance(block.get("records"), list) else []
+        status = "not_marked"
+        note = ""
+        for r in recs:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("userId") or "").strip() == user_id:
+                status = norm_attendance_status(r.get("status"))
+                note = str(r.get("note") or "").strip()
+                break
+        is_marked = len(recs) > 0
+        if sd and sd <= today and is_marked:
+            marked_sessions += 1
+            if status in ("present", "late"):
+                attended += 1
+        items.append({
+            "sessionKey": sk,
+            "title": (link.get("title") or "Session").strip(),
+            "sessionDate": sd.isoformat() if sd else "",
+            "time": str(link.get("time") or "").strip(),
+            "platform": str(link.get("platform") or "").strip(),
+            "status": status if is_marked else "not_marked",
+            "note": note,
+        })
+    pct = round(100.0 * attended / marked_sessions) if marked_sessions else None
+    return jsonify({
+        "sessions": items,
+        "summary": {
+            "markedSessions": marked_sessions,
+            "attended": attended,
+            "percent": pct,
+        },
+    })
+
+
+@enrollments_bp.route("/by-course/<course_id>/curriculum-topic-complete", methods=["PATCH"])
+@jwt_required()
+def patch_curriculum_topic_complete(course_id):
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    topic_id = (data.get("topicId") or "").strip()[:120]
+    if not topic_id:
+        return jsonify({"error": "topicId is required"}), 400
+    completed = bool(data.get("completed"))
+    enroll_coll = get_enrollments_collection()
+    courses_coll = get_courses_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    c = courses_coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    if completed:
+        enroll_coll.update_one({"_id": e["_id"]}, {"$addToSet": {"completedCurriculumTopicIds": topic_id}})
+    else:
+        enroll_coll.update_one({"_id": e["_id"]}, {"$pull": {"completedCurriculumTopicIds": topic_id}})
+    e2 = enroll_coll.find_one({"_id": e["_id"]})
+    return jsonify(_enrollment_to_item(e2, c))
 
 
 @enrollments_bp.route("", methods=["POST"])
@@ -501,6 +663,8 @@ def submit_curriculum_quiz_result(course_id):
 
     topic = find_quiz_topic_by_title(c, quiz_title)
     if not topic or str(topic.get("type") or "").strip().lower() != "quiz":
+        return jsonify({"error": "Quiz topic not found in this course curriculum"}), 404
+    if topic.get("published") is False:
         return jsonify({"error": "Quiz topic not found in this course curriculum"}), 404
 
     ct = (c.get("completionQuizTitle") or "").strip().lower()

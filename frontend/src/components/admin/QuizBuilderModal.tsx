@@ -111,7 +111,7 @@ type QuizBuilderModalProps = {
   initialQuestions: unknown[]
   initialSettings?: Partial<QuizSettingsDraft>
   onClose: () => void
-  onSave: (draft: QuizTopicDraft) => void
+  onSave: (draft: QuizTopicDraft & { published: boolean }) => void
 }
 
 function FieldHint({ text }: { text: string }) {
@@ -231,9 +231,15 @@ export function QuizBuilderModal({
 
   const totalMarks = questions.reduce((s, q) => s + (Number.isFinite(q.marks) ? q.marks : 0), 0)
 
-  const handleSave = () => {
-    onSave({ title: title.trim(), summary: summary.trim(), questions, settings })
+  const handleSaveDraft = () => {
+    onSave({ title: title.trim(), summary: summary.trim(), questions, settings, published: false })
   }
+
+  const handlePublish = () => {
+    onSave({ title: title.trim(), summary: summary.trim(), questions, settings, published: true })
+  }
+
+  const publishOk = title.trim() && questions.length > 0
 
   const patchSettings = <K extends keyof QuizSettingsDraft>(key: K, value: QuizSettingsDraft[K]) => {
     setSettings((s) => ({ ...s, [key]: value }))
@@ -508,12 +514,24 @@ export function QuizBuilderModal({
                   placeholder="Short description…"
                 />
                 <p className="mt-3 text-xs text-gray-500">Total marks (sum): <span className="font-semibold text-brand-navy">{totalMarks}</span></p>
-                <div className="mt-4 flex justify-end gap-2 border-t border-gray-200 pt-4">
+                <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4">
                   <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                     Cancel
                   </button>
-                  <button type="button" onClick={handleSave} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600">
-                    Save
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                  >
+                    Save draft
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!publishOk}
+                    onClick={handlePublish}
+                    className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+                  >
+                    Publish
                   </button>
                 </div>
               </aside>
@@ -825,12 +843,24 @@ export function QuizBuilderModal({
                   ) : null}
                 </div>
 
-                <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+                <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
                   <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
                     Cancel
                   </button>
-                  <button type="button" onClick={handleSave} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600">
-                    Save
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                  >
+                    Save draft
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!publishOk}
+                    onClick={handlePublish}
+                    className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+                  >
+                    Publish
                   </button>
                 </div>
               </div>

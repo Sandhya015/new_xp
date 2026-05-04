@@ -1,9 +1,11 @@
 import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
+import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  await runBeforeAuthorizedRequest(config)
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
@@ -19,6 +21,8 @@ export type OrderItem = {
   method?: string
   createdAt: string
   invoiceNumber?: string
+  amountPaise?: number
+  razorpayOrderId?: string
 }
 
 export const paymentService = {
@@ -55,12 +59,27 @@ export const paymentService = {
     })
     return data
   },
+  async fetchLastBilling(): Promise<Record<string, string> | null> {
+    const { data } = await api.get<{ billingSnapshot: Record<string, string> | null }>('/api/payments/last-billing')
+    return data.billingSnapshot
+  },
   async verify(paymentId: string, orderId: string, signature: string) {
     const { data } = await api.post('/api/payments/verify', {
       razorpay_payment_id: paymentId,
       razorpay_order_id: orderId,
       razorpay_signature: signature,
     })
+    return data
+  },
+  async resumeCheckout(internalOrderId: string): Promise<{
+    internalOrderId: string
+    keyId: string
+    orderId: string
+    amount: number
+    currency: string
+    courseTitle?: string
+  }> {
+    const { data } = await api.post('/api/payments/resume-checkout', { internalOrderId })
     return data
   },
   async getInvoice(orderId: string, format: 'pdf' | 'html' = 'pdf'): Promise<Blob> {

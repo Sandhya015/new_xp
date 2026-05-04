@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { X, ClipboardCheck } from 'lucide-react'
+import { X, ClipboardCheck, Plus, Trash2 } from 'lucide-react'
+
+export type AssignmentQuestionRow = { prompt: string }
+export type AssignmentAttachmentRow = { name: string; url: string }
 
 export type AssignmentTopicDraft = {
   title: string
@@ -14,6 +17,8 @@ export type AssignmentTopicDraft = {
   modelAnswer: string
   allowResubmission: boolean
   resubmissionDeadline: string
+  questions: AssignmentQuestionRow[]
+  attachments: AssignmentAttachmentRow[]
 }
 
 export function defaultAssignmentDraft(): AssignmentTopicDraft {
@@ -30,12 +35,27 @@ export function defaultAssignmentDraft(): AssignmentTopicDraft {
     modelAnswer: '',
     allowResubmission: false,
     resubmissionDeadline: '',
+    questions: [],
+    attachments: [],
   }
 }
 
 function normalizeDraft(input: Partial<AssignmentTopicDraft> | undefined): AssignmentTopicDraft {
   const d = defaultAssignmentDraft()
   if (!input) return d
+  const qs = Array.isArray(input.questions)
+    ? input.questions
+        .filter((x) => x && typeof x === 'object')
+        .map((x) => ({ prompt: typeof x.prompt === 'string' ? x.prompt : '' }))
+    : []
+  const ats = Array.isArray(input.attachments)
+    ? input.attachments
+        .filter((x) => x && typeof x === 'object')
+        .map((x) => ({
+          name: typeof x.name === 'string' ? x.name : '',
+          url: typeof x.url === 'string' ? x.url : '',
+        }))
+    : []
   return {
     title: typeof input.title === 'string' ? input.title : d.title,
     instructions: typeof input.instructions === 'string' ? input.instructions : d.instructions,
@@ -49,8 +69,18 @@ function normalizeDraft(input: Partial<AssignmentTopicDraft> | undefined): Assig
       input.maxFileSizeMb != null && String(input.maxFileSizeMb).trim() ? String(input.maxFileSizeMb) : d.maxFileSizeMb,
     modelAnswer: typeof input.modelAnswer === 'string' ? input.modelAnswer : d.modelAnswer,
     allowResubmission: Boolean(input.allowResubmission),
-    resubmissionDeadline: typeof input.resubmissionDeadline === 'string' ? input.resubmissionDeadline : d.resubmissionDeadline,
+    resubmissionDeadline:
+      typeof input.resubmissionDeadline === 'string' ? input.resubmissionDeadline : d.resubmissionDeadline,
+    questions: qs,
+    attachments: ats,
   }
+}
+
+export type AssignmentBuilderSave = {
+  title: string
+  summary: string
+  assignment: AssignmentTopicDraft
+  published: boolean
 }
 
 type AssignmentBuilderModalProps = {
@@ -61,7 +91,7 @@ type AssignmentBuilderModalProps = {
   initialSummary: string
   initialAssignment?: Partial<AssignmentTopicDraft>
   onClose: () => void
-  onSave: (draft: { title: string; summary: string; assignment: AssignmentTopicDraft }) => void
+  onSave: (draft: AssignmentBuilderSave) => void
 }
 
 export function AssignmentBuilderModal({
@@ -89,8 +119,20 @@ export function AssignmentBuilderModal({
 
   const submissionOk = a.allowText || a.allowPdf || a.allowDoc || a.allowZip
 
-  const handleSave = () => {
-    onSave({ title: title.trim(), summary: summary.trim(), assignment: a })
+  const strictOk =
+    title.trim() &&
+    a.title.trim() &&
+    a.instructions.trim() &&
+    a.maxMarks.trim() &&
+    a.deadline.trim() &&
+    submissionOk
+
+  const saveDraft = () => {
+    onSave({ title: title.trim(), summary: summary.trim(), assignment: a, published: false })
+  }
+
+  const publish = () => {
+    onSave({ title: title.trim(), summary: summary.trim(), assignment: a, published: true })
   }
 
   if (!open) return null
@@ -143,6 +185,104 @@ export function AssignmentBuilderModal({
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               placeholder="Short line in the curriculum list"
             />
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/80 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-brand-navy">Question prompts (optional)</h3>
+              <button
+                type="button"
+                onClick={() => setA((x) => ({ ...x, questions: [...x.questions, { prompt: '' }] }))}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add
+              </button>
+            </div>
+            {a.questions.length === 0 ? (
+              <p className="text-xs text-gray-500">No extra prompts. Instructions below are shown to students.</p>
+            ) : (
+              <ul className="space-y-2">
+                {a.questions.map((row, i) => (
+                  <li key={i} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={row.prompt}
+                      onChange={(e) =>
+                        setA((x) => ({
+                          ...x,
+                          questions: x.questions.map((q, j) => (j === i ? { ...q, prompt: e.target.value } : q)),
+                        }))
+                      }
+                      className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      placeholder={`Question ${i + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setA((x) => ({ ...x, questions: x.questions.filter((_, j) => j !== i) }))}
+                      className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-white"
+                      aria-label="Remove question"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/80 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-brand-navy">Reference attachments (name + URL)</h3>
+              <button
+                type="button"
+                onClick={() => setA((x) => ({ ...x, attachments: [...x.attachments, { name: '', url: '' }] }))}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add
+              </button>
+            </div>
+            {a.attachments.length === 0 ? (
+              <p className="text-xs text-gray-500">Optional links (readings, data files) listed for students.</p>
+            ) : (
+              <ul className="space-y-2">
+                {a.attachments.map((row, i) => (
+                  <li key={i} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      value={row.name}
+                      onChange={(e) =>
+                        setA((x) => ({
+                          ...x,
+                          attachments: x.attachments.map((t, j) => (j === i ? { ...t, name: e.target.value } : t)),
+                        }))
+                      }
+                      className="sm:w-1/3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      placeholder="Label"
+                    />
+                    <input
+                      type="url"
+                      value={row.url}
+                      onChange={(e) =>
+                        setA((x) => ({
+                          ...x,
+                          attachments: x.attachments.map((t, j) => (j === i ? { ...t, url: e.target.value } : t)),
+                        }))
+                      }
+                      className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      placeholder="https://…"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setA((x) => ({ ...x, attachments: x.attachments.filter((_, j) => j !== i) }))}
+                      className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-white sm:self-center"
+                      aria-label="Remove attachment"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 space-y-4">
@@ -262,17 +402,25 @@ export function AssignmentBuilderModal({
           </div>
         </div>
 
-        <footer className="flex shrink-0 justify-end gap-2 border-t border-gray-100 bg-gray-50/90 px-4 py-3 sm:px-6">
+        <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-gray-100 bg-gray-50/90 px-4 py-3 sm:px-6">
           <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
             Cancel
           </button>
           <button
             type="button"
-            disabled={!a.title.trim() || !a.instructions.trim() || !a.maxMarks.trim() || !a.deadline.trim() || !submissionOk}
-            onClick={handleSave}
+            disabled={!title.trim() || !submissionOk}
+            onClick={saveDraft}
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Save draft
+          </button>
+          <button
+            type="button"
+            disabled={!strictOk}
+            onClick={publish}
             className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
           >
-            Save
+            Publish
           </button>
         </footer>
       </div>

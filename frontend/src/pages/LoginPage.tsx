@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
-import { useAuthStore, type User } from '@/store/authStore'
+import { useAuthStore } from '@/store/authStore'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -24,7 +24,7 @@ export function LoginPage() {
         setError('Admin accounts must use the Admin portal (/admin/login).')
         return
       }
-      setSession(data.user as User, data.token)
+      setSession(data.user, data.token, typeof data.expiresIn === 'number' ? data.expiresIn : undefined)
       if (role === 'company') navigate('/company')
       else navigate('/dashboard')
     } catch (err: unknown) {

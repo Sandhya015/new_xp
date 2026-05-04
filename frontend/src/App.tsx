@@ -53,14 +53,19 @@ import { InternshipManagement } from './pages/admin/InternshipManagement'
 import { AdminReports } from './pages/admin/AdminReports'
 import { AdminNotifications } from './pages/admin/AdminNotifications'
 import { AdminManagement } from './pages/admin/AdminManagement'
+import { AdminTickets } from './pages/admin/AdminTickets'
+import { AdminSupportFAQ } from './pages/admin/AdminSupportFAQ'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
 import { Blog } from './pages/public/Blog'
 import { BlogArticle } from './pages/public/BlogArticle'
+import { AppToastHost } from './components/AppToastHost'
 
 function App() {
   return (
-    <Routes>
+    <>
+      <AppToastHost />
+      <Routes>
       <Route path="/admin/login" element={<AdminLogin />} />
       {/* Student dashboard: no navbar/footer */}
       <Route path="/dashboard" element={<StudentLayout />}>
@@ -107,6 +112,8 @@ function App() {
         <Route path="internships" element={<InternshipManagement />} />
         <Route path="reports" element={<AdminReports />} />
         <Route path="notifications" element={<AdminNotifications />} />
+        <Route path="tickets" element={<AdminTickets />} />
+        <Route path="help-faq" element={<AdminSupportFAQ />} />
         <Route path="admins" element={<AdminManagement />} />
         <Route path="settings" element={<SystemSettings />} />
       </Route>
@@ -144,6 +151,7 @@ function App() {
         </Layout>
       } />
     </Routes>
+    </>
   )
 }
 

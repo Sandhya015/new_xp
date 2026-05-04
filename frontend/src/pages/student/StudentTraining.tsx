@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useLocation } from 'react-router-dom'
-import type { LucideIcon } from 'lucide-react'
-import { BarChart3, Brain, Code2, Cpu, Filter, Loader2, Megaphone, Search, Smartphone, Star, X } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { Filter, Loader2, Search, X } from 'lucide-react'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { useAuth } from '@/hooks/useAuth'
-import { courseContentPath, courseMarketingPath } from '@/utils/courseStudyLink'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
 import {
   catalogCourseMatchesFilters,
@@ -17,6 +15,7 @@ import {
 } from '@/components/training/trainingCatalogFilters'
 import { TrainingFiltersControls } from '@/components/training/TrainingFiltersControls'
 import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
+import { TrainingProgramCard } from '@/components/training/TrainingProgramCard'
 
 type Mode = 'Online' | 'Offline' | 'Hybrid'
 
@@ -29,7 +28,8 @@ type CourseCard = {
   mode: Mode
   universities: string
   price: number
-  Icon: LucideIcon
+  originalPrice: number
+  featuredImageUrl: string
   tag: string
   trainingTags: string[]
   courses: string[]
@@ -39,29 +39,26 @@ type CourseCard = {
   reviewCount?: number
 }
 
-const ICON_MAP: LucideIcon[] = [Code2, Cpu, Brain, Megaphone, Smartphone, BarChart3]
-
-function courseFromApi(
-  c: {
-    id: string
-    title: string
-    description: string
-    shortDescription?: string
-    category: string
-    duration: string
-    mode: string
-    universities: string
-    price: number
-    tag?: string
-    trainingTags?: string[]
-    courses?: string[]
-    streams?: string[]
-    subjects?: string[]
-    reviewAverage?: number
-    reviewCount?: number
-  },
-  i: number,
-): CourseCard {
+function courseFromApi(c: {
+  id: string
+  title: string
+  description: string
+  shortDescription?: string
+  category: string
+  duration: string
+  mode: string
+  universities: string
+  price: number
+  originalPrice?: number
+  featuredImageUrl?: string
+  tag?: string
+  trainingTags?: string[]
+  courses?: string[]
+  streams?: string[]
+  subjects?: string[]
+  reviewAverage?: number
+  reviewCount?: number
+}): CourseCard {
   const catRaw = String(c.category || 'technical').toLowerCase()
   const category: CourseCard['category'] =
     catRaw === 'non-technical' ? 'non-technical' : catRaw === 'other' ? 'other' : 'technical'
@@ -79,7 +76,8 @@ function courseFromApi(
     mode,
     universities: c.universities || '—',
     price: typeof c.price === 'number' ? c.price : 0,
-    Icon: ICON_MAP[i % ICON_MAP.length],
+    originalPrice: typeof c.originalPrice === 'number' ? c.originalPrice : 0,
+    featuredImageUrl: String(c.featuredImageUrl ?? ''),
     tag: String(c.tag || '').trim(),
     trainingTags: tags,
     courses,
@@ -166,13 +164,15 @@ export function StudentTraining() {
           mode: string
           universities: string
           price: number
+          originalPrice?: number
+          featuredImageUrl?: string
           tag?: string
           trainingTags?: string[]
           courses?: string[]
           streams?: string[]
           subjects?: string[]
         }>
-        setCourses(items.map((c, i) => courseFromApi(c, i)))
+        setCourses(items.map((c) => courseFromApi(c)))
       })
       .catch(() => {
         if (!cancelled) setLoadError('Could not load programs. Check your connection and try again.')
@@ -247,6 +247,7 @@ export function StudentTraining() {
           universities: c.universities,
           mode: c.mode,
           duration: c.duration,
+          featuredImageUrl: c.featuredImageUrl,
           shortDescription: c.description,
         }
       : null
@@ -387,80 +388,20 @@ export function StudentTraining() {
           ) : null}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((c) => {
             const isEnrolled = Boolean(token && enrolledCourseIds.has(c.id))
             const isCompleted = Boolean(token && completedCourseIds.has(c.id))
-            const detailTo = isEnrolled ? courseContentPath(c.id) : courseMarketingPath(c.id)
             return (
-              <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col">
-                <div className="flex items-start justify-between gap-2">
-                  <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                      c.category === 'technical' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'
-                    }`}
-                  >
-                    <c.Icon className="h-5 w-5" />
-                  </div>
-                  <span
-                    className={`rounded px-2 py-0.5 text-xs font-medium ${
-                      c.category === 'technical' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                    }`}
-                  >
-                    {c.category === 'technical' ? 'Technical' : c.category === 'non-technical' ? 'Non-technical' : 'Other'}
-                  </span>
-                </div>
-                <h3 className="mt-3 font-semibold text-brand-navy line-clamp-2">{c.title}</h3>
-                <p className="mt-1 text-xs text-slate-gray line-clamp-2">{c.description}</p>
-                <div className="mt-1.5 flex items-center gap-1.5 text-xs">
-                  {c.reviewCount && c.reviewCount > 0 ? (
-                    <>
-                      <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" aria-hidden />
-                      <span className="font-semibold text-gray-900">{Number(c.reviewAverage ?? 0).toFixed(1)}</span>
-                      <span className="text-gray-500">({c.reviewCount})</span>
-                    </>
-                  ) : (
-                    <span className="text-gray-400">No ratings yet</span>
-                  )}
-                </div>
-                <p className="mt-2 text-xs text-slate-gray">
-                  {c.universities} · {c.duration} · {c.mode}
-                </p>
-                <p className="mt-2 text-sm font-semibold text-brand-navy">
-                  {c.price > 0 ? `₹${c.price.toLocaleString('en-IN')}` : 'Free'}
-                </p>
-                <div className="mt-4 flex gap-2 mt-auto">
-                  <Link
-                    to={detailTo}
-                    className="flex-1 rounded-lg border border-gray-300 py-2 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    {isEnrolled ? 'View course' : 'View details'}
-                  </Link>
-                  {isEnrolled ? (
-                    <span
-                      className={`flex-1 rounded-lg border py-2 text-center text-sm font-semibold ${
-                        isCompleted
-                          ? 'border-violet-200 bg-violet-50 text-violet-900'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      }`}
-                    >
-                      {isCompleted ? 'Completed' : 'Enrolled'}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={!token || (payBusy && checkoutCourseId === c.id)}
-                      onClick={() => {
-                        if (!token) return
-                        setEnrollCourse(c)
-                      }}
-                      className="flex-1 rounded-lg bg-brand-accent py-2 text-center text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
-                    >
-                      {payBusy && checkoutCourseId === c.id ? 'Please wait…' : 'Enroll Now'}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <TrainingProgramCard
+                key={c.id}
+                course={c}
+                isLoggedIn={Boolean(token)}
+                isEnrolled={isEnrolled}
+                isCompleted={isCompleted}
+                onEnroll={() => setEnrollCourse(c)}
+                payBusy={Boolean(payBusy && checkoutCourseId === c.id)}
+              />
             )
           })}
         </div>

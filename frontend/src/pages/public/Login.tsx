@@ -3,7 +3,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { authService } from '@/services/authService'
-import { useAuthStore, type User } from '@/store/authStore'
+import { useAuthStore } from '@/store/authStore'
 
 type LoginForm = { email: string; password: string }
 type Tab = 'student' | 'company'
@@ -41,7 +41,7 @@ export function Login() {
           setSubmitting(false)
           return
         }
-        setSession(res.user as User, res.token)
+        setSession(res.user, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
         const r = safeRedirect(searchParams.get('redirect') || searchParams.get('next'))
         navigate(r || '/dashboard', { replace: true })
       } else {
@@ -50,7 +50,7 @@ export function Login() {
           setSubmitting(false)
           return
         }
-        setSession(res.user as User, res.token)
+        setSession(res.user, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
         navigate('/company', { replace: true })
       }
     } catch (err: unknown) {

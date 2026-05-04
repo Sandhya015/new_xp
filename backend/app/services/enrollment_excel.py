@@ -12,12 +12,62 @@ def _assign_col_title(a: dict, index: int) -> str:
     return f"Assign_{safe}_Submitted"
 
 
+def merged_student_fields_for_admin(e: dict, u: Optional[dict]) -> Dict[str, str]:
+    """Merge user profile with enrollment certificateProfile (checkout) for display and export."""
+    prof = e.get("certificateProfile") if isinstance(e.get("certificateProfile"), dict) else {}
+    u = u or {}
+
+    def first(*vals) -> str:
+        for v in vals:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return ""
+
+    return {
+        "name": first(u.get("name"), u.get("fullName"), prof.get("fullName")),
+        "email": first(u.get("email"), prof.get("email")),
+        "mobile": first(u.get("mobile"), prof.get("mobile"), prof.get("phone")),
+        "university": first(u.get("university"), prof.get("university")),
+        "collegeName": first(u.get("collegeName"), prof.get("collegeName")),
+        "course": first(u.get("course"), prof.get("course")),
+        "branch": first(u.get("stream"), u.get("branch"), prof.get("branchOrSubject"), prof.get("stream")),
+        "semester": first(u.get("semester"), prof.get("semester")),
+        "registrationNo": first(u.get("collegeRegNo"), prof.get("registrationNumber"), prof.get("collegeRegNo")),
+    }
+
+
+def assignment_submissions_submitted_count(e: dict) -> int:
+    subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
+    return sum(1 for s in subs if isinstance(s, dict) and s.get("submittedAt"))
+
+
+def enrollment_created_date_str(e: dict) -> str:
+    ca = e.get("createdAt")
+    if ca is None:
+        return ""
+    if hasattr(ca, "strftime"):
+        return ca.strftime("%Y-%m-%d")
+    return str(ca)[:10]
+
+
 def enrollment_sheet_headers(course: dict) -> List[str]:
     base = [
         "EnrollmentId",
         "UserId",
         "Email",
         "Name",
+        "Mobile",
+        "University",
+        "College",
+        "Course",
+        "Branch",
+        "Semester",
+        "RegistrationNo",
+        "EnrolledDate",
+        "SubmissionsCount",
         "CompletionQuizPassed",
         "CompletionQuizScore",
         "CertificateIssued",
@@ -98,6 +148,7 @@ def export_row_for_enrollment(course: dict, e: dict, u: Optional[dict]) -> Dict[
     pq = e.get("pythonQuiz") or {}
     cc = e.get("courseCertificate") or {}
     subs = e.get("assignmentSubmissions") if isinstance(e.get("assignmentSubmissions"), list) else []
+    m = merged_student_fields_for_admin(e, u)
     by_aid: Dict[str, str] = {}
     for s in subs:
         if isinstance(s, dict):
@@ -106,8 +157,17 @@ def export_row_for_enrollment(course: dict, e: dict, u: Optional[dict]) -> Dict[
     row: Dict[str, Any] = {
         "EnrollmentId": str(e["_id"]),
         "UserId": str(e.get("userId") or ""),
-        "Email": (u.get("email") or "") if u else "",
-        "Name": (u.get("name") or u.get("fullName") or "") if u else "",
+        "Email": m["email"],
+        "Name": m["name"],
+        "Mobile": m["mobile"],
+        "University": m["university"],
+        "College": m["collegeName"],
+        "Course": m["course"],
+        "Branch": m["branch"],
+        "Semester": m["semester"],
+        "RegistrationNo": m["registrationNo"],
+        "EnrolledDate": enrollment_created_date_str(e),
+        "SubmissionsCount": assignment_submissions_submitted_count(e),
         "CompletionQuizPassed": "Y" if pq.get("passedAt") else "N",
         "CompletionQuizScore": pq.get("scorePercent") if pq.get("scorePercent") is not None else "",
         "CertificateIssued": "Y" if (cc.get("certNo") or "").strip() else "N",

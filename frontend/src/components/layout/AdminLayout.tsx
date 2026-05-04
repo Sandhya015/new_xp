@@ -21,6 +21,8 @@ import {
   User,
   MessageSquare,
   GraduationCap,
+  Ticket,
+  HelpCircle,
 } from 'lucide-react'
 
 const SIDEBAR_LINKS = [
@@ -34,6 +36,8 @@ const SIDEBAR_LINKS = [
   { to: '/admin/internships', label: 'Internships', icon: Briefcase, badge: 2 },
   { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
   { to: '/admin/notifications', label: 'Notifications', icon: Bell },
+  { to: '/admin/tickets', label: 'Tickets', icon: Ticket },
+  { to: '/admin/help-faq', label: 'Help & FAQ', icon: HelpCircle },
   { to: '/admin/admins', label: 'Admins', icon: Shield },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
 ]
@@ -54,6 +58,8 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     internships: 'Internships',
     reports: 'Reports',
     notifications: 'Notifications',
+    tickets: 'Tickets',
+    'help-faq': 'Help & FAQ',
     admins: 'Admins',
     settings: 'Settings',
   }

@@ -1,9 +1,11 @@
 import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
+import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  await runBeforeAuthorizedRequest(config)
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config

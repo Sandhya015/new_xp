@@ -12,10 +12,11 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { enrollmentService } from '@/services/enrollmentService'
+import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
 import { internshipService } from '@/services/internshipService'
 import { certificateService } from '@/services/certificateService'
 import { paymentService } from '@/services/paymentService'
+import { absoluteApiUrl } from '@/config/api'
 
 const QUICK_ACTIONS = [
   { to: '/dashboard/training', label: 'Explore Training', icon: BookOpen, primary: true },
@@ -24,17 +25,17 @@ const QUICK_ACTIONS = [
   { to: '/dashboard/profile', label: 'My Profile', icon: User, primary: false },
 ]
 
-function profileCompletionPercent(user: { name?: string; email?: string; university?: string; course?: string; semester?: string; collegeName?: string } | null): number {
+function profileCompletionPercent(user: { name?: string; email?: string; university?: string; course?: string; semester?: string; collegeName?: string; profilePhotoUrl?: string } | null): number {
   if (!user) return 0
-  const fields = [user.name, user.email, user.university, user.course, user.semester, user.collegeName]
+  const fields = [user.name, user.email, user.university, user.course, user.semester, user.collegeName, user.profilePhotoUrl]
   const filled = fields.filter((f) => f && String(f).trim()).length
-  return Math.round((filled / 6) * 100)
+  return Math.round((filled / 7) * 100)
 }
 
 export function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [enrollments, setEnrollments] = useState<{ id: string; courseId: string; courseTitle: string; createdAt: string }[]>([])
+  const [enrollments, setEnrollments] = useState<EnrollmentItem[]>([])
   const [applications, setApplications] = useState<{ id: string; internshipTitle?: string; createdAt?: string }[]>([])
   const [certificatesCount, setCertificatesCount] = useState(0)
   const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0)
@@ -60,7 +61,7 @@ export function Dashboard() {
     ])
       .then(([enrollRes, appRes, certRes, payRes]) => {
         if (cancelled) return
-        setEnrollments((enrollRes.items || []) as { id: string; courseId: string; courseTitle: string; createdAt: string }[])
+        setEnrollments((enrollRes.items || []) as EnrollmentItem[])
         setApplications((appRes.items || []) as { id: string; internshipTitle?: string; createdAt?: string }[])
         setCertificatesCount((certRes.items || []).length)
         const pending = (payRes.items || []).filter((p: { status?: string }) => p.status !== 'success' && p.status !== 'completed')
@@ -155,23 +156,46 @@ export function Dashboard() {
             ) : enrollments.length === 0 ? (
               <p className="text-sm text-slate-gray">No ongoing trainings. Explore programs to enroll.</p>
             ) : (
-              enrollments.slice(0, 5).map((e) => (
-                <div key={e.id} className="rounded-lg border border-gray-100 p-3">
-                  <div className="flex justify-between items-start gap-2">
-                    <span className="font-medium text-gray-800">{e.courseTitle || 'Course'}</span>
-                    <span className="text-sm text-slate-gray">In progress</span>
+              enrollments.slice(0, 5).map((e) => {
+                const thumb = (e.courseFeaturedImageUrl || '').trim()
+                  ? absoluteApiUrl(e.courseFeaturedImageUrl!.trim())
+                  : ''
+                const pct =
+                  typeof e.curriculumProgressPercent === 'number' && !Number.isNaN(e.curriculumProgressPercent)
+                    ? Math.min(100, Math.max(0, e.curriculumProgressPercent))
+                    : null
+                return (
+                  <div key={e.id} className="rounded-lg border border-gray-100 p-3">
+                    <div className="flex gap-3">
+                      <div className="h-16 w-28 shrink-0 overflow-hidden rounded-md bg-gray-100">
+                        {thumb ? (
+                          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" decoding="async" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-400">No image</div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="font-medium text-gray-800 line-clamp-2">{e.courseTitle || 'Course'}</span>
+                          <span className="shrink-0 text-sm text-slate-gray">{pct != null ? `${pct}%` : '—'}</span>
+                        </div>
+                        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                          <div
+                            className="h-full rounded-full bg-brand-accent transition-all"
+                            style={{ width: pct != null ? `${pct}%` : '0%' }}
+                          />
+                        </div>
+                        <Link
+                          to={`/dashboard/my-courses/${e.courseId}`}
+                          className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-accent hover:underline"
+                        >
+                          <Play className="h-3.5 w-3.5" /> Continue
+                        </Link>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                    <div className="h-full rounded-full bg-brand-accent transition-all" style={{ width: '50%' }} />
-                  </div>
-                  <Link
-                    to={`/dashboard/my-courses/${e.courseId}`}
-                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-accent hover:underline"
-                  >
-                    <Play className="h-3.5 w-3.5" /> Continue
-                  </Link>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>

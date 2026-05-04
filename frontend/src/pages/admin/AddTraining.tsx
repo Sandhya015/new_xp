@@ -41,7 +41,6 @@ import { absoluteApiUrl } from '@/config/api'
 import { RichTextEditor } from '@/components/admin/RichTextEditor'
 import {
   QuizBuilderModal,
-  type QuizTopicDraft,
   type QuizSettingsDraft,
   defaultQuizSettings,
 } from '@/components/admin/QuizBuilderModal'
@@ -97,6 +96,8 @@ interface CurriculumTopic {
   assignment?: AssignmentTopicDraft
   /** Lecture-only: rich HTML from lesson builder */
   lessonContent?: string
+  /** When false, quiz/assignment topic is hidden from students (draft). */
+  published?: boolean
   lessonVideoAttachMode?: LessonVideoAttachMode
   lessonVideoUrl?: string
   /** `__module__` or another topic id (Recording) */
@@ -429,14 +430,16 @@ function mapApiTopicToCurriculumTopic(raw: unknown, topicIndex: number): Curricu
       ...defaultQuizSettings(),
       ...(typeof r.quizSettings === 'object' && r.quizSettings !== null ? (r.quizSettings as object) : {}),
     }
-    return { ...base, quizQuestions, quizSettings: qs as QuizSettingsDraft }
+    const published = r.published !== false
+    return { ...base, quizQuestions, quizSettings: qs as QuizSettingsDraft, published }
   }
   if (type === 'Assignment') {
     const assignment = {
       ...defaultAssignmentDraft(),
       ...(typeof r.assignment === 'object' && r.assignment !== null ? (r.assignment as Partial<AssignmentTopicDraft>) : {}),
     }
-    return { ...base, assignment }
+    const published = r.published !== false
+    return { ...base, assignment, published }
   }
   return base
 }
@@ -759,11 +762,13 @@ export function AddTraining() {
           ? {
               ...(t.quizQuestions !== undefined ? { quizQuestions: t.quizQuestions } : {}),
               ...(t.quizSettings !== undefined ? { quizSettings: t.quizSettings } : {}),
+              published: t.published !== false,
             }
           : {}),
         ...(t.type === 'Assignment'
           ? {
               assignment: { ...defaultAssignmentDraft(), ...(t.assignment ?? {}) },
+              published: t.published !== false,
             }
           : {}),
       })),
@@ -2178,12 +2183,14 @@ export function AddTraining() {
           initialQuestions={quizEditorTopic.quizQuestions ?? []}
           initialSettings={quizEditorTopic.quizSettings}
           onClose={() => setQuizEditor(null)}
-          onSave={(draft: QuizTopicDraft) => {
+          onSave={(draft) => {
+            const { published, ...rest } = draft
             patchTopic(quizEditor.moduleId, quizEditor.topicId, {
-              title: draft.title,
-              details: draft.summary,
-              quizQuestions: draft.questions,
-              quizSettings: draft.settings,
+              title: rest.title,
+              details: rest.summary,
+              quizQuestions: rest.questions,
+              quizSettings: rest.settings,
+              published,
             })
             setQuizEditor(null)
           }}
@@ -2204,6 +2211,7 @@ export function AddTraining() {
               title: draft.title,
               details: draft.summary,
               assignment: draft.assignment,
+              published: draft.published,
             })
             setAssignmentEditor(null)
           }}
