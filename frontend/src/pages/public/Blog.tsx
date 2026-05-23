@@ -8,7 +8,6 @@ import {
   BLOG_MAINTENANCE_HEADING,
 } from '@/constants/blogPublic'
 import { strapiService, type StrapiArticle } from '@/services/strapiService'
-import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 function formatBlogDate(iso: string | null): string {
   if (!iso) return ''
@@ -25,6 +24,7 @@ const featuredGradients = [
 
 export function Blog() {
   const [articles, setArticles] = useState<StrapiArticle[]>([])
+  /** First fetch only — no full-screen loader (Strapi/Cold hosts can take several seconds). */
   const [loading, setLoading] = useState(true)
   const [fetchFailed, setFetchFailed] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState('All')
@@ -64,11 +64,6 @@ export function Blog() {
 
   return (
     <div className="min-w-0 bg-brand-light-bg relative">
-      <AuthLoadingOverlay
-        show={loading}
-        ariaLabel="Loading blog articles"
-        message="Loading"
-      />
       <section className="relative overflow-hidden bg-gradient-to-br from-brand-navy via-primary-900 to-primary-950 text-white">
         <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-brand-accent/40 via-transparent to-transparent" />
         <div className="relative mx-auto max-w-7xl px-4 py-14 sm:py-20 sm:px-6 lg:px-8">
@@ -126,8 +121,9 @@ export function Blog() {
             <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
           </div>
         ) : loading ? (
-          /* Full-page AuthLoadingOverlay above; reserve space avoid layout jump */
-          <div className="rounded-2xl border border-transparent py-24 min-h-[18rem]" aria-hidden />
+          <p className="py-14 text-center text-sm text-slate-gray" aria-live="polite">
+            Loading articles…
+          </p>
         ) : !featured ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
             <BookOpen className="mx-auto h-12 w-12 text-brand-accent/80" aria-hidden />

@@ -467,12 +467,16 @@ function articleBySlugUrlPopulateAll(origin: string, slug: string): string {
   return url.toString()
 }
 
-const ARTICLES_CACHE_TTL_MS = 300_000
+const ARTICLES_CACHE_TTL_MS = 900_000 // 15m — list is static enough; Strapi/Render can be slow.
+
+type ArticlesInFlight = { origin: string; promise: Promise<StrapiArticle[]> }
+let articlesListInFlight: ArticlesInFlight | null = null
 type ArticlesCache = { origin: string; exp: number; data: StrapiArticle[] }
 let articlesCache: ArticlesCache | null = null
 
 export function invalidateStrapiArticlesCache(): void {
   articlesCache = null
+  articlesListInFlight = null
 }
 
 export const strapiService = {
@@ -482,19 +486,33 @@ export const strapiService = {
     if (articlesCache && articlesCache.origin === origin && now < articlesCache.exp) {
       return articlesCache.data
     }
-    let res = await fetch(articlesListUrl(origin), {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    })
-    if (res.status === 400) {
-      res = await fetch(articlesListUrlLegacy(origin), {
+    if (articlesListInFlight && articlesListInFlight.origin === origin) {
+      return articlesListInFlight.promise
+    }
+    const promise = (async () => {
+      let res = await fetch(articlesListUrl(origin), {
         method: 'GET',
         headers: { Accept: 'application/json' },
       })
+      if (res.status === 400) {
+        res = await fetch(articlesListUrlLegacy(origin), {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        })
+      }
+      const data = await parseList(res)
+      articlesCache = { origin, exp: Date.now() + ARTICLES_CACHE_TTL_MS, data }
+      return data
+    })()
+
+    articlesListInFlight = { origin, promise }
+    try {
+      return await promise
+    } finally {
+      if (articlesListInFlight?.promise === promise) {
+        articlesListInFlight = null
+      }
     }
-    const data = await parseList(res)
-    articlesCache = { origin, exp: now + ARTICLES_CACHE_TTL_MS, data }
-    return data
   },
 
   async getArticleBySlug(slug: string): Promise<StrapiArticle | null> {
