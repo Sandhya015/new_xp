@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { BookOpen, Play, CheckCircle, Award } from 'lucide-react'
 import { enrollmentService, type EnrollmentItem } from '@/services/enrollmentService'
 import { absoluteApiUrl } from '@/config/api'
+import { ENROLLMENTS_CHANGED_EVENT } from '@/utils/enrollmentEvents'
 
 function categoryBadgeClass(cat: string | undefined) {
   const c = (cat || '').toLowerCase()
@@ -27,14 +28,23 @@ export function MyCourses() {
   const [items, setItems] = useState<EnrollmentItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const reloadItems = useCallback(() => {
     setLoading(true)
     enrollmentService
       .list()
       .then((res) => setItems(res.items || []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
-  }, [location.pathname, location.key])
+  }, [])
+
+  useEffect(() => {
+    reloadItems()
+  }, [location.pathname, location.key, reloadItems])
+
+  useEffect(() => {
+    window.addEventListener(ENROLLMENTS_CHANGED_EVENT, reloadItems)
+    return () => window.removeEventListener(ENROLLMENTS_CHANGED_EVENT, reloadItems)
+  }, [reloadItems])
 
   /** Certificate issued (quiz path) or legacy status=completed. */
   const enrollmentIsCompleted = (e: EnrollmentItem) =>

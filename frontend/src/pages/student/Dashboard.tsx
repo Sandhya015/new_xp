@@ -17,6 +17,7 @@ import { internshipService } from '@/services/internshipService'
 import { certificateService } from '@/services/certificateService'
 import { paymentService } from '@/services/paymentService'
 import { absoluteApiUrl } from '@/config/api'
+import { ENROLLMENTS_CHANGED_EVENT } from '@/utils/enrollmentEvents'
 
 const QUICK_ACTIONS = [
   { to: '/dashboard/training', label: 'Explore Training', icon: BookOpen, primary: true },
@@ -82,6 +83,20 @@ export function Dashboard() {
       })
     return () => { cancelled = true }
   }, [user, logout, navigate])
+
+  useEffect(() => {
+    if (!user) return
+    function onEnrollmentChange() {
+      enrollmentService
+        .list()
+        .then((enrollRes) => {
+          setEnrollments((enrollRes.items || []) as EnrollmentItem[])
+        })
+        .catch(() => {})
+    }
+    window.addEventListener(ENROLLMENTS_CHANGED_EVENT, onEnrollmentChange)
+    return () => window.removeEventListener(ENROLLMENTS_CHANGED_EVENT, onEnrollmentChange)
+  }, [user])
 
   const enrolledCount = enrollments.length
   const appliedCount = applications.length

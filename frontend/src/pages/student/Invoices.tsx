@@ -7,6 +7,7 @@ import { loadCashfreeScript } from '@/utils/loadCashfree'
 import { useAuth } from '@/hooks/useAuth'
 import { showAppToast } from '@/components/AppToastHost'
 import { courseContentPath } from '@/utils/courseStudyLink'
+import { notifyEnrollmentsChanged } from '@/utils/enrollmentEvents'
 
 function isPaidStatus(status: string): boolean {
   const s = status.toLowerCase()
@@ -103,6 +104,7 @@ export function Invoices() {
                 return
               }
               showAppToast('Welcome aboard! Your course is now active.')
+              notifyEnrollmentsChanged()
               await loadItems()
               const cid = v.courseId || order.courseId
               if (cid) navigate(courseContentPath(cid))
@@ -143,14 +145,16 @@ export function Invoices() {
           razorpay_signature: string
         }) => {
           try {
-            await paymentService.verify(
+            const v = (await paymentService.verify(
               response.razorpay_payment_id,
               response.razorpay_order_id,
               response.razorpay_signature,
-            )
+            )) as { courseId?: string }
             showAppToast('Welcome aboard! Your course is now active.')
+            notifyEnrollmentsChanged()
             await loadItems()
-            const cid = order.courseId
+            const cid =
+              (typeof v.courseId === 'string' && v.courseId.trim() ? v.courseId : '') || order.courseId
             if (cid) navigate(courseContentPath(cid))
           } catch {
             showAppToast('Payment received but verification failed. Contact support with your payment ID.')

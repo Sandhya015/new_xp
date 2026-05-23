@@ -83,8 +83,12 @@ export function StudentLayout() {
   const breadcrumbs = getBreadcrumbs(path)
 
   useEffect(() => {
-    if (!token || !user) {
-      navigate('/login', { replace: true })
+    if (!token) {
+      const dest = `${location.pathname}${location.search}`
+      navigate(`/login?next=${encodeURIComponent(dest)}`, { replace: true })
+      return
+    }
+    if (!user) {
       return
     }
     if (isSuperAdminPanelUser(user)) {
@@ -98,7 +102,7 @@ export function StudentLayout() {
     if (!isStudentUser(user)) {
       navigate('/login', { replace: true })
     }
-  }, [token, user, navigate])
+  }, [token, user, navigate, location.pathname, location.search])
 
   const handleLogout = () => {
     setLogoutConfirmOpen(false)

@@ -8,6 +8,7 @@ import { showAppToast } from '@/components/AppToastHost'
 import { loadRazorpayScript } from '@/utils/loadRazorpay'
 import { loadCashfreeScript } from '@/utils/loadCashfree'
 import { courseContentPath } from '@/utils/courseStudyLink'
+import { notifyEnrollmentsChanged } from '@/utils/enrollmentEvents'
 
 type RazorpaySuccessResponse = {
   razorpay_payment_id: string
@@ -138,6 +139,7 @@ export function useRazorpayCheckout() {
                   return
                 }
                 showAppToast('Welcome aboard! Your course is now active.')
+                notifyEnrollmentsChanged()
                 try {
                   onSuccess?.()
                 } catch {
@@ -180,19 +182,22 @@ export function useRazorpayCheckout() {
           order_id: order.orderId,
           handler: async (response: RazorpaySuccessResponse) => {
             try {
-              await paymentService.verify(
+              const v = (await paymentService.verify(
                 response.razorpay_payment_id,
                 response.razorpay_order_id,
-                response.razorpay_signature
-              )
+                response.razorpay_signature,
+              )) as { courseId?: string }
               setCheckoutCourseId(null)
               showAppToast('Welcome aboard! Your course is now active.')
+              notifyEnrollmentsChanged()
               try {
                 onSuccess?.()
               } catch {
                 /* ignore */
               }
-              navigate(courseContentPath(courseId))
+              const paidCourseId =
+                typeof v.courseId === 'string' && v.courseId.trim() ? v.courseId.trim() : courseId
+              navigate(courseContentPath(paidCourseId))
             } catch {
               setError('Payment received but verification failed. Please contact support with your payment ID.')
               setCheckoutCourseId(null)

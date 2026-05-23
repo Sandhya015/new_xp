@@ -33,6 +33,8 @@ You also need **one browser origin**: after payment Cashfree redirects to `/paym
 
 5. Open **`https://localhost:5173`** (accept the self‑signed certificate warning once).
 
+**Note:** Backend `order_meta.return_url` must include Cashfree's `{order_id}` placeholder so the browser receives `order_id` on `/payments/cashfree-complete` (handled automatically by this repo).
+
 ---
 
 ## Option B — ngrok

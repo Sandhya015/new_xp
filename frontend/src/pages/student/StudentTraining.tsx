@@ -16,6 +16,7 @@ import {
 import { TrainingFiltersControls } from '@/components/training/TrainingFiltersControls'
 import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
 import { TrainingProgramCard } from '@/components/training/TrainingProgramCard'
+import { ENROLLMENTS_CHANGED_EVENT } from '@/utils/enrollmentEvents'
 
 type Mode = 'Online' | 'Offline' | 'Hybrid'
 
@@ -151,6 +152,28 @@ export function StudentTraining() {
       cancelled = true
     }
   }, [token, location.pathname, location.key])
+
+  useEffect(() => {
+    function onEnrollmentChange() {
+      if (!token) return
+      if (location.pathname.replace(/\/$/, '') !== '/dashboard/training') return
+      enrollmentService
+        .list()
+        .then((res) => {
+          const enrolled = new Set<string>()
+          const completed = new Set<string>()
+          for (const i of res.items || []) {
+            if (i.courseId) enrolled.add(i.courseId)
+            if (i.courseId && i.certificateIssued) completed.add(i.courseId)
+          }
+          setEnrolledCourseIds(enrolled)
+          setCompletedCourseIds(completed)
+        })
+        .catch(() => {})
+    }
+    window.addEventListener(ENROLLMENTS_CHANGED_EVENT, onEnrollmentChange)
+    return () => window.removeEventListener(ENROLLMENTS_CHANGED_EVENT, onEnrollmentChange)
+  }, [token, location.pathname])
 
   useEffect(() => {
     let cancelled = false

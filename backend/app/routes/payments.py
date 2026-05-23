@@ -10,6 +10,7 @@ import os
 import uuid
 from dataclasses import asdict, fields
 from datetime import datetime
+from urllib.parse import quote
 
 from typing import Any
 
@@ -122,6 +123,24 @@ def _cashfree_return_url_https_error(pub: str, cf_env_raw: str) -> str | None:
     return None
 
 
+def _cashfree_checkout_return_url(pub: str, course_id: Any) -> str:
+    """
+    Cashfree replaces the literal substring {order_id} in return_url with the order id
+    from PG create order (same value we store as Mongo orders.orderId).
+
+    Without this placeholder, full-page redirects often omit the payment reference and
+    the client cannot call verify or deep-link to course content.
+    """
+    base_origin = (pub or "").strip().rstrip("/")
+    c = str(course_id or "").strip()
+    cid_q = quote(c, safe="") if c else ""
+    # Preserve {order_id} for Cashfree — double braces in an f-string emit one pair.
+    tail = f"{base_origin}/payments/cashfree-complete?order_id={{order_id}}"
+    if cid_q:
+        return f"{tail}&courseId={cid_q}"
+    return tail
+
+
 def _digits10_phone(raw: str) -> str:
     d = "".join(c for c in (raw or "") if c.isdigit())
     tail = d[-10:]
@@ -167,6 +186,61 @@ def _gateway_label(order: dict) -> str:
     return "Cashfree" if str(order.get("method") or "").lower() == "cashfree" else "Razorpay"
 
 
+def _ensure_enrollment_for_successful_order(user_id: Any, order: dict) -> bool:
+    """
+    Insert an enrollment row if the order is paid and the learner has none for this course.
+    Safe to call on every verify: idempotent. Use for repair when order is success but
+    enrollment insert failed earlier.
+    """
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    status = str(order.get("status") or "").lower()
+    if status not in ("success", "paid"):
+        return False
+    course_raw = order.get("courseId")
+    if not course_raw or not ObjectId.is_valid(str(course_raw)):
+        return False
+    cid_str = str(course_raw)
+    enroll = get_enrollments_collection()
+    try:
+        if enroll.find_one(user_course_enrollment_filter(uid, cid_str)):
+            return False
+    except Exception:
+        current_app.logger.exception(
+            "enrollment lookup failed order=%s user=%s course=%s",
+            order.get("_id"),
+            uid,
+            cid_str,
+        )
+        return False
+
+    oid = order.get("_id")
+    order_id_val = str(oid) if oid is not None else ""
+    snap = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
+    bill = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
+    doc = {
+        "userId": uid,
+        "courseId": cid_str,
+        "orderId": order_id_val,
+        "status": "active",
+        "createdAt": datetime.utcnow(),
+        "certificateProfile": snap,
+        "billingAddress": bill,
+    }
+    try:
+        enroll.insert_one(doc)
+        return True
+    except Exception:
+        current_app.logger.exception(
+            "enrollment insert failed order=%s user=%s course=%s",
+            oid,
+            uid,
+            cid_str,
+        )
+        return False
+
+
 def _finalize_successful_charge(
     coll,
     order_before: dict,
@@ -182,7 +256,6 @@ def _finalize_successful_charge(
     """
     oid = order_before["_id"]
     rs = receipt_ts or datetime.utcnow()
-    enrollment_created = False
     coll.update_one(
         {"_id": oid},
         {"$set": {
@@ -200,22 +273,7 @@ def _finalize_successful_charge(
     order["lastPaymentMethod"] = payment_method or ""
     order["invoiceReceiptAt"] = rs
 
-    course_id = order.get("courseId")
-    if course_id and ObjectId.is_valid(str(course_id)):
-        enroll = get_enrollments_collection()
-        if not enroll.find_one(user_course_enrollment_filter(user_id, str(course_id))):
-            snap = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
-            bill = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
-            enroll.insert_one({
-                "userId": user_id,
-                "courseId": str(course_id),
-                "orderId": str(order["_id"]),
-                "status": "active",
-                "createdAt": datetime.utcnow(),
-                "certificateProfile": snap,
-                "billingAddress": bill,
-            })
-            enrollment_created = True
+    enrollment_created = _ensure_enrollment_for_successful_order(user_id, order)
 
     _build_and_store_invoice_if_needed(
         current_app._get_current_object(),
@@ -500,7 +558,7 @@ def resume_checkout():
         billing_snapshot = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
         c_id, name, email, phone = _customer_for_cf(user_id, enrollment_snapshot, billing_snapshot)
         merchant_order_id = f"xpi_cf_{uuid.uuid4().hex[:28]}"
-        return_url = f"{pub}/payments/cashfree-complete"
+        return_url = _cashfree_checkout_return_url(pub, course_id)
         cf_body, cerr = cashfree_create_order(
             base_url=base_url,
             api_version=api_ver,
@@ -667,7 +725,7 @@ def create_order():
         base_url = cashfree_base_url(cf_ev)
         api_ver = cfg.config.get("CASHFREE_API_VERSION", "2023-08-01")
         c_oid, cust_name, cust_email, cust_phone = _customer_for_cf(user_id, enrollment_snapshot, billing_snapshot)
-        return_url = f"{pub}/payments/cashfree-complete"
+        return_url = _cashfree_checkout_return_url(pub, course_id)
         cf_body, cerr = cashfree_create_order(
             base_url=base_url,
             api_version=api_ver,
@@ -815,20 +873,23 @@ def verify():
 
     if order.get("status") == "success":
         pay_ref = order.get("razorpayPaymentId") or razorpay_payment_id
+        refreshed = coll.find_one({"_id": order["_id"]}) or order
+        repaired = _ensure_enrollment_for_successful_order(user_id, refreshed)
+        refreshed = coll.find_one({"_id": order["_id"]}) or refreshed
         _build_and_store_invoice_if_needed(
             current_app._get_current_object(),
             coll,
-            order,
+            refreshed,
             razorpay_payment_id=pay_ref,
             payment_method=order.get("lastPaymentMethod"),
             receipt_ts=order.get("invoiceReceiptAt") or order.get("verifiedAt"),
-            enrollment_created=False,
+            enrollment_created=repaired,
         )
-        refreshed = coll.find_one({"_id": order["_id"]}) or order
+        refreshed = coll.find_one({"_id": order["_id"]}) or refreshed
         return jsonify({
             "ok": True,
             "message": "Payment already verified",
-            "enrollmentCreated": False,
+            "enrollmentCreated": repaired,
             "invoiceNumber": refreshed.get("invoiceNumber") or "",
             "courseId": str(refreshed.get("courseId") or ""),
         }), 200
@@ -864,6 +925,7 @@ def verify():
         payment_method=payment_method,
         receipt_ts=receipt_ts,
     )
+    enrollment_created = enrollment_created or _ensure_enrollment_for_successful_order(user_id, refreshed)
 
     return jsonify({
         "ok": True,
@@ -908,6 +970,8 @@ def verify_cashfree():
 
     if order.get("status") == "success":
         refreshed = coll.find_one({"_id": order["_id"]}) or order
+        repaired = _ensure_enrollment_for_successful_order(user_id, refreshed)
+        refreshed = coll.find_one({"_id": order["_id"]}) or refreshed
         pay_ref = str(refreshed.get("razorpayPaymentId") or refreshed.get("transactionId") or "")
         _build_and_store_invoice_if_needed(
             current_app._get_current_object(),
@@ -916,14 +980,14 @@ def verify_cashfree():
             razorpay_payment_id=pay_ref,
             payment_method=refreshed.get("lastPaymentMethod"),
             receipt_ts=refreshed.get("invoiceReceiptAt") or refreshed.get("verifiedAt"),
-            enrollment_created=False,
+            enrollment_created=repaired,
         )
         refreshed = coll.find_one({"_id": order["_id"]}) or refreshed
         return jsonify({
             "ok": True,
             "message": "Payment already verified",
             "orderStatus": "PAID",
-            "enrollmentCreated": False,
+            "enrollmentCreated": repaired,
             "invoiceNumber": refreshed.get("invoiceNumber") or "",
             "courseId": str(refreshed.get("courseId") or ""),
         }), 200
@@ -981,6 +1045,7 @@ def verify_cashfree():
         payment_method="cashfree",
         receipt_ts=receipt_ts,
     )
+    enrollment_created = enrollment_created or _ensure_enrollment_for_successful_order(user_id, refreshed)
 
     return jsonify({
         "ok": True,
