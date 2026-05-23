@@ -87,7 +87,13 @@ export function Training() {
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
   const [completedCourseIds, setCompletedCourseIds] = useState<Set<string>>(new Set())
 
-  const { startCheckout, busy: payBusy, error: payError, clearError: clearPayError } = useRazorpayCheckout()
+  const {
+    startCheckout,
+    busy: payBusy,
+    error: payError,
+    clearError: clearPayError,
+    abandonCheckout,
+  } = useRazorpayCheckout()
 
   useEffect(() => {
     if (!token) {
@@ -380,7 +386,9 @@ export function Training() {
       </div>
 
       <TrainingEnrollmentModal
+        key={enrollCourse ? enrollCourse.id : 'closed'}
         course={enrollLite(enrollCourse)}
+        abandonCheckout={abandonCheckout}
         onClose={() => setEnrollCourse(null)}
         startCheckout={startCheckout}
         payBusy={payBusy}

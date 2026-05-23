@@ -69,6 +69,16 @@ provider:
     # Razorpay — export before deploy or set in Lambda Console (never commit secrets)
     RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
     RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}
+    # Cashfree PG — never commit secrets; set before deploy / in Lambda Console
+    CASHFREE_CLIENT_ID: ${env:CASHFREE_CLIENT_ID, ''}
+    CASHFREE_CLIENT_SECRET: ${env:CASHFREE_CLIENT_SECRET, ''}
+    CASHFREE_ENV: ${env:CASHFREE_ENV, 'production'}
+    CASHFREE_API_VERSION: ${env:CASHFREE_API_VERSION, '2023-08-01'}
+    PUBLIC_APP_URL: ${env:PUBLIC_APP_URL, ''}
+    # HTTPS origin for Cashfree return_url if PUBLIC_APP_URL is http (omit when PUBLIC_APP_URL is already https).
+    CASHFREE_RETURN_URL_ORIGIN: ${env:CASHFREE_RETURN_URL_ORIGIN, ''}
+    # Optional: cashfree | razorpay (empty = Cashfree wins if CF keys exist, else Razorpay)
+    PAYMENT_GATEWAY: ${env:PAYMENT_GATEWAY, ''}
     # SMTP (Zoho) — set in Lambda env / SSM; never commit secrets
     SMTP_HOST: ${env:SMTP_HOST, ''}
     SMTP_PORT: ${env:SMTP_PORT, '587'}

@@ -2,8 +2,12 @@
 Run the Flask app. Use: from backend dir: python run.py  OR  flask run (with FLASK_APP=run:app)
 """
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv()
+
+# Always load backend/.env ( cwd-independent — same issue as config.py ).
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
 from app import create_app
 app = create_app()

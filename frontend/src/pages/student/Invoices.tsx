@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { CreditCard, Download, AlertCircle, Loader2 } from 'lucide-react'
 import { paymentService, type OrderItem } from '@/services/paymentService'
 import { loadRazorpayScript } from '@/utils/loadRazorpay'
+import { loadCashfreeScript } from '@/utils/loadCashfree'
 import { useAuth } from '@/hooks/useAuth'
 import { showAppToast } from '@/components/AppToastHost'
 import { courseContentPath } from '@/utils/courseStudyLink'
@@ -56,13 +57,79 @@ export function Invoices() {
     if (!canResumeCheckout(order.status)) return
     setPayingId(order.id)
     try {
+      const session = await paymentService.resumeCheckout(order.id)
+      const gw =
+        session.gateway ??
+        order.gateway ??
+        (session.paymentSessionId && session.merchantOrderId ? 'cashfree' : 'razorpay')
+
+      if (gw === 'cashfree') {
+        const loadedCf = await loadCashfreeScript()
+        if (!loadedCf || typeof window.Cashfree !== 'function') {
+          showAppToast('Could not load payment gateway. Try again.')
+          setPayingId(null)
+          return
+        }
+        const merchantOrderId = session.merchantOrderId
+        const paymentSessionId = session.paymentSessionId
+        if (!merchantOrderId || !paymentSessionId) {
+          showAppToast('Could not resume Cashfree checkout. Try again from the course page.')
+          setPayingId(null)
+          return
+        }
+        const mode: 'sandbox' | 'production' =
+          session.cashfreeEnv === 'sandbox' ? 'sandbox' : 'production'
+        const cashfree = window.Cashfree({ mode })
+        cashfree
+          .checkout({
+            paymentSessionId,
+            redirectTarget: '_modal',
+          })
+          .then(async (result) => {
+            if (result?.error) {
+              showAppToast(
+                typeof result.error?.message === 'string' && result.error.message.trim()
+                  ? result.error.message
+                  : 'Payment was cancelled.'
+              )
+              setPayingId(null)
+              return
+            }
+            try {
+              const v = await paymentService.verifyCashfree(merchantOrderId)
+              if (!v.ok) {
+                showAppToast(v.message || 'Payment not confirmed yet.')
+                setPayingId(null)
+                return
+              }
+              showAppToast('Welcome aboard! Your course is now active.')
+              await loadItems()
+              const cid = v.courseId || order.courseId
+              if (cid) navigate(courseContentPath(cid))
+            } catch {
+              showAppToast('Payment received but verification failed. Contact support with your payment ID.')
+            } finally {
+              setPayingId(null)
+            }
+          })
+          .catch(() => {
+            showAppToast('Could not complete payment.')
+            setPayingId(null)
+          })
+        return
+      }
+
       const loaded = await loadRazorpayScript()
       if (!loaded || !window.Razorpay) {
         showAppToast('Could not load payment gateway. Try again.')
         setPayingId(null)
         return
       }
-      const session = await paymentService.resumeCheckout(order.id)
+      if (!session.keyId || !session.orderId) {
+        showAppToast('Could not resume Razorpay checkout.')
+        setPayingId(null)
+        return
+      }
       const options: Record<string, unknown> = {
         key: session.keyId,
         amount: session.amount,

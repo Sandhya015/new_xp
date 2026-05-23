@@ -145,7 +145,7 @@ export function CourseDetail() {
   const [enrollOpen, setEnrollOpen] = useState(false)
   const [trainingCoverFailed, setTrainingCoverFailed] = useState(false)
   const { token } = useAuth()
-  const { startCheckout, busy, error: payError, clearError } = useRazorpayCheckout()
+  const { startCheckout, busy, error: payError, clearError, abandonCheckout } = useRazorpayCheckout()
 
   useEffect(() => {
     if (!id) return
@@ -763,7 +763,9 @@ export function CourseDetail() {
       </div>
 
       <TrainingEnrollmentModal
+        key={enrollOpen && enrollLite ? `enroll-${enrollLite.id}` : 'closed'}
         course={enrollOpen ? enrollLite : null}
+        abandonCheckout={abandonCheckout}
         onClose={() => setEnrollOpen(false)}
         startCheckout={startCheckout}
         payBusy={busy}

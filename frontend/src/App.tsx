@@ -59,6 +59,7 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
 import { Blog } from './pages/public/Blog'
 import { BlogArticle } from './pages/public/BlogArticle'
+import { PaymentsCashfreeComplete } from './pages/public/PaymentsCashfreeComplete'
 import { AppToastHost } from './components/AppToastHost'
 
 function App() {
@@ -134,6 +135,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/payments/cashfree-complete" element={<PaymentsCashfreeComplete />} />
             <Route path="/terms" element={<LegalPlaceholder title="Terms and Conditions" />} />
             <Route path="/privacy" element={<LegalPlaceholder title="Privacy Policy" />} />
             <Route path="/refund" element={<LegalPlaceholder title="Refund & Cancellation Policy" />} />

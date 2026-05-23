@@ -61,6 +61,11 @@ export function absoluteApiUrl(pathOrUrl: string): string {
 }
 
 export function getApiBase(): string {
+  /** Local HTTPS + Vite `/api` proxy — see npm run dev:https (Cashfree prod return_url HTTPS). */
+  if (String(import.meta.env.VITE_API_RELATIVE || '').trim() === '1') {
+    return ''
+  }
+
   const envUrl = import.meta.env.VITE_API_URL
   if (envUrl && String(envUrl).trim()) {
     return String(envUrl).trim()

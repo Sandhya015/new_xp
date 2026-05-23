@@ -13,6 +13,8 @@ api.interceptors.request.use(async (config) => {
 
 export type OrderItem = {
   id: string
+  /** Primary gateway used for checkout (persisted Mongo `method`). */
+  gateway?: 'cashfree' | 'razorpay'
   transactionId: string
   courseId?: string
   courseTitle?: string
@@ -23,6 +25,42 @@ export type OrderItem = {
   invoiceNumber?: string
   amountPaise?: number
   razorpayOrderId?: string
+}
+
+export type PaymentCreateOrderResponse = {
+  gateway: 'cashfree' | 'razorpay'
+  internalOrderId: string
+  amount: number
+  currency: string
+  courseTitle?: string
+  pricing?: Record<string, unknown>
+  keyId?: string
+  orderId?: string
+  paymentSessionId?: string
+  merchantOrderId?: string
+  cashfreeEnv?: 'sandbox' | 'production'
+}
+
+export type ResumeCheckoutResponse = {
+  gateway: 'cashfree' | 'razorpay'
+  internalOrderId: string
+  amount: number
+  currency: string
+  courseTitle?: string
+  keyId?: string
+  orderId?: string
+  paymentSessionId?: string
+  merchantOrderId?: string
+  cashfreeEnv?: 'sandbox' | 'production'
+}
+
+export type PaymentVerifyCashfreeResponse = {
+  ok: boolean
+  message?: string
+  enrollmentCreated?: boolean
+  invoiceNumber?: string
+  orderStatus?: string
+  courseId?: string
 }
 
 export const paymentService = {
@@ -40,16 +78,8 @@ export const paymentService = {
       enrollmentSnapshot?: Record<string, string | undefined>
       billingSnapshot?: Record<string, string | undefined>
     },
-  ): Promise<{
-    keyId: string
-    orderId: string
-    amount: number
-    currency: string
-    courseTitle?: string
-    internalOrderId?: string
-    pricing?: Record<string, unknown>
-  }> {
-    const { data } = await api.post('/api/payments/create-order', {
+  ): Promise<PaymentCreateOrderResponse> {
+    const { data } = await api.post<PaymentCreateOrderResponse>('/api/payments/create-order', {
       courseId,
       currency: opts?.currency ?? 'INR',
       couponCode: opts?.couponCode?.trim() || undefined,
@@ -71,15 +101,23 @@ export const paymentService = {
     })
     return data
   },
-  async resumeCheckout(internalOrderId: string): Promise<{
-    internalOrderId: string
-    keyId: string
-    orderId: string
-    amount: number
-    currency: string
-    courseTitle?: string
-  }> {
-    const { data } = await api.post('/api/payments/resume-checkout', { internalOrderId })
+  async verifyCashfree(merchantOrderId: string): Promise<PaymentVerifyCashfreeResponse> {
+    try {
+      const { data } = await api.post<PaymentVerifyCashfreeResponse>('/api/payments/cashfree/verify', {
+        merchantOrderId,
+      })
+      return data
+    } catch (e: unknown) {
+      if (axios.isAxiosError(e) && e.response?.data && typeof e.response.data === 'object') {
+        return e.response.data as PaymentVerifyCashfreeResponse
+      }
+      throw e
+    }
+  },
+  async resumeCheckout(internalOrderId: string): Promise<ResumeCheckoutResponse> {
+    const { data } = await api.post<ResumeCheckoutResponse>('/api/payments/resume-checkout', {
+      internalOrderId,
+    })
     return data
   },
   async getInvoice(orderId: string, format: 'pdf' | 'html' = 'pdf'): Promise<Blob> {

@@ -106,8 +106,14 @@ export function StudentTraining() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const { token } = useAuth()
-  const { startCheckout, busy: payBusy, checkoutCourseId, error: payError, clearError: clearPayError } =
-    useRazorpayCheckout()
+  const {
+    startCheckout,
+    busy: payBusy,
+    checkoutCourseId,
+    error: payError,
+    clearError: clearPayError,
+    abandonCheckout,
+  } = useRazorpayCheckout()
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set())
   const [completedCourseIds, setCompletedCourseIds] = useState<Set<string>>(new Set())
 
@@ -408,7 +414,9 @@ export function StudentTraining() {
       )}
 
       <TrainingEnrollmentModal
+        key={enrollCourse ? enrollCourse.id : 'closed'}
         course={enrollLite(enrollCourse)}
+        abandonCheckout={abandonCheckout}
         onClose={() => setEnrollCourse(null)}
         startCheckout={startCheckout}
         payBusy={payBusy}

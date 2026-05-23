@@ -1,10 +1,12 @@
 """
-Payments: Razorpay Orders API — create-order (JWT), verify signature (JWT), list my orders,
-GST tax invoice download.
-Amount is always taken from the course document (never trust client-supplied amounts).
+Payments: paid course checkout — Razorpay (legacy / optional) or Cashfree PG (when configured).
+
+Create-order is JWT-backed; amounts come from Mongo (never trust the client alone).
+GST tax invoices and receipts after successful verification.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import asdict, fields
 from datetime import datetime
@@ -19,12 +21,14 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.checkout_coupon import kit_price_from_course_and_settings, lookup_coupon_pricing_only, resolve_checkout_coupon
 from app.checkout_pricing import OrderPricingBreakdown, build_order_pricing_breakdown, breakdown_to_pricing_dict
+from app.cashfree_pg import cashfree_base_url, cashfree_create_order, cashfree_fetch_order
 from app.db import (
     get_app_settings_collection,
     get_courses_collection,
     get_db,
     get_enrollments_collection,
     get_orders_collection,
+    get_users_collection,
 )
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.indian_gst_state_codes import gst_state_code_for_name
@@ -41,6 +45,167 @@ def _razorpay_client():
     if not key_id or not key_secret:
         return None
     return razorpay.Client(auth=(key_id, key_secret))
+
+
+def _detect_payment_gateway() -> str | None:
+    rz_ok = bool(current_app.config.get("RAZORPAY_KEY_ID") and current_app.config.get("RAZORPAY_KEY_SECRET"))
+    cf_ok = bool(current_app.config.get("CASHFREE_CLIENT_ID") and current_app.config.get("CASHFREE_CLIENT_SECRET"))
+    force = (os.environ.get("PAYMENT_GATEWAY") or "").strip().lower()
+    if force == "razorpay":
+        return "razorpay" if rz_ok else None
+    if force == "cashfree":
+        return "cashfree" if cf_ok else None
+    if cf_ok:
+        return "cashfree"
+    if rz_ok:
+        return "razorpay"
+    return None
+
+
+def _public_app_base_url() -> str:
+    explicit = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    cors = getattr(current_app, "config", {}).get("CORS_ORIGINS") or []
+    for o in cors:
+        s = str(o).strip().rstrip("/")
+        if s.startswith("http://") or s.startswith("https://"):
+            return s
+    return ""
+
+
+def _cashfree_return_base_url(cfg) -> str:
+    """Public origin exclusively for Cashfree return_url — prefer HTTPS override for local HTTP dev."""
+    ov = str(cfg.config.get("CASHFREE_RETURN_URL_ORIGIN") or "").strip().rstrip("/")
+    if ov:
+        return ov
+    return _public_app_base_url()
+
+
+def _cashfree_return_url_https_error(pub: str, cf_env_raw: str) -> str | None:
+    """Cashfree production rejects http:// localhost return URLs."""
+    if not pub:
+        return None
+    cf_env = str(cf_env_raw or "production").strip().lower()
+    if cf_env == "sandbox":
+        return None
+    if pub.lower().startswith("http://"):
+        return (
+            "Cashfree production requires an HTTPS order_meta.return_url. "
+            "Easiest locally: frontend `npm run dev:https`, open https://localhost:5173 — then set "
+            "PUBLIC_APP_URL and CASHFREE_RETURN_URL_ORIGIN to https://localhost:5173 in backend `.env`. "
+            "If Cashfree blocks localhost on your merchant account, tunnel the frontend via ngrok "
+            "(HTTPS) and put that URL in CASHFREE_RETURN_URL_ORIGIN, add it to CORS_ORIGINS."
+        )
+    return None
+
+
+def _digits10_phone(raw: str) -> str:
+    d = "".join(c for c in (raw or "") if c.isdigit())
+    tail = d[-10:]
+    return tail if len(tail) == 10 else ""
+
+
+def _customer_for_cf(
+    user_id: str,
+    enrollment_snapshot: dict,
+    billing_snapshot: dict,
+) -> tuple[str, str, str, str]:
+    es = enrollment_snapshot if isinstance(enrollment_snapshot, dict) else {}
+    bs = billing_snapshot if isinstance(billing_snapshot, dict) else {}
+    name = str(bs.get("fullName") or bs.get("name") or "").strip()
+    email = str(bs.get("email") or "").strip()
+    phone = _digits10_phone(str(bs.get("phone") or bs.get("mobile") or "").strip())
+
+    mongo_uid = ""
+    doc = None
+    if ObjectId.is_valid(str(user_id)):
+        doc = get_users_collection().find_one({"_id": ObjectId(str(user_id))})
+        if doc:
+            mongo_uid = str(doc.get("_id"))
+            if not name:
+                name = str(doc.get("name") or "").strip()
+            if not email:
+                email = str(doc.get("email") or "").strip()
+            if not phone:
+                phone = _digits10_phone(str(doc.get("mobile") or ""))
+    if not email:
+        email = str(es.get("email") or "").strip()
+    cid = mongo_uid[:50] if mongo_uid else str(user_id)[:50]
+    if not phone:
+        phone = "9999999999"
+    if not email:
+        email = "customer@noreply.invalid"
+    if not name:
+        name = "Customer"
+    return cid, name[:100], email[:100], phone
+
+
+def _gateway_label(order: dict) -> str:
+    return "Cashfree" if str(order.get("method") or "").lower() == "cashfree" else "Razorpay"
+
+
+def _finalize_successful_charge(
+    coll,
+    order_before: dict,
+    *,
+    user_id: str,
+    gateway_payment_ref: str,
+    payment_method: str | None,
+    receipt_ts: datetime | None,
+) -> tuple[bool, dict]:
+    """
+    Persist success, optionally create enrollment, generate invoice/email.
+    `gateway_payment_ref` is stored as transactionId / legacy razorpayPaymentId for receipts.
+    """
+    oid = order_before["_id"]
+    rs = receipt_ts or datetime.utcnow()
+    enrollment_created = False
+    coll.update_one(
+        {"_id": oid},
+        {"$set": {
+            "status": "success",
+            "razorpayPaymentId": gateway_payment_ref,
+            "transactionId": gateway_payment_ref,
+            "verifiedAt": datetime.utcnow(),
+            "invoiceReceiptAt": rs,
+            "lastPaymentMethod": (payment_method or "").strip(),
+        }},
+    )
+    order = coll.find_one({"_id": oid}) or order_before
+    order["status"] = "success"
+    order["razorpayPaymentId"] = gateway_payment_ref
+    order["lastPaymentMethod"] = payment_method or ""
+    order["invoiceReceiptAt"] = rs
+
+    course_id = order.get("courseId")
+    if course_id and ObjectId.is_valid(str(course_id)):
+        enroll = get_enrollments_collection()
+        if not enroll.find_one(user_course_enrollment_filter(user_id, str(course_id))):
+            snap = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
+            bill = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
+            enroll.insert_one({
+                "userId": user_id,
+                "courseId": str(course_id),
+                "orderId": str(order["_id"]),
+                "status": "active",
+                "createdAt": datetime.utcnow(),
+                "certificateProfile": snap,
+                "billingAddress": bill,
+            })
+            enrollment_created = True
+
+    _build_and_store_invoice_if_needed(
+        current_app._get_current_object(),
+        coll,
+        order,
+        razorpay_payment_id=gateway_payment_ref,
+        payment_method=payment_method or "",
+        receipt_ts=rs,
+        enrollment_created=enrollment_created,
+    )
+    refreshed = coll.find_one({"_id": oid}) or order
+    return enrollment_created, refreshed
 
 
 def _breakdown_from_order_doc(order: dict) -> OrderPricingBreakdown | None:
@@ -149,6 +314,7 @@ def _build_and_store_invoice_if_needed(
         billing=bill,
         buyer_gstin=(bill.get("gstin") or "").strip() or None,
         intra_state=intra,
+        payment_gateway_label=_gateway_label(order),
     )
     pdf_bytes = render_invoice_pdf(
         invoice_number=inv_no,
@@ -216,8 +382,10 @@ def list_my_orders():
         course_id = o.get("courseId")
         course_title = titles.get(str(course_id), "") if course_id else ""
         st = str(o.get("status", "pending") or "").lower()
+        method = str(o.get("method") or "").lower()
         items.append({
             "id": str(o["_id"]),
+            "gateway": "cashfree" if method == "cashfree" else "razorpay",
             "transactionId": o.get("transactionId", o.get("razorpayPaymentId", o.get("orderId", str(o["_id"])))),
             "courseId": str(course_id) if course_id else "",
             "courseTitle": course_title,
@@ -251,7 +419,7 @@ def last_billing_snapshot():
 @payments_bp.route("/resume-checkout", methods=["POST"])
 @jwt_required()
 def resume_checkout():
-    """Re-open Razorpay Checkout for an existing unpaid order (same order id + amount)."""
+    """Resume payment: Razorpay (existing order id) or new Cashfree session for pending order."""
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
@@ -267,9 +435,6 @@ def resume_checkout():
     st = str(order.get("status") or "").lower()
     if st not in ("created", "pending"):
         return jsonify({"error": "This order is not awaiting payment", "status": st}), 400
-    rz_id = (order.get("orderId") or "").strip()
-    if not rz_id:
-        return jsonify({"error": "Missing payment session"}), 400
     amount_paise = order.get("amountPaise")
     try:
         ap = int(amount_paise) if amount_paise is not None else 0
@@ -283,11 +448,89 @@ def resume_checkout():
         c = get_courses_collection().find_one({"_id": ObjectId(str(course_id))})
         if c:
             title = str(c.get("title") or "")
+    gw = _detect_payment_gateway()
+    meth = str(order.get("method") or "").lower()
+    want_cf = gw == "cashfree" or meth == "cashfree"
+
+    if want_cf:
+        cfg = current_app._get_current_object()
+        cid = cfg.config.get("CASHFREE_CLIENT_ID", "").strip()
+        csecret = cfg.config.get("CASHFREE_CLIENT_SECRET", "").strip()
+        if not cid or not csecret:
+            return jsonify({"error": "Cashfree credentials not configured on server"}), 503
+        pub = _cashfree_return_base_url(cfg)
+        if not pub:
+            return jsonify({
+                "error": "Missing public app URL",
+                "detail": "Set PUBLIC_APP_URL or CASHFREE_RETURN_URL_ORIGIN (HTTPS for production Cashfree).",
+            }), 503
+        cf_ev = cfg.config.get("CASHFREE_ENV", "production")
+        cf_https_err = _cashfree_return_url_https_error(pub, cf_ev)
+        if cf_https_err:
+            return jsonify({"error": cf_https_err}), 503
+        base_url = cashfree_base_url(cf_ev)
+        api_ver = cfg.config.get("CASHFREE_API_VERSION", "2023-08-01")
+        try:
+            total_gross = float(order.get("amount") or 0)
+        except (TypeError, ValueError):
+            total_gross = 0.0
+        enrollment_snapshot = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
+        billing_snapshot = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
+        c_id, name, email, phone = _customer_for_cf(user_id, enrollment_snapshot, billing_snapshot)
+        merchant_order_id = f"xpi_cf_{uuid.uuid4().hex[:28]}"
+        return_url = f"{pub}/payments/cashfree-complete"
+        cf_body, cerr = cashfree_create_order(
+            base_url=base_url,
+            api_version=api_ver,
+            client_id=cid,
+            client_secret=csecret,
+            merchant_order_id=merchant_order_id,
+            order_amount_rupees=total_gross,
+            order_currency=(order.get("currency") or "INR").strip().upper() or "INR",
+            customer_id=c_id,
+            customer_email=email,
+            customer_phone=phone,
+            customer_name=name,
+            return_url=return_url,
+            order_note=str(title or "Course enrollment")[:200],
+        )
+        if cerr or not isinstance(cf_body, dict):
+            return jsonify({"error": cerr or "Could not create Cashfree order"}), 502
+        session_id = str(cf_body.get("payment_session_id") or "").strip()
+        cf_oid = str(cf_body.get("cf_order_id") or "").strip()
+        if not session_id:
+            return jsonify({"error": "Cashfree did not return a payment_session_id"}), 502
+        cf_env_flag = cfg.config.get("CASHFREE_ENV", "production").strip().lower()
+        cashfree_env_js = "sandbox" if cf_env_flag == "sandbox" else "production"
+        coll.update_one(
+            {"_id": order["_id"]},
+            {"$set": {
+                "orderId": merchant_order_id,
+                "cashfreeCfOrderId": cf_oid,
+                "cashfreePaymentSessionId": session_id,
+                "method": "cashfree",
+            }},
+        )
+        return jsonify({
+            "gateway": "cashfree",
+            "internalOrderId": oid,
+            "paymentSessionId": session_id,
+            "merchantOrderId": merchant_order_id,
+            "cashfreeEnv": cashfree_env_js,
+            "amount": ap,
+            "currency": (order.get("currency") or "INR").strip().upper() or "INR",
+            "courseTitle": title,
+        }), 200
+
+    rz_existing = (order.get("orderId") or "").strip()
+    if not rz_existing:
+        return jsonify({"error": "Missing payment session"}), 400
     key_id = current_app.config.get("RAZORPAY_KEY_ID", "")
     return jsonify({
+        "gateway": "razorpay",
         "internalOrderId": oid,
         "keyId": key_id,
-        "orderId": rz_id,
+        "orderId": rz_existing,
         "amount": ap,
         "currency": (order.get("currency") or "INR").strip().upper() or "INR",
         "courseTitle": title,
@@ -298,18 +541,22 @@ def resume_checkout():
 @jwt_required()
 def create_order():
     """
-    Create a Razorpay order for an active course. Price comes from DB only (INR, rupees).
-    Returns keyId + order details for Razorpay Checkout on the client.
+    Create a payable checkout session server-side.
+
+    Preferred gateway when credentials exist: Cashfree PG (hosted checkout).
+    Otherwise Razorpay (legacy). Controlled by PAYMENT_GATEWAY or auto-discovery.
+
+    Course amount is computed only from DB + coupons + kit (never client totals alone).
     """
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
 
-    client = _razorpay_client()
-    if client is None:
+    gw = _detect_payment_gateway()
+    if gw is None:
         return jsonify({
             "error": "Payment gateway not configured",
-            "detail": "Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the server environment.",
+            "detail": "Set Cashfree (CASHFREE_CLIENT_ID / CASHFREE_CLIENT_SECRET) or Razorpay (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET), or PAYMENT_GATEWAY explicitly.",
         }), 503
 
     user_id = get_jwt_identity()
@@ -373,9 +620,96 @@ def create_order():
 
     amount_paise = int(round(total_gross * 100))
     if amount_paise < 100:
-        return jsonify({"error": "Amount too small for Razorpay (minimum ₹1)"}), 400
+        return jsonify({"error": "Amount too small to charge (minimum ₹1)"}), 400
 
     receipt = f"xpi_{uuid.uuid4().hex[:32]}"
+    coll = orders_coll
+    cfg = current_app._get_current_object()
+
+    if gw == "cashfree":
+        cid = cfg.config.get("CASHFREE_CLIENT_ID", "").strip()
+        csecret = cfg.config.get("CASHFREE_CLIENT_SECRET", "").strip()
+        pub = _cashfree_return_base_url(cfg)
+        if not pub:
+            return jsonify({
+                "error": "Missing public origin for Cashfree",
+                "detail": (
+                    "Set PUBLIC_APP_URL (HTTPS in production), or CASHFREE_RETURN_URL_ORIGIN for return_url "
+                    "only when testing locally with http PUBLIC_APP_URL."
+                ),
+            }), 503
+        cf_ev = cfg.config.get("CASHFREE_ENV", "production")
+        cf_https_err = _cashfree_return_url_https_error(pub, cf_ev)
+        if cf_https_err:
+            return jsonify({"error": cf_https_err}), 503
+        base_url = cashfree_base_url(cf_ev)
+        api_ver = cfg.config.get("CASHFREE_API_VERSION", "2023-08-01")
+        c_oid, cust_name, cust_email, cust_phone = _customer_for_cf(user_id, enrollment_snapshot, billing_snapshot)
+        return_url = f"{pub}/payments/cashfree-complete"
+        cf_body, cerr = cashfree_create_order(
+            base_url=base_url,
+            api_version=api_ver,
+            client_id=cid,
+            client_secret=csecret,
+            merchant_order_id=receipt,
+            order_amount_rupees=total_gross,
+            order_currency=currency,
+            customer_id=c_oid,
+            customer_email=cust_email,
+            customer_phone=cust_phone,
+            customer_name=cust_name,
+            return_url=return_url,
+            order_note=str(course.get("title") or "")[:200],
+        )
+        if cerr or not isinstance(cf_body, dict):
+            current_app.logger.error("Cashfree create order failed: %s", cerr)
+            return jsonify({"error": cerr or "Could not create Cashfree order"}), 502
+        session_id = str(cf_body.get("payment_session_id") or "").strip()
+        cf_oid = str(cf_body.get("cf_order_id") or "").strip()
+        if not session_id:
+            return jsonify({"error": "Cashfree did not return a payment_session_id"}), 502
+        cf_env_flag = cfg.config.get("CASHFREE_ENV", "production").strip().lower()
+        cashfree_env_js = "sandbox" if cf_env_flag == "sandbox" else "production"
+
+        doc = {
+            "userId": user_id,
+            "courseId": course_id,
+            "amount": total_gross,
+            "amountPaise": amount_paise,
+            "currency": currency,
+            "orderId": receipt,
+            "receipt": receipt,
+            "status": "created",
+            "method": "cashfree",
+            "cashfreeCfOrderId": cf_oid,
+            "cashfreePaymentSessionId": session_id,
+            "createdAt": datetime.utcnow(),
+            "pricing": pricing,
+            "invoiceBreakdown": asdict(bd),
+            "couponCode": pricing.get("couponCode") or "",
+            "enrollmentSnapshot": enrollment_snapshot,
+            "billingSnapshot": billing_snapshot,
+            "includeTrainingKit": include_kit,
+        }
+        result = coll.insert_one(doc)
+        return jsonify({
+            "gateway": "cashfree",
+            "internalOrderId": str(result.inserted_id),
+            "paymentSessionId": session_id,
+            "merchantOrderId": receipt,
+            "cashfreeEnv": cashfree_env_js,
+            "amount": amount_paise,
+            "currency": currency,
+            "courseTitle": course.get("title", ""),
+            "pricing": pricing,
+        }), 201
+
+    client = _razorpay_client()
+    if client is None:
+        return jsonify({
+            "error": "Payment gateway not configured",
+            "detail": "Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the server environment.",
+        }), 503
     try:
         rz_order = client.order.create({
             "amount": amount_paise,
@@ -394,7 +728,6 @@ def create_order():
         return jsonify({"error": "Could not create payment order", "detail": str(e)}), 502
 
     razorpay_order_id = rz_order.get("id")
-    coll = orders_coll
     doc = {
         "userId": user_id,
         "courseId": course_id,
@@ -415,8 +748,9 @@ def create_order():
     }
     result = coll.insert_one(doc)
 
-    key_id = current_app.config.get("RAZORPAY_KEY_ID", "")
+    key_id = cfg.config.get("RAZORPAY_KEY_ID", "")
     return jsonify({
+        "gateway": "razorpay",
         "internalOrderId": str(result.inserted_id),
         "keyId": key_id,
         "orderId": razorpay_order_id,
@@ -441,7 +775,7 @@ def verify():
 
     client = _razorpay_client()
     if client is None:
-        return jsonify({"error": "Payment gateway not configured"}), 503
+        return jsonify({"error": "Razorpay gateway not configured"}), 503
 
     user_id = get_jwt_identity()
     data = request.get_json() or {}
@@ -457,7 +791,6 @@ def verify():
     if not order:
         return jsonify({"error": "Order not found for this user"}), 404
 
-    enrollment_created = False
     if order.get("status") == "success":
         pay_ref = order.get("razorpayPaymentId") or razorpay_payment_id
         _build_and_store_invoice_if_needed(
@@ -475,7 +808,8 @@ def verify():
             "message": "Payment already verified",
             "enrollmentCreated": False,
             "invoiceNumber": refreshed.get("invoiceNumber") or "",
-        })
+            "courseId": str(refreshed.get("courseId") or ""),
+        }), 200
 
     try:
         client.utility.verify_payment_signature({
@@ -500,56 +834,139 @@ def verify():
     except Exception:
         current_app.logger.exception("Could not fetch Razorpay payment for invoice metadata")
 
-    coll.update_one(
-        {"_id": order["_id"]},
-        {"$set": {
-            "status": "success",
-            "razorpayPaymentId": razorpay_payment_id,
-            "transactionId": razorpay_payment_id,
-            "verifiedAt": datetime.utcnow(),
-            "invoiceReceiptAt": receipt_ts,
-            "lastPaymentMethod": payment_method,
-        }},
-    )
-    order = coll.find_one({"_id": order["_id"]}) or order
-    order["status"] = "success"
-    order["razorpayPaymentId"] = razorpay_payment_id
-    order["lastPaymentMethod"] = payment_method
-    order["invoiceReceiptAt"] = receipt_ts
-
-    course_id = order.get("courseId")
-    if course_id and ObjectId.is_valid(str(course_id)):
-        enroll = get_enrollments_collection()
-        if not enroll.find_one(user_course_enrollment_filter(user_id, str(course_id))):
-            snap = order.get("enrollmentSnapshot") if isinstance(order.get("enrollmentSnapshot"), dict) else {}
-            bill = order.get("billingSnapshot") if isinstance(order.get("billingSnapshot"), dict) else {}
-            enroll.insert_one({
-                "userId": user_id,
-                "courseId": str(course_id),
-                "orderId": str(order["_id"]),
-                "status": "active",
-                "createdAt": datetime.utcnow(),
-                "certificateProfile": snap,
-                "billingAddress": bill,
-            })
-            enrollment_created = True
-
-    _build_and_store_invoice_if_needed(
-        current_app._get_current_object(),
+    enrollment_created, refreshed = _finalize_successful_charge(
         coll,
         order,
-        razorpay_payment_id=razorpay_payment_id,
+        user_id=user_id,
+        gateway_payment_ref=razorpay_payment_id,
         payment_method=payment_method,
         receipt_ts=receipt_ts,
-        enrollment_created=enrollment_created,
     )
-    refreshed = coll.find_one({"_id": order["_id"]}) or order
 
     return jsonify({
         "ok": True,
         "message": "Payment verified",
         "enrollmentCreated": enrollment_created,
         "invoiceNumber": refreshed.get("invoiceNumber") or "",
+        "courseId": str(refreshed.get("courseId") or ""),
+    }), 200
+
+
+@payments_bp.route("/cashfree/verify", methods=["POST"])
+@jwt_required()
+def verify_cashfree():
+    """
+    After Cashfree redirects or SDK completes, fetch order server-side (JWT) and
+    confirm PAID status before enrolling / invoicing.
+
+    Body: merchantOrderId (same as Mongo order.orderId for Cashfree flow).
+    """
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    cid = current_app.config.get("CASHFREE_CLIENT_ID", "").strip()
+    csecret = current_app.config.get("CASHFREE_CLIENT_SECRET", "").strip()
+    if not cid or not csecret:
+        return jsonify({"error": "Cashfree not configured"}), 503
+
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    merchant_order_id = (data.get("merchantOrderId") or data.get("order_id") or data.get("orderId") or "").strip()
+    if not merchant_order_id:
+        return jsonify({"error": "merchantOrderId is required"}), 400
+
+    coll = get_orders_collection()
+    order = coll.find_one({"orderId": merchant_order_id, "userId": user_id})
+    if not order:
+        return jsonify({"error": "Order not found for this user"}), 404
+
+    if str(order.get("method") or "").lower() != "cashfree":
+        return jsonify({"error": "This order is not a Cashfree checkout"}), 400
+
+    if order.get("status") == "success":
+        refreshed = coll.find_one({"_id": order["_id"]}) or order
+        pay_ref = str(refreshed.get("razorpayPaymentId") or refreshed.get("transactionId") or "")
+        _build_and_store_invoice_if_needed(
+            current_app._get_current_object(),
+            coll,
+            refreshed,
+            razorpay_payment_id=pay_ref,
+            payment_method=refreshed.get("lastPaymentMethod"),
+            receipt_ts=refreshed.get("invoiceReceiptAt") or refreshed.get("verifiedAt"),
+            enrollment_created=False,
+        )
+        refreshed = coll.find_one({"_id": order["_id"]}) or refreshed
+        return jsonify({
+            "ok": True,
+            "message": "Payment already verified",
+            "orderStatus": "PAID",
+            "enrollmentCreated": False,
+            "invoiceNumber": refreshed.get("invoiceNumber") or "",
+            "courseId": str(refreshed.get("courseId") or ""),
+        }), 200
+
+    base_url = cashfree_base_url(current_app.config.get("CASHFREE_ENV", "production"))
+    api_ver = current_app.config.get("CASHFREE_API_VERSION", "2023-08-01")
+    cf_ord, ferr = cashfree_fetch_order(
+        base_url=base_url,
+        api_version=api_ver,
+        client_id=cid,
+        client_secret=csecret,
+        merchant_order_id=merchant_order_id,
+    )
+    if ferr or not isinstance(cf_ord, dict):
+        return jsonify({"error": ferr or "Could not fetch Cashfree order"}), 502
+
+    st_cf = str(cf_ord.get("order_status") or "").upper()
+    if st_cf != "PAID":
+        return jsonify({
+            "ok": False,
+            "orderStatus": st_cf or "UNKNOWN",
+            "message": "Payment not completed yet. Try again in a moment or check your SMS/email receipt.",
+        }), 409
+
+    try:
+        remote_amt = float(cf_ord.get("order_amount") or 0)
+        local_amt = float(order.get("amount") or 0)
+        if abs(remote_amt - local_amt) > 0.05:
+            current_app.logger.warning(
+                "Cashfree amount mismatch mongo=%s cashfree=%s order=%s",
+                local_amt,
+                remote_amt,
+                order.get("_id"),
+            )
+    except (TypeError, ValueError):
+        pass
+
+    pay_ref = str(cf_ord.get("cf_order_id") or merchant_order_id)
+    receipt_ts = datetime.utcnow()
+    ts_raw = cf_ord.get("created_at")
+    if isinstance(ts_raw, str) and ts_raw.strip():
+        try:
+            iso = ts_raw.replace("Z", "+00:00")
+            receipt_ts = datetime.fromisoformat(iso)
+            if receipt_ts.tzinfo is not None:
+                receipt_ts = receipt_ts.replace(tzinfo=None)
+        except (TypeError, ValueError):
+            pass
+
+    enrollment_created, refreshed = _finalize_successful_charge(
+        coll,
+        order,
+        user_id=user_id,
+        gateway_payment_ref=pay_ref,
+        payment_method="cashfree",
+        receipt_ts=receipt_ts,
+    )
+
+    return jsonify({
+        "ok": True,
+        "message": "Payment verified",
+        "orderStatus": "PAID",
+        "enrollmentCreated": enrollment_created,
+        "invoiceNumber": refreshed.get("invoiceNumber") or "",
+        "courseId": str(refreshed.get("courseId") or ""),
     }), 200
 
 
@@ -618,6 +1035,7 @@ def get_invoice(order_id):
                 billing=bill,
                 buyer_gstin=(bill.get("gstin") or "").strip() or None,
                 intra_state=intra,
+                payment_gateway_label=_gateway_label(order),
             )
         return Response(html_doc, mimetype="text/html; charset=utf-8")
 

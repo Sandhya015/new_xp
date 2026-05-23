@@ -29,6 +29,8 @@ export type EnrollCourseLite = {
 
 type Props = {
   course: EnrollCourseLite | null
+  /** Reset payment-gateway busy/error (same hook instance as startCheckout). */
+  abandonCheckout?: () => void
   onClose: () => void
   startCheckout: (opts: {
     courseId: string
@@ -76,7 +78,15 @@ function applyCouponToCourseLine(
 
 type KitMeta = { name: string; shortDescription: string; thumbnailUrl: string }
 
-export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBusy, payError, clearPayError }: Props) {
+export function TrainingEnrollmentModal({
+  course,
+  abandonCheckout,
+  onClose,
+  startCheckout,
+  payBusy,
+  payError,
+  clearPayError,
+}: Props) {
   const { user } = useAuth()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [settings, setSettings] = useState<TrainingCheckoutSettings | null>(null)
@@ -197,15 +207,21 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
       cancelled = true
     }
   }, [step, course?.id])
+
+  // Reset wizard only when enrolling in a different course — NOT on every parent render or auth store tick.
+  // (Depending on full `course`/`user`/unstable callbacks was resetting step mid-flow → 1↔2↔3 loops and gateway never opens.)
   useEffect(() => {
-    if (!course) return
+    if (!course?.id) return
+    clearPayError()
     setFullName((user?.name || '').trim())
     setEmail((user?.email || '').trim())
     setMobile((user?.mobile || '').replace(/\D/g, '').slice(-10))
     setUniversity((user?.university || '').trim())
     setCollegeName((user?.collegeName || '').trim())
+    setCollegeOther('')
     setCourseLevel((user?.course || '').trim())
     setBranchOrSubject((user?.stream || '').trim())
+    setBranchOther('')
     setSemester((user?.semester || '1st').trim() || '1st')
     setRegistrationNumber((user?.collegeRegNo || '').trim())
     setCouponCode('')
@@ -213,9 +229,14 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
     setCouponError(null)
     setIncludeKit(false)
     setFormError(null)
-    clearPayError()
     setStep(1)
-  }, [course, user, clearPayError])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when course id changes; read latest user
+  }, [course?.id, clearPayError])
+
+  const handleDismiss = () => {
+    abandonCheckout?.()
+    onClose()
+  }
 
   const collegeOptions = useMemo(() => {
     if (!university || university === OTHER_OPTION_VALUE) return []
@@ -404,7 +425,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" aria-hidden onClick={() => !payBusy && onClose()} />
+      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" aria-hidden onClick={handleDismiss} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
         <div
           className="relative w-full max-w-lg rounded-xl border border-gray-200 bg-white shadow-xl max-h-[90vh] overflow-y-auto"
@@ -419,7 +440,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
             </div>
             <button
               type="button"
-              onClick={() => !payBusy && onClose()}
+              onClick={handleDismiss}
               className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100"
               aria-label="Close"
             >
@@ -666,7 +687,7 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                     ) : null}
                     {couponApplied ? (
                       <span className="block mt-1 text-emerald-700">
-                        Payable after coupon {formatInr(totalGross)} — matches Razorpay at checkout when applied on the server.
+                        Payable after coupon {formatInr(totalGross)} — matches the amount charged at checkout (server-priced).
                       </span>
                     ) : null}
                   </p>
@@ -812,13 +833,10 @@ export function TrainingEnrollmentModal({ course, onClose, startCheckout, payBus
                   disabled={payBusy}
                   onClick={() => {
                     setCouponError(null)
-                    if (couponCode.trim() && couponCode.trim().toUpperCase() !== couponApplied) {
-                      const r = applyCouponToCourseLine(courseGross, couponCode, coupons)
-                      if (!r.ok) {
-                        setCouponError('Invalid or expired coupon code.')
-                        return
-                      }
-                      setCouponApplied(couponCode.trim().toUpperCase())
+                    const typed = couponCode.trim()
+                    if (typed && typed.toUpperCase() !== couponApplied) {
+                      setCouponError('Click Apply next to the coupon box, or clear the field to continue.')
+                      return
                     }
                     if (course.price <= 0) {
                       clearPayError()

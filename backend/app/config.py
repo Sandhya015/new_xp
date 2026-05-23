@@ -1,8 +1,21 @@
 """
 Environment-based configuration. Never hardcode secrets or stage-specific values.
 """
+from __future__ import annotations
+
 import os
+from pathlib import Path
 from typing import List
+
+# Load backend/.env regardless of process cwd (e.g. `python backend/run.py` from repo root).
+# Lambda uses injected env vars; optional .env on disk is skipped if missing.
+try:
+    from dotenv import load_dotenv
+
+    _BACKEND_ENV = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(_BACKEND_ENV, override=False)
+except ImportError:
+    pass
 
 
 def _int_mb_env(name: str, default: int) -> int:
@@ -34,6 +47,16 @@ class Config:
     # Razorpay (test/live keys from https://dashboard.razorpay.com/app/keys)
     RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
     RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
+    # Cashfree PG (merchant.cashfree.com → Developers → API Keys)
+    CASHFREE_CLIENT_ID = os.environ.get("CASHFREE_CLIENT_ID", "").strip()
+    CASHFREE_CLIENT_SECRET = os.environ.get("CASHFREE_CLIENT_SECRET", "").strip()
+    CASHFREE_ENV = (os.environ.get("CASHFREE_ENV") or "production").strip().lower()
+    CASHFREE_API_VERSION = (os.environ.get("CASHFREE_API_VERSION") or "2023-08-01").strip()
+    # Frontend origin used in messaging / fallbacks (may be http://localhost for dev).
+    PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
+    # HTTPS origin for Cashfree order_meta.return_url only. Cashfree production rejects http://.
+    # Override when PUBLIC_APP_URL is http (local): e.g. https://www.xpertintern.com or https://YOUR_APP.ngrok-free.app
+    CASHFREE_RETURN_URL_ORIGIN = os.environ.get("CASHFREE_RETURN_URL_ORIGIN", "").strip().rstrip("/")
     # Zoho / SMTP (transactional: welcome, enrollment, certificate)
     SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
     SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
@@ -65,8 +88,16 @@ class Config:
 class DevelopmentConfig(Config):
     ENV = "development"
     DEBUG = True
-    _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
-    CORS_ORIGINS = [o.strip() for o in _origins.split(",") if o.strip()] or ["http://localhost:5173", "http://127.0.0.1:5173"]
+    _origins = os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,https://localhost:5173,https://127.0.0.1:5173",
+    )
+    CORS_ORIGINS = [o.strip() for o in _origins.split(",") if o.strip()] or [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+    ]
 
 
 class StagingConfig(Config):

@@ -51,8 +51,11 @@ _load_error = None
 def _load_app():
     global _load_error
     try:
+        from pathlib import Path
+
         from dotenv import load_dotenv
-        load_dotenv()
+
+        load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
     except Exception:
         pass
     try:

@@ -6,6 +6,7 @@ import { paymentService } from '@/services/paymentService'
 import { enrollmentService } from '@/services/enrollmentService'
 import { showAppToast } from '@/components/AppToastHost'
 import { loadRazorpayScript } from '@/utils/loadRazorpay'
+import { loadCashfreeScript } from '@/utils/loadCashfree'
 import { courseContentPath } from '@/utils/courseStudyLink'
 
 type RazorpaySuccessResponse = {
@@ -86,6 +87,77 @@ export function useRazorpayCheckout() {
 
       setCheckoutCourseId(courseId)
       try {
+        const order = await paymentService.createOrder(courseId, {
+          couponCode,
+          includeTrainingKit,
+          enrollmentSnapshot,
+          billingSnapshot,
+        })
+
+        const gw =
+          order.gateway ??
+          (order.paymentSessionId && order.merchantOrderId ? 'cashfree' : 'razorpay')
+
+        if (gw === 'cashfree') {
+          const loadedCf = await loadCashfreeScript()
+          if (!loadedCf || typeof window.Cashfree !== 'function') {
+            setError('Could not load payment gateway. Check your connection and try again.')
+            setCheckoutCourseId(null)
+            return
+          }
+          const merchantOrderId = order.merchantOrderId
+          const paymentSessionId = order.paymentSessionId
+          if (!merchantOrderId || !paymentSessionId) {
+            setError('Payment gateway misconfigured. Missing Cashfree session.')
+            setCheckoutCourseId(null)
+            return
+          }
+
+          const mode: 'sandbox' | 'production' =
+            order.cashfreeEnv === 'sandbox' ? 'sandbox' : 'production'
+          const cashfree = window.Cashfree({ mode })
+          cashfree
+            .checkout({
+              paymentSessionId,
+              redirectTarget: '_modal',
+            })
+            .then(async (result) => {
+              setCheckoutCourseId(null)
+              if (result?.error) {
+                setError(
+                  typeof result.error?.message === 'string' && result.error.message.trim()
+                    ? result.error.message
+                    : 'Payment was cancelled.'
+                )
+                return
+              }
+              try {
+                const v = await paymentService.verifyCashfree(merchantOrderId)
+                if (!v.ok) {
+                  setError(v.message || 'Payment not confirmed yet. Try again shortly.')
+                  return
+                }
+                showAppToast('Welcome aboard! Your course is now active.')
+                try {
+                  onSuccess?.()
+                } catch {
+                  /* ignore */
+                }
+                const paidCourseId = v.courseId || courseId
+                navigate(courseContentPath(paidCourseId))
+              } catch {
+                setError(
+                  'Payment received but verification failed. Please contact support or check Payments & Invoices.'
+                )
+              }
+            })
+            .catch(() => {
+              setCheckoutCourseId(null)
+              setError('Could not complete payment.')
+            })
+          return
+        }
+
         const loaded = await loadRazorpayScript()
         if (!loaded || !window.Razorpay) {
           setError('Could not load payment gateway. Check your connection and try again.')
@@ -93,12 +165,11 @@ export function useRazorpayCheckout() {
           return
         }
 
-        const order = await paymentService.createOrder(courseId, {
-          couponCode,
-          includeTrainingKit,
-          enrollmentSnapshot,
-          billingSnapshot,
-        })
+        if (!order.keyId || !order.orderId) {
+          setError('Payment gateway misconfigured. Missing Razorpay order.')
+          setCheckoutCourseId(null)
+          return
+        }
 
         const options: Record<string, unknown> = {
           key: order.keyId,
@@ -171,12 +242,21 @@ export function useRazorpayCheckout() {
     [token, user, navigate]
   )
 
+  const abandonCheckout = useCallback(() => {
+    setCheckoutCourseId(null)
+    setError(null)
+  }, [])
+
+  const clearError = useCallback(() => setError(null), [])
+
   return {
     startCheckout,
     /** True while any course checkout is in progress (single-course pages can use this). */
     busy: checkoutCourseId !== null,
     checkoutCourseId,
     error,
-    clearError: () => setError(null),
+    clearError,
+    /** Clears spinner + payment error — call when enrollment modal closes or user cancels checkout. */
+    abandonCheckout,
   }
 }

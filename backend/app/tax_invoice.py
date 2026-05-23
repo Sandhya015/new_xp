@@ -112,6 +112,7 @@ def render_invoice_html(
     billing: dict[str, Any],
     buyer_gstin: str | None,
     intra_state: bool,
+    payment_gateway_label: str = "Razorpay",
 ) -> str:
     b = breakdown
     cn = html.escape((billing.get("fullName") or billing.get("name") or "").strip() or "Customer")
@@ -138,6 +139,7 @@ def render_invoice_html(
     pay_mode_e = html.escape(display_payment_mode(payment_mode))
     pay_id_e = html.escape(payment_id)
     pos_e = html.escape(place_of_supply_label)
+    pgw_e = html.escape((payment_gateway_label or "Payments").strip() or "Payments")
 
     # Line items: rate column = taxable (pre-discount list) per sample
     course_rate_taxable = b.course_taxable_list
@@ -390,7 +392,7 @@ def render_invoice_html(
   <div class="payment-info">
     <div class="row"><div class="label">Payment Status</div><div class="value" style="color:#15803d">PAID</div></div>
     <div class="row"><div class="label">Amount Paid</div><div class="value">&#8377; {fmt_inr(b.grand_total_inclusive)}</div></div>
-    <div class="row"><div class="label">Payment Gateway</div><div class="value">Razorpay</div></div>
+    <div class="row"><div class="label">Payment Gateway</div><div class="value">{pgw_e}</div></div>
     <div class="row"><div class="label">Transaction ID</div><div class="value">{pay_id_e}</div></div>
   </div>
 
