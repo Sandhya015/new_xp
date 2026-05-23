@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useRazorpayCheckout } from '@/hooks/useRazorpayCheckout'
 import { courseService } from '@/services/courseService'
 import { enrollmentService } from '@/services/enrollmentService'
-import { Search, Filter, X } from 'lucide-react'
+import { Search, Filter, X, Loader2 } from 'lucide-react'
 import { courseListingBlurb } from '@/utils/sanitizeHtml'
 import { TrainingProgramCard } from '@/components/training/TrainingProgramCard'
 import { TrainingEnrollmentModal, type EnrollCourseLite } from '@/components/training/TrainingEnrollmentModal'
@@ -343,45 +343,51 @@ export function Training() {
             )
           : null}
 
-        {coursesLoading && <p className="text-sm text-slate-gray py-4">Loading courses...</p>}
-        {!coursesLoading && coursesLoadError && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{coursesLoadError}</p>
-        )}
-
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {filteredCourses.map((course) => {
-            const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
-            const isCompleted = Boolean(token && completedCourseIds.has(course.id))
-            return (
-              <TrainingProgramCard
-                key={course.id}
-                course={course}
-                isLoggedIn={Boolean(token)}
-                isEnrolled={isEnrolled}
-                isCompleted={isCompleted}
-                onEnroll={() => setEnrollCourse(course)}
-                payBusy={payBusy}
-              />
-            )
-          })}
-        </div>
-
-        {!coursesLoading && !coursesLoadError && courses.length === 0 && (
-          <p className="text-center py-12 text-slate-gray">
-            No trainings are listed yet. If you just added courses in the database, confirm this site uses the same API environment and try a hard refresh.
-          </p>
-        )}
-        {!coursesLoading && !coursesLoadError && courses.length > 0 && filteredCourses.length === 0 && (
-          <div className="py-12 text-center space-y-3">
-            <p className="text-slate-gray">No courses match your current search or filters.</p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
-            >
-              Clear all filters
-            </button>
+        {coursesLoading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-slate-gray" role="status" aria-live="polite">
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-brand-accent" aria-hidden />
+            <span>Loading programs…</span>
           </div>
+        ) : coursesLoadError ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{coursesLoadError}</p>
+        ) : (
+          <>
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredCourses.map((course) => {
+                const isEnrolled = Boolean(token && enrolledCourseIds.has(course.id))
+                const isCompleted = Boolean(token && completedCourseIds.has(course.id))
+                return (
+                  <TrainingProgramCard
+                    key={course.id}
+                    course={course}
+                    isLoggedIn={Boolean(token)}
+                    isEnrolled={isEnrolled}
+                    isCompleted={isCompleted}
+                    onEnroll={() => setEnrollCourse(course)}
+                    payBusy={payBusy}
+                  />
+                )
+              })}
+            </div>
+
+            {courses.length === 0 && (
+              <p className="text-center py-12 text-slate-gray">
+                No trainings are listed yet. If you just added courses in the database, confirm this site uses the same API environment and try a hard refresh.
+              </p>
+            )}
+            {courses.length > 0 && filteredCourses.length === 0 && (
+              <div className="py-12 text-center space-y-3">
+                <p className="text-slate-gray">No courses match your current search or filters.</p>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

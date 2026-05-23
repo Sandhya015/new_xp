@@ -47,4 +47,10 @@ Minimal ngrok+Vite combo: **`ngrok http 5173`**, use **`npm run dev:https`**, **
 
 ---
 
-Production deploy is simpler: set **`PUBLIC_APP_URL=https://YOUR_DOMAIN`** (HTTPS) — you normally do **not** need localhost or ngrok.
+## Production / live site (Amplify + Lambda)
+
+1. Set **`PUBLIC_APP_URL=https://YOUR_LIVE_ORIGIN`** (no path, no trailing slash) in **`backend/.env`**, then run **`serverless deploy`** so Lambda gets it (`useDotenv: true`). Example: `https://www.xpertintern.com`.
+2. Put the same origin in **`CORS_ORIGINS`** if it is missing.
+3. If **`PUBLIC_APP_URL`** was blank on deploy, the API fell back to the **first** CORS origin—which used to default to **`http://localhost`**, breaking Cashfree. The backend now prefers **HTTPS** and **non-localhost** CORS origins as a fallback—but you should **always set `PUBLIC_APP_URL` explicitly**.
+
+Use the exact origin visitors use (Amplify hostname or custom www vs apex). Optional: **`CASHFREE_RETURN_URL_ORIGIN`** to the same HTTPS value only if needed.

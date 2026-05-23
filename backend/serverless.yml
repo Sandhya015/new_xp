@@ -64,8 +64,8 @@ provider:
     ADMIN_PANEL_ALLOWED_EMAIL: ${env:ADMIN_PANEL_ALLOWED_EMAIL, 'admin@xpertintern.com'}
     # Strip /dev (stage) from path so Flask sees /api/... not /dev/api/...
     API_GATEWAY_BASE_PATH: ${self:provider.stage}
-    # Comma-separated origins; include your frontend URL for CORS
-    CORS_ORIGINS: ${env:CORS_ORIGINS, 'http://localhost:5173,http://127.0.0.1:5173,https://www.xpertintern.com,https://xpertintern.com'}
+    # Prefer https production origins first so Cashfree PUBLIC_APP_URL fallback is never http://localhost.
+    CORS_ORIGINS: ${env:CORS_ORIGINS, 'https://www.xpertintern.com,https://xpertintern.com,http://localhost:5173,http://127.0.0.1:5173'}
     # Razorpay — export before deploy or set in Lambda Console (never commit secrets)
     RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
     RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}

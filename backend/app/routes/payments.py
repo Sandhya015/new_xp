@@ -63,27 +63,49 @@ def _detect_payment_gateway() -> str | None:
 
 
 def _public_app_base_url() -> str:
-    explicit = os.environ.get("PUBLIC_APP_URL", "").strip().rstrip("/")
+    cfg = getattr(current_app, "config", {})
+    explicit = str(cfg.get("PUBLIC_APP_URL") or os.environ.get("PUBLIC_APP_URL") or "").strip().rstrip("/")
     if explicit:
         return explicit
-    cors = getattr(current_app, "config", {}).get("CORS_ORIGINS") or []
-    for o in cors:
-        s = str(o).strip().rstrip("/")
+    raw = cfg.get("CORS_ORIGINS") or []
+    if isinstance(raw, str):
+        origins = [o.strip() for o in raw.split(",") if o.strip()]
+    else:
+        origins = [str(o).strip() for o in raw if str(o).strip()]
+    candidates: list[str] = []
+    for o in origins:
+        s = o.rstrip("/")
         if s.startswith("http://") or s.startswith("https://"):
-            return s
-    return ""
+            candidates.append(s)
+    if not candidates:
+        return ""
+    # Prefer https over http and real deploy origins over localhost (serverless default CORS lists localhost first).
+    def sort_key(u: str) -> tuple[int, int, str]:
+        lo = u.lower()
+        https_rank = 0 if lo.startswith("https://") else 1
+        local_rank = (
+            1
+            if "localhost" in lo or "127.0.0.1" in lo or "::1" in lo or "[::1]" in lo
+            else 0
+        )
+        return (https_rank, local_rank, u)
+
+    candidates.sort(key=sort_key)
+    return candidates[0]
 
 
 def _cashfree_return_base_url(cfg) -> str:
     """Public origin exclusively for Cashfree return_url — prefer HTTPS override for local HTTP dev."""
-    ov = str(cfg.config.get("CASHFREE_RETURN_URL_ORIGIN") or "").strip().rstrip("/")
+    ov = str(cfg.config.get("CASHFREE_RETURN_URL_ORIGIN") or os.environ.get("CASHFREE_RETURN_URL_ORIGIN") or "").strip().rstrip(
+        "/",
+    )
     if ov:
         return ov
     return _public_app_base_url()
 
 
 def _cashfree_return_url_https_error(pub: str, cf_env_raw: str) -> str | None:
-    """Cashfree production rejects http:// localhost return URLs."""
+    """Cashfree production rejects http:// return URLs."""
     if not pub:
         return None
     cf_env = str(cf_env_raw or "production").strip().lower()
@@ -91,11 +113,11 @@ def _cashfree_return_url_https_error(pub: str, cf_env_raw: str) -> str | None:
         return None
     if pub.lower().startswith("http://"):
         return (
-            "Cashfree production requires an HTTPS order_meta.return_url. "
-            "Easiest locally: frontend `npm run dev:https`, open https://localhost:5173 — then set "
-            "PUBLIC_APP_URL and CASHFREE_RETURN_URL_ORIGIN to https://localhost:5173 in backend `.env`. "
-            "If Cashfree blocks localhost on your merchant account, tunnel the frontend via ngrok "
-            "(HTTPS) and put that URL in CASHFREE_RETURN_URL_ORIGIN, add it to CORS_ORIGINS."
+            "Cashfree production requires order_meta.return_url to use HTTPS (not http://). "
+            "On deployed API: set PUBLIC_APP_URL=https://YOUR_LIVE_SITE "
+            "(or CASHFREE_RETURN_URL_ORIGIN) in Lambda/environment, redeploy backend, retry. "
+            "If PUBLIC_APP_URL was omitted, backend may fall back to CORS — ensure an https:// production origin leads the list "
+            'or always set PUBLIC_APP_URL. Local dev: see docs/local-cashfree-testing.md and `npm run dev:https`.'
         )
     return None
 
