@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
+import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 type LoginForm = { email: string; password: string }
 type Tab = 'student' | 'company'
@@ -65,6 +66,11 @@ export function Login() {
 
   return (
     <div className="bg-gray-50 flex justify-center px-4 py-8 sm:py-10 min-w-0">
+      <AuthLoadingOverlay
+        show={submitting}
+        ariaLabel="Signing you in, please wait"
+        message="Loading"
+      />
       <div className="w-full max-w-md">
         <div className="rounded-2xl border border-gray-200/80 bg-white shadow-xl overflow-hidden">
           <div className="flex border-b border-gray-200">
@@ -98,6 +104,7 @@ export function Login() {
                 <input
                   id="login-email"
                   type="email"
+                  autoComplete="username"
                   {...register('email', { required: 'Email is required' })}
                   placeholder="your@email.com"
                   className="mt-1.5 block w-full min-w-0 rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 focus:outline-none"
@@ -110,6 +117,7 @@ export function Login() {
                   <input
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
                     {...register('password', { required: 'Password is required' })}
                     placeholder="Your password"
                     className="block w-full min-w-0 rounded-lg border border-gray-300 px-3.5 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 focus:outline-none"

@@ -4,7 +4,8 @@
  * - Any other host (xpertintern.com, *.vercel.app, Amplify, etc.) → production API unless VITE_API_URL overrides
  */
 const DEPLOYED_API_URL = 'https://kbp3dx8ic4.execute-api.ap-south-1.amazonaws.com/dev'
-const LOCAL_API_URL = 'http://localhost:5000'
+/** Matches default local Flask port in backend/run.py (change together if needed). */
+const LOCAL_API_URL = 'http://127.0.0.1:5001'
 
 function isLoopbackHost(hostname: string): boolean {
   const h = (hostname || '').toLowerCase()

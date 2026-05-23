@@ -14,4 +14,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     # Bind to localhost by default to avoid restricted socket/interface lookups in some environments.
     host = os.environ.get("HOST", "127.0.0.1")
-    app.run(host=host, port=int(os.environ.get("PORT", 5000)), debug=app.config.get("DEBUG", False))
+    app.run(host=host, port=int(os.environ.get("PORT", 5001)), debug=app.config.get("DEBUG", False))

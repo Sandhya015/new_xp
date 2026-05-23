@@ -47,7 +47,9 @@ export function Navbar() {
               alt="XpertIntern"
               className="h-9 sm:h-10 md:h-11 w-auto object-contain"
               decoding="async"
-              fetchPriority="high"
+              ref={(node) => {
+                node?.setAttribute('fetchpriority', 'high')
+              }}
             />
           </Link>
           <div className="hidden md:flex flex-1 justify-center items-center min-w-0">

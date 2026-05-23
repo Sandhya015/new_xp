@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { User, Building2, Info, CheckCircle, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
+import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 import type { User as AuthUser } from '@/store/authStore'
 
 import { REGISTRATION_UNIVERSITIES_LIST } from '@/constants/registrationUniversities'
@@ -589,8 +590,20 @@ export function Register() {
   void tick
   void companyTick
 
+  const registerBusy = authLoading || otpSubmitting || companyOtpSubmitting
+  const busyMessage = otpSubmitting || companyOtpSubmitting ? 'Verifying' : 'Loading'
+
   return (
     <div className="min-h-screen bg-gray-100/80 flex items-center justify-center px-4 py-10 sm:py-16 min-w-0 relative">
+      <AuthLoadingOverlay
+        show={registerBusy}
+        ariaLabel={
+          otpSubmitting || companyOtpSubmitting
+            ? 'Verifying your code'
+            : 'Working on your registration'
+        }
+        message={busyMessage}
+      />
       {showSuccessToast && (
         <div
           role="alert"

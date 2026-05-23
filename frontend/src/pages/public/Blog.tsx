@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Calendar, Clock, ArrowRight, BookOpen, Briefcase, GraduationCap, Sparkles, Mail, Loader2 } from 'lucide-react'
+import { Calendar, Clock, ArrowRight, BookOpen, Briefcase, GraduationCap, Sparkles, Mail } from 'lucide-react'
 import {
   BLOG_EMPTY_DESCRIPTION,
   BLOG_EMPTY_HEADING,
@@ -8,6 +8,7 @@ import {
   BLOG_MAINTENANCE_HEADING,
 } from '@/constants/blogPublic'
 import { strapiService, type StrapiArticle } from '@/services/strapiService'
+import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 function formatBlogDate(iso: string | null): string {
   if (!iso) return ''
@@ -62,7 +63,12 @@ export function Blog() {
   const gridPosts = filtered.slice(1)
 
   return (
-    <div className="min-w-0 bg-brand-light-bg">
+    <div className="min-w-0 bg-brand-light-bg relative">
+      <AuthLoadingOverlay
+        show={loading}
+        ariaLabel="Loading blog articles"
+        message="Loading"
+      />
       <section className="relative overflow-hidden bg-gradient-to-br from-brand-navy via-primary-900 to-primary-950 text-white">
         <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-brand-accent/40 via-transparent to-transparent" />
         <div className="relative mx-auto max-w-7xl px-4 py-14 sm:py-20 sm:px-6 lg:px-8">
@@ -120,11 +126,8 @@ export function Blog() {
             <p className="mt-3 text-sm text-slate-gray leading-relaxed">{BLOG_MAINTENANCE_DESCRIPTION}</p>
           </div>
         ) : loading ? (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-gray-100 bg-white/80 py-20 text-slate-gray shadow-sm">
-            <Loader2 className="h-10 w-10 animate-spin text-brand-accent" aria-hidden />
-            <p className="text-sm font-medium">Loading articles…</p>
-            <p className="max-w-sm px-4 text-center text-xs text-slate-gray">This can take a few seconds the first time our blog service wakes up.</p>
-          </div>
+          /* Full-page AuthLoadingOverlay above; reserve space avoid layout jump */
+          <div className="rounded-2xl border border-transparent py-24 min-h-[18rem]" aria-hidden />
         ) : !featured ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
             <BookOpen className="mx-auto h-12 w-12 text-brand-accent/80" aria-hidden />

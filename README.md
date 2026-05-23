@@ -60,7 +60,7 @@ python run.py
 
 Or: `FLASK_APP=run:app flask run`
 
-API at `http://127.0.0.1:5000`. Health: `GET /api/health`.
+API at `http://127.0.0.1:5001` by default (`PORT` in `backend/run.py`; override via env). Health: `GET /api/health`.
 
 ---
 

@@ -40,10 +40,10 @@ Or:
 
 ```bash
 export FLASK_APP=run.py
-flask run --host=0.0.0.0 --port=5000
+flask run --host=0.0.0.0 --port=5001
 ```
 
-API base URL: **http://localhost:5000**
+API base URL: **http://127.0.0.1:5001** (`python run.py` uses this port by default)
 
 ## 5. Auth endpoints (implemented)
 
@@ -57,7 +57,7 @@ API base URL: **http://localhost:5000**
 ## 6. Frontend integration
 
 - In the frontend project root, create `.env` (or `.env.local`) with:
-  - `VITE_API_URL=http://localhost:5000` (so the React app calls this API).
+  - `VITE_API_URL=http://127.0.0.1:5001` (so the React app calls this API; optional if dev host is localhost and port matches defaults).
 - Run frontend: `cd frontend && npm run dev`.
 - Use **Login** and **Register**; they call the Flask API and store the JWT and user.
 

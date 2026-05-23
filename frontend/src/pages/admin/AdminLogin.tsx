@@ -4,6 +4,7 @@ import { Lock, Mail, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 import { useAuthStore, type User } from '@/store/authStore'
 import { isSuperAdminPanelUser } from '@/constants/adminAccess'
+import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 export function AdminLogin() {
   const [email, setEmail] = useState('')
@@ -38,7 +39,12 @@ export function AdminLogin() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row min-w-0">
+    <div className="min-h-screen flex flex-col md:flex-row min-w-0 relative">
+      <AuthLoadingOverlay
+        show={loading}
+        ariaLabel="Signing you in as admin"
+        message="Loading"
+      />
       <div className="bg-brand-navy text-white p-6 sm:p-8 md:p-12 md:w-2/5 flex flex-col justify-center min-w-0">
         <div className="flex items-center gap-3 mb-6 sm:mb-8">
           <img src="/logo.png" alt="XpertIntern" className="h-14 sm:h-16 md:h-20 w-auto object-contain" />
