@@ -23,6 +23,16 @@ from app.services.course_media_storage import (
 )
 from app.certificate_pdf import build_course_certificate_pdf
 from app.certificate_quiz_pass import apply_quiz_pass_certificate
+from app.certificate_storage import delete_certificate_pdf, save_certificate_pdf
+from app.certificate_verification import (
+    allocate_certificate_number,
+    certificate_admin_detail_fields,
+    certificate_pdf_bytes,
+    find_certificate_by_no,
+    log_certificate_audit,
+    normalize_cert_no,
+    parse_certificate_admin_fields,
+)
 from app.services.curriculum import normalize_curriculum
 from app.services.enrollment_excel import (
     assignment_submissions_submitted_count,
@@ -1710,13 +1720,17 @@ def certificates_list():
             "certNo": c.get("certNo", ""),
             "studentName": c.get("studentName", ""),
             "studentEmail": em,
-            "programName": c.get("programName", ""),
+            "programName": c.get("programName", "") or c.get("domain", "") or c.get("course", ""),
             "courseId": str(c.get("courseId") or ""),
             "issueDate": _issue_date_str(c),
-            "completionDate": str(c.get("completionDate") or "")[:10],
-            "university": c.get("university", ""),
+            "completionDate": str(c.get("completionDate") or c.get("internshipEndDate") or "")[:10],
+            "university": c.get("university", "") or c.get("collegeName", ""),
+            "collegeName": c.get("collegeName", "") or c.get("university", ""),
+            "domain": c.get("domain", "") or c.get("programName", ""),
+            "mode": c.get("mode", ""),
             "status": c.get("status", "valid"),
             "source": c.get("source", "") or "",
+            "hasUploadedPdf": bool((c.get("certificatePdfKey") or "").strip()),
         })
     return jsonify({"items": items})
 
@@ -1756,24 +1770,230 @@ def _certificate_to_admin_detail(c: dict, users_coll, courses_coll) -> dict:
             if crs:
                 course_title = crs.get("title") or ""
     revoked_at = c.get("revokedAt")
-    return {
+    base = {
         "id": str(c["_id"]),
         "certNo": c.get("certNo", ""),
         "studentName": c.get("studentName", ""),
         "studentEmail": em,
         "studentMobile": mobile,
         "studentId": uid,
-        "programName": c.get("programName", ""),
+        "programName": c.get("programName", "") or c.get("domain", "") or c.get("course", ""),
         "courseId": str(c.get("courseId") or ""),
         "courseTitle": course_title,
-        "university": c.get("university", ""),
+        "university": c.get("university", "") or c.get("collegeName", ""),
         "issueDate": _issue_date_str(c),
-        "completionDate": str(c.get("completionDate") or "")[:10],
+        "completionDate": str(c.get("completionDate") or c.get("internshipEndDate") or "")[:10],
         "status": c.get("status", "valid"),
         "source": c.get("source", "") or "",
         "revokeReason": c.get("revokeReason") or "",
         "revokedAt": revoked_at.strftime("%Y-%m-%d %H:%M UTC") if hasattr(revoked_at, "strftime") else (str(revoked_at) if revoked_at else ""),
     }
+    base.update(certificate_admin_detail_fields(c))
+    return base
+
+
+@admin_bp.route("/certificates", methods=["POST"])
+@jwt_required()
+def certificate_admin_create():
+    err = _admin_required()
+    if err:
+        return err
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    data = request.get_json() or {}
+    fields = parse_certificate_admin_fields(data)
+    cert_no = fields.get("certNo") or ""
+    if not cert_no and data.get("autoGenerateCertNo"):
+        domain = fields.get("domain") or "INT"
+        cert_no = allocate_certificate_number(domain)
+        fields["certNo"] = cert_no
+    if not cert_no:
+        return jsonify({"error": "Certificate number is required (or enable autoGenerateCertNo)."}), 400
+    if not fields.get("studentName"):
+        return jsonify({"error": "Student name is required."}), 400
+    if find_certificate_by_no(cert_no):
+        return jsonify({"error": "Certificate number already exists."}), 409
+
+    now = datetime.utcnow()
+    doc = {
+        **{k: v for k, v in fields.items() if v or k == "certNo"},
+        "certNo": cert_no,
+        "status": "valid",
+        "source": "admin-manual",
+        "issueDate": now,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    if not doc.get("completionDate") and doc.get("internshipEndDate"):
+        doc["completionDate"] = doc["internshipEndDate"]
+
+    coll = get_certificates_collection()
+    res = coll.insert_one(doc)
+    cid = str(res.inserted_id)
+    claims = get_jwt()
+    log_certificate_audit(
+        certificate_id=cid,
+        cert_no=cert_no,
+        action="create",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+        changes=fields,
+    )
+    return jsonify({"id": cid, "certNo": cert_no, "message": "Certificate created."}), 201
+
+
+@admin_bp.route("/certificates/<cert_id>", methods=["PUT", "PATCH"])
+@jwt_required()
+def certificate_admin_update(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    coll = get_certificates_collection()
+    existing = coll.find_one({"_id": ObjectId(cert_id)})
+    if not existing:
+        return jsonify({"error": "Certificate not found"}), 404
+
+    data = request.get_json() or {}
+    fields = parse_certificate_admin_fields(data)
+    new_cert_no = fields.get("certNo") or existing.get("certNo") or ""
+    if new_cert_no and new_cert_no != existing.get("certNo"):
+        if find_certificate_by_no(new_cert_no):
+            other = find_certificate_by_no(new_cert_no)
+            if other and str(other["_id"]) != cert_id:
+                return jsonify({"error": "Certificate number already in use."}), 409
+
+    patch = {k: v for k, v in fields.items() if v or k in data}
+    if "certNo" in data or "certificate_no" in data:
+        patch["certNo"] = new_cert_no
+    patch["updatedAt"] = datetime.utcnow()
+    if patch.get("internshipEndDate") and not patch.get("completionDate"):
+        patch["completionDate"] = patch["internshipEndDate"]
+
+    coll.update_one({"_id": ObjectId(cert_id)}, {"$set": patch})
+    claims = get_jwt()
+    log_certificate_audit(
+        certificate_id=cert_id,
+        cert_no=new_cert_no,
+        action="update",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+        changes=patch,
+    )
+    updated = coll.find_one({"_id": ObjectId(cert_id)})
+    users_coll = get_users_collection()
+    courses_coll = get_courses_collection()
+    return jsonify(_certificate_to_admin_detail(updated, users_coll, courses_coll))
+
+
+@admin_bp.route("/certificates/<cert_id>", methods=["DELETE"])
+@jwt_required()
+def certificate_admin_delete(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    coll = get_certificates_collection()
+    c = coll.find_one({"_id": ObjectId(cert_id)})
+    if not c:
+        return jsonify({"error": "Certificate not found"}), 404
+    pdf_key = (c.get("certificatePdfKey") or "").strip()
+    if pdf_key:
+        delete_certificate_pdf(pdf_key)
+    coll.delete_one({"_id": ObjectId(cert_id)})
+    claims = get_jwt()
+    log_certificate_audit(
+        certificate_id=cert_id,
+        cert_no=str(c.get("certNo") or ""),
+        action="delete",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+        changes={"deletedCertNo": c.get("certNo")},
+    )
+    return jsonify({"ok": True, "message": "Certificate deleted."})
+
+
+@admin_bp.route("/certificates/<cert_id>/upload-pdf", methods=["POST"])
+@jwt_required()
+def certificate_admin_upload_pdf(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    coll = get_certificates_collection()
+    c = coll.find_one({"_id": ObjectId(cert_id)})
+    if not c:
+        return jsonify({"error": "Certificate not found"}), 404
+
+    f = request.files.get("file") or request.files.get("pdf")
+    if not f:
+        return jsonify({"error": "PDF file is required (field: file)."}), 400
+    raw = f.read()
+    try:
+        key = save_certificate_pdf(raw, cert_no=str(c.get("certNo") or ""))
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    old_key = (c.get("certificatePdfKey") or "").strip()
+    coll.update_one(
+        {"_id": ObjectId(cert_id)},
+        {"$set": {
+            "certificatePdfKey": key,
+            "certificatePdfUploadedAt": datetime.utcnow(),
+            "updatedAt": datetime.utcnow(),
+        }},
+    )
+    if old_key and old_key != key:
+        delete_certificate_pdf(old_key)
+
+    claims = get_jwt()
+    log_certificate_audit(
+        certificate_id=cert_id,
+        cert_no=str(c.get("certNo") or ""),
+        action="upload_pdf",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+        changes={"certificatePdfKey": key},
+    )
+    return jsonify({"ok": True, "message": "Certificate PDF uploaded.", "hasUploadedPdf": True})
+
+
+@admin_bp.route("/certificates/<cert_id>/audit", methods=["GET"])
+@jwt_required()
+def certificate_admin_audit_log(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(cert_id):
+        return jsonify({"error": "Invalid certificate id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"items": []}), 503
+    rows = list(
+        db["certificate_audit_logs"]
+        .find({"certificateId": cert_id})
+        .sort("createdAt", -1)
+        .limit(100)
+    )
+    items = []
+    for r in rows:
+        ts = r.get("createdAt")
+        items.append({
+            "action": r.get("action", ""),
+            "adminEmail": r.get("adminEmail", ""),
+            "changes": r.get("changes") or {},
+            "createdAt": ts.strftime("%Y-%m-%d %H:%M UTC") if hasattr(ts, "strftime") else str(ts or ""),
+        })
+    return jsonify({"items": items})
 
 
 @admin_bp.route("/certificates/<cert_id>/pdf", methods=["GET"])
@@ -1788,12 +2008,9 @@ def certificate_admin_pdf(cert_id):
     c = cert_coll.find_one({"_id": ObjectId(cert_id)})
     if not c:
         return jsonify({"error": "Certificate not found"}), 404
-    student_name = c.get("studentName") or "Student"
-    program = c.get("programName") or "Program"
     cert_no = (c.get("certNo") or "").strip() or "CERT"
-    date_str = _issue_date_str(c) or datetime.utcnow().strftime("%Y-%m-%d")
     try:
-        pdf_bytes = build_course_certificate_pdf(student_name, program, cert_no, date_str)
+        pdf_bytes = certificate_pdf_bytes(c)
     except Exception as ex:
         return jsonify({"error": f"Could not build PDF: {ex}"}), 500
     safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
@@ -1832,6 +2049,16 @@ def certificate_admin_revoke(cert_id):
         if not c:
             return jsonify({"error": "Certificate not found"}), 404
         return jsonify({"error": "Certificate is already revoked."}), 400
+    claims = get_jwt()
+    c = cert_coll.find_one({"_id": ObjectId(cert_id)})
+    log_certificate_audit(
+        certificate_id=cert_id,
+        cert_no=str(c.get("certNo") if c else ""),
+        action="revoke",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+        changes={"reason": reason},
+    )
     return jsonify({"ok": True, "message": "Certificate revoked."})
 
 

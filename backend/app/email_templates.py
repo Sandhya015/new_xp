@@ -168,7 +168,7 @@ def course_certificate_email_bodies(
     raw_cert = (cert_no or "").strip()
     safe_cert = html.escape(raw_cert, quote=False)
     base = _public_app_url()
-    verify_url = f"{base}/verify?cert={quote(raw_cert, safe='')}" if raw_cert else base
+    verify_url = f"{base}/verify/{quote(raw_cert, safe='')}" if raw_cert else base
     verify_href = html.escape(verify_url, quote=True)
     subject_plain = (course_title or "your course").replace("\n", " ").strip() or "your course"
     subject = (
@@ -211,7 +211,7 @@ def course_certificate_email_bodies(
         if resent
         else ""
     )
-    plain_verify = f"{base}/verify?cert={quote(raw_cert, safe='')}" if raw_cert else base
+    plain_verify = f"{base}/verify/{quote(raw_cert, safe='')}" if raw_cert else base
     plain = (
         f"Hi {student_name or 'there'},\n\n"
         f"{plain_intro}"

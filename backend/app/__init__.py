@@ -22,13 +22,18 @@ def create_app(config_class=None):
     uri = app.config.get("MONGODB_URI", "").strip()
     if uri:
         try:
-            init_db(uri)
+            from app.db import init_db_with_retry
+            init_db_with_retry(uri, attempts=3)
             from app.seed import seed_admin_if_missing
             seed_admin_if_missing()
-        except Exception:
+        except Exception as exc:
             # Don't fail app startup if DB is unreachable (e.g. Lambda cold start, network).
             # CORS preflight and health checks can still run; DB routes will return 503.
-            pass
+            import logging
+            logging.getLogger(__name__).warning(
+                "MongoDB init failed — auth and data routes will return 503 until fixed: %s",
+                exc,
+            )
 
     JWTManager(app)
 
@@ -133,6 +138,8 @@ def create_app(config_class=None):
     app.register_blueprint(enrollments_bp, url_prefix="/api/enrollments")
     app.register_blueprint(payments_bp, url_prefix="/api/payments")
     app.register_blueprint(certificates_bp, url_prefix="/api/certificates")
+    from app.routes.certificates import verify_public_bp
+    app.register_blueprint(verify_public_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
     app.register_blueprint(visitor_bp, url_prefix="/api")

@@ -37,8 +37,25 @@ def get_client(uri: str) -> MongoClient:
     return _client
 
 
+def _mongo_uri_from_env() -> str:
+    return (os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI") or "").strip()
+
+
 def get_db() -> Database | None:
-    """Return database. Requires init_db to have been called at app startup."""
+    """
+    Return database handle. Tries lazy init when startup failed (e.g. DNS not ready yet)
+    so a stale 503 state can recover without restarting the dev server.
+    """
+    global _db
+    if _db is not None:
+        return _db
+    uri = _mongo_uri_from_env()
+    if not uri:
+        return None
+    try:
+        init_db_with_retry(uri, attempts=3)
+    except Exception as exc:
+        logger.warning("MongoDB lazy init failed: %s", exc)
     return _db
 
 
@@ -219,6 +236,11 @@ def ensure_indexes(db: Database) -> None:
         [("studentId", 1), ("issueDate", -1)],
         name="idx_certificates_student_issue",
     )
+    _ix(
+        db["certificate_audit_logs"],
+        [("certificateId", 1), ("createdAt", -1)],
+        name="idx_cert_audit_cert_created",
+    )
 
     _ix(
         db["registration_verifications"],
@@ -257,8 +279,40 @@ def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:
     """Initialize connection. Call from create_app after config is loaded. Returns db or None if URI empty."""
     if not uri or not uri.strip():
         return None
-    global _db
-    client = get_client(uri)
-    _db = client[database_name]
-    ensure_indexes(_db)
-    return _db
+    global _db, _client
+    try:
+        client = get_client(uri)
+        _db = client[database_name]
+        ensure_indexes(_db)
+        return _db
+    except Exception:
+        _db = None
+        _client = None
+        raise
+
+
+def init_db_with_retry(uri: str, database_name: str = "xpertintern", *, attempts: int = 3) -> Database | None:
+    """Retry Mongo init — local DNS (systemd-resolved) can time out once on cold start."""
+    import time
+
+    if not uri or not uri.strip():
+        return None
+    last_exc: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return init_db(uri, database_name)
+        except Exception as exc:
+            last_exc = exc
+            _db_reset()
+            if attempt + 1 < attempts:
+                logger.warning("MongoDB init attempt %s/%s failed, retrying: %s", attempt + 1, attempts, exc)
+                time.sleep(2)
+    if last_exc is not None:
+        raise last_exc
+    return None
+
+
+def _db_reset() -> None:
+    global _db, _client
+    _db = None
+    _client = None

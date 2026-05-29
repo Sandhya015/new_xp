@@ -52,6 +52,26 @@ function blobFromMaybeBase64Body(
   return new Blob([buffer], { type: mime })
 }
 
+export type AdminCertificateFormPayload = {
+  certNo: string
+  studentName: string
+  collegeName: string
+  course: string
+  branch: string
+  semester: string
+  registrationNo: string
+  domain: string
+  mode: string
+  internshipStartDate: string
+  internshipEndDate: string
+  marks: string
+  attendance: string
+  session: string
+  duration: string
+  performanceRating: string
+  autoGenerateCertNo?: boolean
+}
+
 export type DashboardData = {
   kpis: {
     totalStudents: number
@@ -502,8 +522,12 @@ export const adminService = {
         issueDate: string
         completionDate: string
         university: string
+        collegeName?: string
+        domain?: string
+        mode?: string
         status: string
         source: string
+        hasUploadedPdf?: boolean
       }>
     }>('/api/admin/certificates', { params })
     return data
@@ -521,13 +545,60 @@ export const adminService = {
       courseId: string
       courseTitle: string
       university: string
+      collegeName?: string
+      course?: string
+      branch?: string
+      semester?: string
+      registrationNo?: string
+      domain?: string
+      mode?: string
+      internshipStartDate?: string
+      internshipEndDate?: string
+      marks?: string
+      attendance?: string
+      session?: string
+      duration?: string
+      performanceRating?: string
       issueDate: string
       completionDate: string
       status: string
       source: string
       revokeReason: string
       revokedAt: string
+      hasUploadedPdf?: boolean
+      verifyUrl?: string
     }>(`/api/admin/certificates/${id}`)
+    return data
+  },
+
+  async createCertificate(payload: AdminCertificateFormPayload) {
+    const { data } = await api.post<{ id: string; certNo: string; message?: string }>('/api/admin/certificates', payload)
+    return data
+  },
+
+  async updateCertificate(id: string, payload: AdminCertificateFormPayload) {
+    const { data } = await api.put(`/api/admin/certificates/${id}`, payload)
+    return data
+  },
+
+  async deleteCertificate(id: string) {
+    const { data } = await api.delete<{ ok: boolean; message?: string }>(`/api/admin/certificates/${id}`)
+    return data
+  },
+
+  async uploadCertificatePdf(id: string, file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/certificates/${id}/upload-pdf`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+
+  async getCertificateAuditLog(id: string) {
+    const { data } = await api.get<{ items: Array<{ action: string; adminEmail: string; createdAt: string }> }>(
+      `/api/admin/certificates/${id}/audit`,
+    )
     return data
   },
 

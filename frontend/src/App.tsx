@@ -129,6 +129,7 @@ function App() {
             <Route path="/training/:id" element={<CourseDetail />} />
             <Route path="/internship" element={<Internship />} />
             <Route path="/verify" element={<CertVerify />} />
+            <Route path="/verify/:certNo" element={<CertVerify />} />
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogArticle />} />
             <Route path="/login" element={<Login />} />

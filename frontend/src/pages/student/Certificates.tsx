@@ -50,7 +50,7 @@ export function Certificates() {
                   <Download className="h-3.5 w-3.5" /> Download
                 </button>
                 <Link
-                  to={`/verify?cert=${encodeURIComponent(c.certNo)}`}
+                  to={`/verify/${encodeURIComponent(c.certNo)}`}
                   className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                 >
                   <ShieldCheck className="h-3.5 w-3.5" /> Verify

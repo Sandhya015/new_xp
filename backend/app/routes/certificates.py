@@ -1,12 +1,20 @@
 """
-Certificates: verify (public), list my (student). Admin upload/bulk/send-email stubbed for later.
+Certificates: public verification, student list/generate, admin stubs.
 """
+from io import BytesIO
+
 from bson import ObjectId
 from flask import Blueprint, Response, current_app, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.cert_constants import CERTIFICATE_PDF_DOWNLOAD_LIMIT
 from app.certificate_quiz_pass import apply_quiz_pass_certificate, course_certificate_is_email_only
+from app.certificate_verification import (
+    certificate_pdf_bytes,
+    certificate_to_verify_response,
+    find_certificate_by_no,
+    normalize_cert_no,
+)
 from app.course_features import course_has_completion_quiz
 from app.db import (
     get_db,
@@ -18,28 +26,63 @@ from app.db import (
 from app.enrollment_lookup import user_course_enrollment_filter
 
 certificates_bp = Blueprint("certificates", __name__)
+verify_public_bp = Blueprint("verify_public", __name__)
+
+
+def _verify_handler(cert_no: str):
+    db = get_db()
+    if db is None:
+        return jsonify({"status": False, "valid": False, "message": "Service unavailable"}), 503
+    cert_no = normalize_cert_no(cert_no)
+    if not cert_no:
+        return jsonify({"status": False, "valid": False, "message": "Certificate number is required"}), 400
+    c = find_certificate_by_no(cert_no)
+    body, code = certificate_to_verify_response(c, cert_no_input=cert_no)
+    return jsonify(body), code
 
 
 @certificates_bp.route("/verify/<cert_no>", methods=["GET"])
-def verify(cert_no):
+def verify_get(cert_no):
+    return _verify_handler(cert_no)
+
+
+@verify_public_bp.route("/verify-certificate", methods=["POST"])
+def verify_post():
+    data = request.get_json(silent=True) or {}
+    cert_no = (
+        data.get("certificate_no")
+        or data.get("certificateNo")
+        or data.get("certNo")
+        or data.get("cert_no")
+        or ""
+    )
+    return _verify_handler(str(cert_no))
+
+
+@certificates_bp.route("/verify/<cert_no>/pdf", methods=["GET"])
+def verify_download_pdf(cert_no):
     db = get_db()
     if db is None:
-        return jsonify({"valid": False, "message": "Service unavailable"}), 503
-    cert_no = (cert_no or "").strip().upper()
+        return jsonify({"error": "Service unavailable"}), 503
+    cert_no = normalize_cert_no(cert_no)
     if not cert_no:
-        return jsonify({"valid": False, "message": "Certificate ID is required"}), 400
-    coll = get_certificates_collection()
-    c = coll.find_one({"certNo": cert_no})
+        return jsonify({"error": "Certificate number is required"}), 400
+    c = find_certificate_by_no(cert_no)
     if not c:
-        return jsonify({"valid": False, "message": "Certificate not found or invalid."})
-    return jsonify({
-        "valid": True,
-        "certificateId": c.get("certNo", cert_no),
-        "studentName": c.get("studentName", ""),
-        "programName": c.get("programName", ""),
-        "university": c.get("university", ""),
-        "completionDate": c.get("completionDate", ""),
-    })
+        return jsonify({"error": "Certificate not found"}), 404
+    if str(c.get("status") or "valid").lower() == "revoked":
+        return jsonify({"error": "Certificate has been revoked"}), 403
+    try:
+        pdf_bytes = certificate_pdf_bytes(c)
+    except Exception as ex:
+        current_app.logger.exception("certificate pdf build failed")
+        return jsonify({"error": f"Could not load certificate PDF: {ex}"}), 500
+    safe = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_") or "certificate"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="XpertIntern-{safe}.pdf"'},
+    )
 
 
 @certificates_bp.route("/generate-from-quiz", methods=["POST"])
@@ -130,24 +173,9 @@ def list_my_certificates():
         items.append({
             "id": str(c["_id"]),
             "certNo": c.get("certNo", ""),
-            "programName": c.get("programName", ""),
-            "university": c.get("university", ""),
+            "programName": c.get("programName", "") or c.get("domain", "") or c.get("course", ""),
+            "university": c.get("university", "") or c.get("collegeName", ""),
             "issueDate": issue_date or "",
             "status": c.get("status", "valid"),
         })
     return jsonify({"items": items})
-
-
-@certificates_bp.route("", methods=["POST"])
-def upload():
-    return jsonify({"message": "Admin: upload certificate — not implemented"}), 501
-
-
-@certificates_bp.route("/bulk", methods=["POST"])
-def bulk_upload():
-    return jsonify({"message": "Admin: bulk Excel upload — not implemented"}), 501
-
-
-@certificates_bp.route("/send-email", methods=["POST"])
-def send_email():
-    return jsonify({"message": "Admin: send cert emails — not implemented"}), 501

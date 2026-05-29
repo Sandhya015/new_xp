@@ -84,7 +84,26 @@ def apply_quiz_pass_certificate(
             issue_dt = issued
 
     date_str = issue_dt.strftime("%Y-%m-%d") if hasattr(issue_dt, "strftime") else datetime.utcnow().strftime("%Y-%m-%d")
-    pdf_bytes = build_course_certificate_pdf(student_name, course_title, cert_no, date_str)
+    with app.app_context():
+        from app.certificate_verification import verify_url_for_cert
+
+        verify_url = verify_url_for_cert(cert_no)
+    pdf_bytes = build_course_certificate_pdf(
+        student_name,
+        course_title,
+        cert_no,
+        date_str,
+        verify_url=verify_url,
+        college_name=(user.get("university") or user.get("collegeName") or "").strip(),
+        registration_no=(user.get("registrationNo") or user.get("collegeRegNo") or "").strip(),
+        course=course_title,
+        branch=(user.get("branch") or user.get("stream") or "").strip(),
+        domain=course_title,
+        mode="Online",
+        end_date=date_str,
+        marks="",
+        attendance="",
+    )
 
     if to_email:
         schedule_certificate_email(

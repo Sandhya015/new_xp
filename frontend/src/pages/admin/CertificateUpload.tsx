@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Award, Ban, Download, Eye, FileDown, Loader2, RefreshCw, Send, Upload, X } from 'lucide-react'
 import { adminService } from '@/services/adminService'
+import { AdminCertificateManage } from '@/components/admin/AdminCertificateManage'
 
 type CoursePick = { id: string; title: string }
 
@@ -32,7 +33,7 @@ type RegisterCertRow = {
  * Admin — Certificate Generation. Part 5A §6. By Batch + By Excel upload, certificate register.
  */
 export function CertificateUpload() {
-  const [activeTab, setActiveTab] = useState<'batch' | 'excel' | 'register'>('batch')
+  const [activeTab, setActiveTab] = useState<'batch' | 'excel' | 'register' | 'manage'>('manage')
   const [trainings, setTrainings] = useState<Array<{ id: string; title: string }>>([])
   const [certificates, setCertificates] = useState<RegisterCertRow[]>([])
   const [registerLoading, setRegisterLoading] = useState(false)
@@ -110,7 +111,7 @@ export function CertificateUpload() {
 
   const openVerifyPublic = (certNo: string) => {
     const q = encodeURIComponent(certNo.trim())
-    window.open(`${window.location.origin}/verify?cert=${q}`, '_blank', 'noopener,noreferrer')
+    window.open(`${window.location.origin}/verify/${q}`, '_blank', 'noopener,noreferrer')
   }
 
   const downloadCertPdf = async (id: string, certNo: string) => {
@@ -293,7 +294,18 @@ export function CertificateUpload() {
         >
           Certificate Register
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('manage')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition ${
+            activeTab === 'manage' ? 'border-brand-accent text-brand-accent' : 'border-transparent text-slate-gray hover:text-brand-navy'
+          }`}
+        >
+          Manage Internship Certs
+        </button>
       </div>
+
+      {activeTab === 'manage' && <AdminCertificateManage />}
 
       {activeTab === 'batch' && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
