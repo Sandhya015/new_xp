@@ -15,7 +15,7 @@ from urllib.parse import quote
 from typing import Any
 
 import razorpay
-from bson import ObjectId
+from bson import Binary, ObjectId
 from bson.errors import InvalidId
 from flask import Blueprint, Response, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -406,13 +406,18 @@ def _build_and_store_invoice_if_needed(
         course_title=str(course.get("title") or ""),
         breakdown=bd,
         intra_state=intra,
+        billing=bill,
+        buyer_gstin=(bill.get("gstin") or "").strip() or None,
+        payment_gateway_label=_gateway_label(order),
     )
     safe_fn = inv_no.replace("/", "-")
     coll.update_one(
         {"_id": order["_id"]},
         {"$set": {
             "invoiceHtml": html_doc,
+            "invoicePdf": Binary(pdf_bytes),
             "invoicePdfGeneratedAt": datetime.utcnow(),
+            "invoiceVersion": int(order.get("invoiceVersion") or 1),
             "lastPaymentMethod": (payment_method or "").strip(),
         }},
     )
@@ -429,8 +434,6 @@ def _build_and_store_invoice_if_needed(
         invoice_number=inv_no,
         pdf_bytes=pdf_bytes,
         pdf_filename=f"Tax-Invoice-{safe_fn}.pdf",
-        html_invoice_bytes=html_doc.encode("utf-8"),
-        html_filename=f"Tax-Invoice-{safe_fn}.html",
     )
 
 
@@ -1136,6 +1139,9 @@ def get_invoice(order_id):
         course_title=str(course.get("title") or ""),
         breakdown=bd,
         intra_state=intra,
+        billing=bill,
+        buyer_gstin=(bill.get("gstin") or "").strip() or None,
+        payment_gateway_label=_gateway_label(order),
     )
     fn = f"Tax-Invoice-{inv_no.replace('/', '-')}.pdf"
     return Response(

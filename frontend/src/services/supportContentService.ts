@@ -1,7 +1,16 @@
 import axios from 'axios'
 import { getApiBase } from '@/config/api'
 
-export type SupportFaqItem = { id: string; question: string; answer: string; sortOrder: number }
+export type SupportFaqItem = {
+  id: string
+  question: string
+  answer: string
+  sortOrder: number
+  displayOrder?: number
+  category?: string
+  visibility?: string
+  active?: boolean
+}
 
 export type SupportContactPayload = {
   email: string
@@ -19,11 +28,13 @@ export type SupportContactPayload = {
   }
 }
 
-export async function fetchSupportContent(): Promise<{ faqs: SupportFaqItem[]; contact: SupportContactPayload }> {
+export async function fetchSupportContent(
+  audience: 'public' | 'students' = 'students',
+): Promise<{ faqs: SupportFaqItem[]; contact: SupportContactPayload }> {
   const base = getApiBase().replace(/\/$/, '')
   const { data } = await axios.get<{ faqs: SupportFaqItem[]; contact: SupportContactPayload }>(
     `${base}/api/settings/support-content`,
-    { withCredentials: false },
+    { params: { audience }, withCredentials: false },
   )
   return data
 }

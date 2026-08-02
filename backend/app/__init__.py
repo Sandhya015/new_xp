@@ -124,6 +124,7 @@ def create_app(config_class=None):
     from app.routes.payments import payments_bp
     from app.routes.certificates import certificates_bp
     from app.routes.admin import admin_bp
+    from app.routes.admin_students import admin_students_bp
     from app.routes.contact import contact_bp
     from app.routes.visitor import visitor_bp
     from app.routes.internship import internship_bp
@@ -141,6 +142,7 @@ def create_app(config_class=None):
     from app.routes.certificates import verify_public_bp
     app.register_blueprint(verify_public_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
+    app.register_blueprint(admin_students_bp, url_prefix="/api/admin")
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
     app.register_blueprint(visitor_bp, url_prefix="/api")
     app.register_blueprint(internship_bp, url_prefix="/api/internship")

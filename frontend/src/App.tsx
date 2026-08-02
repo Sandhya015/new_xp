@@ -57,6 +57,7 @@ import { AdminTickets } from './pages/admin/AdminTickets'
 import { AdminSupportFAQ } from './pages/admin/AdminSupportFAQ'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
+import { PublicFaq } from './pages/public/PublicFaq'
 import { Blog } from './pages/public/Blog'
 import { BlogArticle } from './pages/public/BlogArticle'
 import { PaymentsCashfreeComplete } from './pages/public/PaymentsCashfreeComplete'
@@ -143,7 +144,7 @@ function App() {
             <Route path="/certificate-policy" element={<LegalPlaceholder title="Certificate Authenticity Policy" />} />
             <Route path="/disclaimer" element={<LegalPlaceholder title="Disclaimer" />} />
             <Route path="/cookies" element={<LegalPlaceholder title="Cookie Policy" />} />
-            <Route path="/faq" element={<LegalPlaceholder title="Help & FAQ" />} />
+            <Route path="/faq" element={<PublicFaq />} />
             <Route path="/report-issue" element={<LegalPlaceholder title="Report an Issue" />} />
             <Route path="/partners/colleges" element={<LegalPlaceholder title="Our Partner Colleges/Institutes" />} />
             <Route path="/partners/companies" element={<LegalPlaceholder title="Our Partner Companies" />} />

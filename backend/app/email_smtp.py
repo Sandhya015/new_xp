@@ -33,6 +33,26 @@ def _from_header(config: Mapping[str, Any]) -> str:
     return f"{name} <{addr}>"
 
 
+def _normalize_bcc(bcc: Optional[list[str] | str]) -> list[str]:
+    if not bcc:
+        return []
+    if isinstance(bcc, str):
+        parts = [p.strip() for p in bcc.split(",")]
+    else:
+        parts = [str(p).strip() for p in bcc]
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        if not p:
+            continue
+        key = p.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
 def send_email(
     config: Mapping[str, Any],
     to_addr: str,
@@ -40,6 +60,7 @@ def send_email(
     html_body: str,
     text_body: Optional[str] = None,
     attachments: Optional[list[tuple[str, bytes, str]]] = None,
+    bcc: Optional[list[str] | str] = None,
 ) -> bool:
     """
     Send one email. attachments: list of (filename, bytes, mime_type).
@@ -48,11 +69,14 @@ def send_email(
     to_addr = (to_addr or "").strip()
     if not to_addr:
         return False
+    bcc_list = _normalize_bcc(bcc)
 
     if (config.get("EMAIL_TRANSPORT") or "smtp").strip().lower() == "ses":
         from app.email_ses import send_email_via_ses
 
-        return send_email_via_ses(config, to_addr, subject, html_body, text_body, attachments)
+        return send_email_via_ses(
+            config, to_addr, subject, html_body, text_body, attachments, bcc=bcc_list
+        )
 
     if not smtp_configured(config):
         logger.info("SMTP not configured; skipping email to %s", to_addr)
@@ -73,6 +97,8 @@ def send_email(
     msg["Subject"] = subject
     msg["From"] = from_header
     msg["To"] = to_addr
+    if bcc_list:
+        msg["Bcc"] = ", ".join(bcc_list)
     reply_to = (config.get("MAIL_REPLY_TO") or "").strip()
     if reply_to:
         msg["Reply-To"] = reply_to
@@ -88,6 +114,7 @@ def send_email(
         part.add_header("Content-Disposition", "attachment", filename=fn)
         msg.attach(part)
 
+    recipients = [to_addr] + [b for b in bcc_list if b.lower() != to_addr.lower()]
     try:
         context = ssl.create_default_context()
         envelope_from = (config.get("MAIL_FROM") or user).strip()
@@ -96,13 +123,13 @@ def send_email(
         if use_ssl:
             with smtplib.SMTP_SSL(host, port, timeout=timeout, context=context) as server:
                 server.login(user, password)
-                server.sendmail(envelope_from, [to_addr], msg.as_string())
+                server.sendmail(envelope_from, recipients, msg.as_string())
         else:
             with smtplib.SMTP(host, port, timeout=timeout) as server:
                 server.starttls(context=context)
                 server.login(user, password)
-                server.sendmail(envelope_from, [to_addr], msg.as_string())
-        logger.info("SMTP: sent mail to %s (subject will appear in inbox)", to_addr)
+                server.sendmail(envelope_from, recipients, msg.as_string())
+        logger.info("SMTP: sent mail to %s bcc=%s", to_addr, len(bcc_list))
         return True
     except smtplib.SMTPAuthenticationError as e:
         logger.error("SMTP auth failed for user %s: %s (check password; if it contains # use quotes in .env)", user, e)
@@ -217,15 +244,18 @@ def send_payment_success_email(
     html_invoice_bytes: bytes | None = None,
     html_filename: str | None = None,
 ) -> bool:
-    """Sent once when Razorpay payment is verified (includes enrollment line if we just created enrollment)."""
-    name = student_name or "there"
+    """
+    Sent when payment is verified. Attaches PDF invoice only (HTML attachment deprecated).
+    BCC accounts@xpertintern.com for finance copies.
+    """
+    # html_invoice_* kept for call-site compat; never attached.
+    _ = (html_invoice_bytes, html_filename)
+    name = html_module.escape(student_name or "there")
     safe_title = course_title or "your course"
+    title_esc = html_module.escape(safe_title)
     inv_raw = (invoice_number or "").strip()
     inv_safe = html_module.escape(inv_raw) if inv_raw else ""
-    if inv_raw:
-        subject = f"Welcome to XpertIntern — Your tax invoice & course access (Invoice #{inv_raw})"
-    else:
-        subject = f"Payment received — {safe_title}"
+    subject = f"Payment received — Welcome to {safe_title} | XpertIntern"
     enroll_block = (
         "<p>Your enrollment is <strong>active</strong>. Open <strong>My Enrolled Courses</strong> in your dashboard for materials, quizzes, and your certificate path.</p>"
         if new_enrollment
@@ -237,8 +267,8 @@ def send_payment_success_email(
     html = f"""
     <html><body style="font-family:Segoe UI,Arial,sans-serif;line-height:1.6;color:#1a2b4d;">
     <p>Hi {name},</p>
-    <p>We have <strong>successfully received</strong> your payment for <strong>{safe_title}</strong>.</p>
-    <p>Amount: <strong>{amount_display}</strong><br/>Payment reference: <strong>{payment_ref}</strong></p>
+    <p>We have <strong>successfully received</strong> your payment for <strong>{title_esc}</strong>.</p>
+    <p>Amount: <strong>{html_module.escape(amount_display)}</strong><br/>Payment reference: <strong>{html_module.escape(payment_ref or "—")}</strong></p>
     {inv_line}
     {enroll_block}
     <p>Thank you for choosing XpertIntern.</p>
@@ -248,9 +278,14 @@ def send_payment_success_email(
     attachments: list[tuple[str, bytes, str]] = []
     if pdf_bytes and pdf_filename:
         attachments.append((pdf_filename, pdf_bytes, "application/pdf"))
-    if html_invoice_bytes and html_filename:
-        attachments.append((html_filename, html_invoice_bytes, "text/html"))
-    return send_email(config, to_email, subject, html, attachments=attachments or None)
+    return send_email(
+        config,
+        to_email,
+        subject,
+        html,
+        attachments=attachments or None,
+        bcc=["accounts@xpertintern.com"],
+    )
 
 
 def send_support_ticket_staff_reply(

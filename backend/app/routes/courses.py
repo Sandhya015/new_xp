@@ -42,17 +42,18 @@ courses_bp = Blueprint("courses", __name__)
 
 # Treat missing `active` as published (legacy rows); only explicit false hides from catalog.
 _PUBLIC_ACTIVE_OR_LEGACY = {"$or": [{"active": True}, {"active": {"$exists": False}}]}
+_NOT_DELETED = {"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]}
 
 
 def _public_catalog_match(category: str, search: str) -> dict:
-    """Active trainings visible on the public catalog (excludes unlisted)."""
+    """Active trainings visible on the public catalog (excludes unlisted and soft-deleted)."""
     visibility_clause = {
         "$or": [
             {"listingVisibility": {"$exists": False}},
             {"listingVisibility": "public"},
         ]
     }
-    clauses = [_PUBLIC_ACTIVE_OR_LEGACY, visibility_clause]
+    clauses = [_PUBLIC_ACTIVE_OR_LEGACY, _NOT_DELETED, visibility_clause]
     if category:
         clauses.append({"category": category})
     if search:
@@ -365,7 +366,7 @@ def get_course(course_id):
     if not ObjectId.is_valid(course_id):
         return jsonify({"error": "Invalid course id"}), 400
     coll = get_courses_collection()
-    c = coll.find_one({"_id": ObjectId(course_id), **_PUBLIC_ACTIVE_OR_LEGACY})
+    c = coll.find_one({"$and": [{"_id": ObjectId(course_id)}, _PUBLIC_ACTIVE_OR_LEGACY, _NOT_DELETED]})
     if not c:
         return jsonify({"error": "Course not found"}), 404
     c = migrate_legacy_course_fields(coll, c)

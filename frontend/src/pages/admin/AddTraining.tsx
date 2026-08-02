@@ -1,5 +1,5 @@
 /**
- * Admin — Add New Training (AD-WF-03). 3-step: Basics → Curriculum → Additional.
+ * Admin — Add New Training (AD-WF-03). 6-step: Basics → Curriculum → Pricing → Kit → Coupon → Publish.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -19,6 +19,12 @@ import {
   BookOpen,
   Pencil,
 } from 'lucide-react'
+import {
+  CourseCouponsEditor,
+  couponsFromApiList,
+  couponsToApiList,
+  type EnrollmentCouponFormRow,
+} from '@/components/admin/CourseCouponsEditor'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
 import {
   BA_SUBJECTS,
@@ -57,6 +63,10 @@ import {
 import { migrateQuizQuestion, questionSummaryLine, type QuizQuestionDraft } from '@/components/admin/quizQuestionTypes'
 import { plainTextFromHtml } from '@/utils/sanitizeHtml'
 import { useAuthStore } from '@/store/authStore'
+
+const WIZARD_STEPS = ['Basics', 'Curriculum', 'Pricing', 'Kit', 'Coupon', 'Publish'] as const
+
+type KitType = 'Physical' | 'Digital' | 'Mixed'
 
 /** Topic type buttons order (stored values unchanged; backend accepts legacy types). */
 const TOPIC_TYPE_ORDER = ['Lecture', 'Quiz', 'Assignment'] as const
@@ -596,6 +606,18 @@ export function AddTraining() {
   })
   const [curriculum, setCurriculum] = useState<CurriculumModule[]>([])
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set())
+  const [kitForm, setKitForm] = useState({
+    enabled: false,
+    name: '',
+    shortDescription: '',
+    thumbnailUrl: '',
+    priceInr: '',
+    kitType: 'Physical' as KitType,
+    shippingApplicable: false,
+    shippingCharge: '',
+  })
+  const [couponRows, setCouponRows] = useState<EnrollmentCouponFormRow[]>([])
+  const [couponUsage, setCouponUsage] = useState<Record<string, { used: number; maxUses: number | null }>>({})
   const [saving, setSaving] = useState(false)
   const [quizEditor, setQuizEditor] = useState<{ moduleId: string; topicId: string } | null>(null)
   const [lessonEditor, setLessonEditor] = useState<{ moduleId: string; topicId: string } | null>(null)
@@ -625,10 +647,45 @@ export function AddTraining() {
         setSubjectPicks(w.subjectPicks)
         setAdditional(w.additional)
         setCurriculum(w.curriculum)
+        const tk = (c.trainingKit && typeof c.trainingKit === 'object' ? c.trainingKit : {}) as Record<
+          string,
+          unknown
+        >
+        const kitTypeRaw = String(tk.kitType || 'Physical')
+        const kitType: KitType =
+          kitTypeRaw === 'Digital' || kitTypeRaw === 'Mixed' ? kitTypeRaw : 'Physical'
+        setKitForm({
+          enabled: Boolean(tk.enabled ?? tk.includeKit),
+          name: String(tk.name || ''),
+          shortDescription: String(tk.shortDescription || ''),
+          thumbnailUrl: String(tk.thumbnailUrl || ''),
+          priceInr: tk.priceInr != null && Number.isFinite(Number(tk.priceInr)) ? String(tk.priceInr) : '',
+          kitType,
+          shippingApplicable: Boolean(tk.shippingApplicable),
+          shippingCharge:
+            tk.shippingCharge != null && Number.isFinite(Number(tk.shippingCharge))
+              ? String(tk.shippingCharge)
+              : '',
+        })
+        const ec = c.enrollmentCoupons
+        setCouponRows(couponsFromApiList(Array.isArray(ec) ? ec : []))
         setExpandedModules(new Set(w.curriculum.map((m) => m.id)))
         slugTouched.current = true
         setStep(1)
         setHydrating(false)
+        adminService
+          .getCourseCouponRedemptions(editCourseId)
+          .then((d) => {
+            if (cancelled) return
+            const m: Record<string, { used: number; maxUses: number | null }> = {}
+            for (const x of d.items || []) {
+              m[String(x.code || '').toUpperCase()] = { used: x.used, maxUses: x.maxUses ?? null }
+            }
+            setCouponUsage(m)
+          })
+          .catch(() => {
+            if (!cancelled) setCouponUsage({})
+          })
       })
       .catch(() => {
         if (!cancelled) {
@@ -776,6 +833,19 @@ export function AddTraining() {
     const plainShort = plainTextFromHtml(basic.shortDesc)
     const plainFull = plainTextFromHtml(basic.fullDesc)
     const metaDescription = (plainFull || plainShort).slice(0, 4000)
+    const kitPrice = parseFloat(kitForm.priceInr) || 0
+    const shipCharge = parseFloat(kitForm.shippingCharge) || 0
+    const trainingKit = {
+      enabled: kitForm.enabled && kitPrice > 0,
+      includeKit: kitForm.enabled,
+      name: kitForm.name.trim(),
+      shortDescription: kitForm.shortDescription.trim(),
+      thumbnailUrl: kitForm.thumbnailUrl.trim(),
+      priceInr: kitForm.enabled ? kitPrice : 0,
+      kitType: kitForm.kitType,
+      shippingApplicable: kitForm.shippingApplicable,
+      shippingCharge: kitForm.shippingApplicable ? shipCharge : 0,
+    }
     return {
       title: basic.title.trim(),
       slug: basic.slug.trim() || undefined,
@@ -818,8 +888,25 @@ export function AddTraining() {
         ? parseInt(additional.trainingMaxSeats, 10)
         : undefined,
       curriculum: curriculumSerial,
+      trainingKit,
+      enrollmentCoupons: couponsToApiList(couponRows),
       active: publish ? true : editCourseId ? editDraftActiveRef.current : false,
     }
+  }
+
+  const validateCoupons = (): string | null => {
+    const codes = couponRows
+      .map((r) => (r.code || '').trim().toUpperCase())
+      .filter(Boolean)
+    const seen = new Set<string>()
+    for (const code of codes) {
+      if (seen.has(code)) return `Duplicate coupon code: ${code}`
+      seen.add(code)
+    }
+    if (couponRows.some((r) => (r.code || '').trim()) && couponsToApiList(couponRows).length === 0) {
+      return 'Check each coupon: code and discount value are required.'
+    }
+    return null
   }
 
   const validateForPublish = (): string | null => {
@@ -914,6 +1001,11 @@ export function AddTraining() {
       setError('Finish new curriculum topics (click Ok on each title/summary card) or cancel them before saving.')
       return
     }
+    const couponErr = validateCoupons()
+    if (couponErr) {
+      setError(couponErr)
+      return
+    }
     setError(null)
     setSaving(true)
     try {
@@ -951,6 +1043,11 @@ export function AddTraining() {
     const v = validateForPublish()
     if (v) {
       setError(v)
+      return
+    }
+    const couponErr = validateCoupons()
+    if (couponErr) {
+      setError(couponErr)
       return
     }
     setError(null)
@@ -1063,18 +1160,21 @@ export function AddTraining() {
       {/* Step tabs + edit actions */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex flex-wrap gap-2">
-          {[1, 2, 3].map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStep(s)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                step === s ? 'bg-brand-accent text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {s === 1 ? 'Basics' : s === 2 ? 'Curriculum' : 'Additional'}
-            </button>
-          ))}
+          {WIZARD_STEPS.map((label, i) => {
+            const s = i + 1
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setStep(s)}
+                className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                  step === s ? 'bg-brand-accent text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
         {editCourseId ? (
           <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:pl-4">
@@ -1521,53 +1621,6 @@ export function AddTraining() {
                   <p className="mt-1 text-xs text-slate-600 truncate" title={basic.introVideoFile.name}>
                     Selected: {basic.introVideoFile.name}
                   </p>
-                ) : null}
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-700">Pricing</span>
-                <div className="mt-2 flex flex-col gap-2 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="pricing-model"
-                      checked={basic.pricingFree}
-                      onChange={() => setBasic((b) => ({ ...b, pricingFree: true, fee: '' }))}
-                      className="text-brand-accent"
-                    />
-                    Free
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="pricing-model"
-                      checked={!basic.pricingFree}
-                      onChange={() => setBasic((b) => ({ ...b, pricingFree: false }))}
-                      className="text-brand-accent"
-                    />
-                    Paid
-                  </label>
-                </div>
-                {!basic.pricingFree ? (
-                  <div className="mt-2 space-y-2">
-                    <input
-                      type="number"
-                      min={0}
-                      value={basic.fee}
-                      onChange={(e) => setBasic((b) => ({ ...b, fee: e.target.value }))}
-                      placeholder="Fee (₹)"
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                    />
-                    <div>
-                      <label className="text-xs font-medium text-gray-600">Original price (₹, optional)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={basic.originalPrice}
-                        onChange={(e) => setBasic((b) => ({ ...b, originalPrice: e.target.value }))}
-                        className="mt-0.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
                 ) : null}
               </div>
               <div>
@@ -2061,16 +2114,232 @@ export function AddTraining() {
               onClick={() => setStep(3)}
               className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
             >
-              Continue to Additional →
+              Continue to Pricing →
             </button>
           </div>
         </div>
       )}
 
       {step === 3 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-semibold text-brand-navy">Step 3 — Pricing</h3>
+          <p className="text-sm text-slate-gray">Set whether this training is free or paid, and the fee shown at checkout.</p>
+          <div>
+            <span className="block text-sm font-medium text-gray-700">Pricing</span>
+            <div className="mt-2 flex flex-col gap-2 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="pricing-model"
+                  checked={basic.pricingFree}
+                  onChange={() => setBasic((b) => ({ ...b, pricingFree: true, fee: '' }))}
+                  className="text-brand-accent"
+                />
+                Free
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="pricing-model"
+                  checked={!basic.pricingFree}
+                  onChange={() => setBasic((b) => ({ ...b, pricingFree: false }))}
+                  className="text-brand-accent"
+                />
+                Paid
+              </label>
+            </div>
+            {!basic.pricingFree ? (
+              <div className="mt-2 max-w-md space-y-2">
+                <input
+                  type="number"
+                  min={0}
+                  value={basic.fee}
+                  onChange={(e) => setBasic((b) => ({ ...b, fee: e.target.value }))}
+                  placeholder="Fee (₹)"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                />
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Original price (₹, optional)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={basic.originalPrice}
+                    onChange={(e) => setBasic((b) => ({ ...b, originalPrice: e.target.value }))}
+                    className="mt-0.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={() => setStep(2)} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={saving}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <Save className="h-4 w-4 inline mr-1" /> Save as Draft
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+            >
+              Continue to Kit →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 4 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-semibold text-brand-navy">Step 4 — Kit</h3>
+          <p className="text-sm text-slate-gray">
+            Optional training kit add-on (12% GST). Extra fields are stored on the course kit object; checkout still uses enabled + priceInr.
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={kitForm.enabled}
+              onChange={(e) => setKitForm((k) => ({ ...k, enabled: e.target.checked }))}
+            />
+            Include training kit (enable add-on)
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-600">Kit name</label>
+              <input
+                value={kitForm.name}
+                onChange={(e) => setKitForm((k) => ({ ...k, name: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600">Price (₹ incl. GST)</label>
+              <input
+                value={kitForm.priceInr}
+                onChange={(e) => setKitForm((k) => ({ ...k, priceInr: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                inputMode="decimal"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600">Kit type</label>
+              <select
+                value={kitForm.kitType}
+                onChange={(e) => setKitForm((k) => ({ ...k, kitType: e.target.value as KitType }))}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="Physical">Physical</option>
+                <option value="Digital">Digital</option>
+                <option value="Mixed">Mixed</option>
+              </select>
+            </div>
+            <div>
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-600 mt-6">
+                <input
+                  type="checkbox"
+                  checked={kitForm.shippingApplicable}
+                  onChange={(e) => setKitForm((k) => ({ ...k, shippingApplicable: e.target.checked }))}
+                />
+                Shipping applicable
+              </label>
+              {kitForm.shippingApplicable ? (
+                <input
+                  value={kitForm.shippingCharge}
+                  onChange={(e) => setKitForm((k) => ({ ...k, shippingCharge: e.target.value }))}
+                  className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  placeholder="Shipping charge (₹)"
+                  inputMode="decimal"
+                />
+              ) : null}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600">Short description</label>
+            <input
+              value={kitForm.shortDescription}
+              onChange={(e) => setKitForm((k) => ({ ...k, shortDescription: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600">Kit thumbnail URL (optional)</label>
+            <input
+              value={kitForm.thumbnailUrl}
+              onChange={(e) => setKitForm((k) => ({ ...k, thumbnailUrl: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              placeholder="/api/courses/media/featured/..."
+            />
+          </div>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={() => setStep(3)} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={saving}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <Save className="h-4 w-4 inline mr-1" /> Save as Draft
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep(5)}
+              className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+            >
+              Continue to Coupon →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 5 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+          <h3 className="font-semibold text-brand-navy">Step 5 — Coupon</h3>
+          <p className="text-sm text-slate-gray">
+            Per-course enrollment coupons. Codes are stored uppercase; duplicate codes in this list are blocked on save.
+          </p>
+          <CourseCouponsEditor rows={couponRows} onChange={setCouponRows} usedByCode={couponUsage} />
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={() => setStep(4)} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={saving}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <Save className="h-4 w-4 inline mr-1" /> Save as Draft
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const couponErr = validateCoupons()
+                if (couponErr) {
+                  setError(couponErr)
+                  return
+                }
+                setError(null)
+                setStep(6)
+              }}
+              className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
+            >
+              Continue to Publish →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 6 && (
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
           <div>
-            <h3 className="font-semibold text-brand-navy">Step 3 — Additional</h3>
+            <h3 className="font-semibold text-brand-navy">Step 6 — Publish</h3>
             <p className="text-sm text-slate-gray mt-1">
               Optional training schedule and seat cap appear on listings and the public course page. Learning outcomes, materials, and instructions (with requirements) are shown on the course page for students.
             </p>
@@ -2150,7 +2419,7 @@ export function AddTraining() {
           </div>
 
           <div className="mt-2 flex flex-wrap gap-3">
-            <button type="button" onClick={() => setStep(2)} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+            <button type="button" onClick={() => setStep(5)} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
               ← Back
             </button>
             <button

@@ -28,7 +28,7 @@ import {
 const SIDEBAR_LINKS = [
   { to: '/admin', label: 'Dashboard', icon: Home },
   { to: '/admin/courses', label: 'Training', icon: BookOpen },
-  { to: '/admin/certificates', label: 'Certificates', icon: Award },
+  { to: '/admin/certificates', label: 'Documents', icon: Award },
   { to: '/admin/payments', label: 'Payments', icon: CreditCard },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
   { to: '/admin/students', label: 'Students', icon: GraduationCap },
@@ -50,7 +50,7 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     courses: 'Training',
     new: 'Add Training',
     manage: 'Manage',
-    certificates: 'Certificates',
+    certificates: 'Documents',
     payments: 'Payments',
     leads: 'Leads',
     students: 'Students',

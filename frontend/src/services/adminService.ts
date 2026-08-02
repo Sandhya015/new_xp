@@ -103,6 +103,22 @@ export type LeadDetail = {
   followUps?: Array<{ type: string; date: string; notes: string; addedBy: string; createdAt: string }>
 }
 
+export type StudentRow = {
+  id: string
+  name: string
+  email: string
+  mobile: string
+  university: string
+  collegeName?: string
+  course: string
+  branch?: string
+  semester?: string
+  registered: string
+  status: string
+  accountStatus?: string
+  emailVerified?: boolean
+}
+
 export type StudentDetail = {
   id: string
   name: string
@@ -112,22 +128,165 @@ export type StudentDetail = {
   course: string
   registered: string
   status: string
+  accountStatus?: string
+  emailVerified?: boolean
   collegeName?: string
   stream?: string
+  branch?: string
   semester?: string
-  enrollments?: Array<{ id: string; courseId: string; courseTitle: string; createdAt: string }>
-  applications?: Array<{ id: string; internshipId: string; status: string; createdAt: string }>
+  dateOfBirth?: string
+  addressLine1?: string
+  addressApartment?: string
+  addressCity?: string
+  addressState?: string
+  addressPincode?: string
+  addressCountry?: string
+  suspendReason?: string
+  enrollments?: StudentEnrollmentRow[]
+  applications?: StudentApplicationRow[]
+  documents?: StudentDocumentRow[]
+  payments?: StudentPaymentRow[]
+  tickets?: StudentTicketRow[]
+  activityLog?: StudentActivityRow[]
+  activityLogTotal?: number
+}
+
+export type StudentEnrollmentRow = {
+  id: string
+  courseId: string
+  title?: string
+  courseTitle?: string
+  university?: string
+  category?: string
+  mode?: string
+  duration?: string
+  feePaid?: boolean
+  enrollmentDate?: string
+  createdAt?: string
+  progressPercent?: number | null
+  certificateStatus?: string
+  status?: string
+}
+
+export type StudentApplicationRow = {
+  id: string
+  internshipId: string
+  company?: string
+  role?: string
+  appliedAt?: string
+  createdAt?: string
+  startDate?: string
+  endDate?: string
+  status: string
+  offerLetter?: string | null
+}
+
+export type StudentDocumentRow = {
+  id: string
+  type: string
+  title: string
+  certNo?: string
+  status?: string
+  issuedAt?: string
+  url?: string
+}
+
+export type StudentPaymentRow = {
+  id: string
+  orderId: string
+  courseId?: string
+  amount: number
+  status: string
+  gatewayRef?: string
+  createdAt: string
+}
+
+export type StudentTicketRow = {
+  id: string
+  ticketId: string
+  subject: string
+  category?: string
+  status: string
+  priority?: string
+  createdAt: string
+}
+
+export type StudentActivityRow = {
+  id: string
+  action: string
+  actorName?: string
+  actorEmail?: string
+  oldValue?: unknown
+  newValue?: unknown
+  createdAt: string
+}
+
+export type StudentListParams = {
+  search?: string
+  page?: number
+  limit?: number
+  university?: string
+  collegeName?: string
+  course?: string
+  branch?: string
+  semester?: string
+  enrollmentStatus?: string
+  accountStatus?: string
+  registeredFrom?: string
+  registeredTo?: string
 }
 
 export type PaymentDetail = {
   id: string
   orderId: string
   studentId: string
+  studentName?: string
+  studentEmail?: string
+  studentPhone?: string
+  university?: string
   amount: number
   status: string
   createdAt: string
   courseId?: string
+  courseTitle?: string
+  couponCode?: string
+  paymentMode?: string
   gatewayRef?: string
+  invoiceNumber?: string
+  invoiceVersion?: number
+  method?: string
+  refundAmount?: number
+  refundReason?: string
+  verifiedAt?: string
+  verifiedNote?: string
+  refundedAt?: string
+  refundGatewayRef?: string
+  hasInvoicePdf?: boolean
+}
+
+export type PaymentFilters = {
+  search?: string
+  status?: string
+  paymentMode?: string
+  dateFrom?: string
+  dateTo?: string
+  courseId?: string
+  university?: string
+  amountMin?: number | string
+  amountMax?: number | string
+  coupon?: string
+  page?: number
+  limit?: number
+}
+
+export type PaymentsSummary = {
+  totalRevenue: number
+  successfulCount: number
+  failedCount: number
+  pendingCount: number
+  refundsSum: number
+  refundsCount: number
+  percentChange?: number | null
 }
 
 export type CompanyRow = {
@@ -163,13 +322,113 @@ export const adminService = {
     return data
   },
 
-  async getStudents(params?: { search?: string }) {
-    const { data } = await api.get<{ items: Array<{ id: string; name: string; email: string; mobile: string; university: string; course: string; registered: string; status: string }> }>('/api/admin/students', { params })
+  async getStudents(params?: StudentListParams) {
+    const { data } = await api.get<{
+      items: StudentRow[]
+      total: number
+      page: number
+      limit: number
+    }>('/api/admin/students', { params })
+    return data
+  },
+
+  async exportStudents(params?: StudentListParams & { format?: 'csv' | 'xlsx'; columns?: string }) {
+    const { data } = await api.get<Blob>('/api/admin/students/export', {
+      params,
+      responseType: 'blob',
+      headers: {
+        Accept:
+          params?.format === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'text/csv',
+      },
+    })
     return data
   },
 
   async getStudent(id: string): Promise<StudentDetail> {
     const { data } = await api.get<StudentDetail>(`/api/admin/students/${id}`)
+    return data
+  },
+
+  async updateStudent(id: string, body: Record<string, unknown>) {
+    const { data } = await api.patch<StudentDetail>(`/api/admin/students/${id}`, body)
+    return data
+  },
+
+  async suspendStudent(id: string, reason?: string) {
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/students/${id}/suspend`, {
+      reason: reason || '',
+    })
+    return data
+  },
+
+  async unsuspendStudent(id: string) {
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/students/${id}/unsuspend`)
+    return data
+  },
+
+  async deleteStudent(id: string, confirmEmail: string) {
+    const { data } = await api.delete<{ ok: boolean; message?: string }>(`/api/admin/students/${id}`, {
+      data: { confirmEmail },
+    })
+    return data
+  },
+
+  async resetStudentPassword(id: string) {
+    const { data } = await api.post<{ ok: boolean; message?: string }>(
+      `/api/admin/students/${id}/reset-password`,
+    )
+    return data
+  },
+
+  async messageStudent(id: string, body: { subject: string; body: string }) {
+    const { data } = await api.post<{ ok: boolean; message?: string; ticketId?: string; emailSent?: boolean }>(
+      `/api/admin/students/${id}/message`,
+      body,
+    )
+    return data
+  },
+
+  async verifyStudentEmail(id: string) {
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/students/${id}/verify-email`)
+    return data
+  },
+
+  async getStudentEnrolledTrainings(id: string) {
+    const { data } = await api.get<{ items: StudentEnrollmentRow[] }>(
+      `/api/admin/students/${id}/enrolled-trainings`,
+    )
+    return data
+  },
+
+  async getStudentAppliedInternships(id: string) {
+    const { data } = await api.get<{ items: StudentApplicationRow[] }>(
+      `/api/admin/students/${id}/applied-internships`,
+    )
+    return data
+  },
+
+  async getStudentDocuments(id: string) {
+    const { data } = await api.get<{ items: StudentDocumentRow[] }>(`/api/admin/students/${id}/documents`)
+    return data
+  },
+
+  async getStudentPayments(id: string) {
+    const { data } = await api.get<{ items: StudentPaymentRow[] }>(`/api/admin/students/${id}/payments`)
+    return data
+  },
+
+  async getStudentTickets(id: string) {
+    const { data } = await api.get<{ items: StudentTicketRow[] }>(`/api/admin/students/${id}/tickets`)
+    return data
+  },
+
+  async getStudentActivityLog(id: string, params?: { page?: number; limit?: number }) {
+    const { data } = await api.get<{ items: StudentActivityRow[]; total: number; page: number; limit: number }>(
+      `/api/admin/students/${id}/activity-log`,
+      { params },
+    )
     return data
   },
 
@@ -188,8 +447,16 @@ export const adminService = {
     return data
   },
 
-  async getPayments(params?: { search?: string; status?: string }) {
-    const { data } = await api.get<{ items: PaymentDetail[] }>('/api/admin/payments', { params })
+  async getPayments(params?: PaymentFilters) {
+    const { data } = await api.get<{ items: PaymentDetail[]; total: number; page?: number; limit?: number }>(
+      '/api/admin/payments',
+      { params },
+    )
+    return data
+  },
+
+  async getPaymentsSummary(params?: PaymentFilters): Promise<PaymentsSummary> {
+    const { data } = await api.get<PaymentsSummary>('/api/admin/payments/summary', { params })
     return data
   },
 
@@ -199,17 +466,100 @@ export const adminService = {
   },
 
   async verifyPayment(id: string, body: { reference?: string; note?: string }) {
-    const { data } = await api.post<{ ok: boolean }>(`/api/admin/payments/${id}/verify`, body)
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/payments/${id}/verify`, body)
     return data
   },
 
   async refundPayment(id: string, body: { reason: string; amount?: number; gatewayRef?: string }) {
-    const { data } = await api.post<{ ok: boolean }>(`/api/admin/payments/${id}/refund`, body)
+    const { data } = await api.post<{ ok: boolean; message?: string }>(`/api/admin/payments/${id}/refund`, body)
     return data
   },
 
-  async getCourses(params?: { search?: string }) {
-    const { data } = await api.get<{ items: unknown[] }>('/api/admin/courses', { params })
+  async downloadPaymentInvoice(id: string): Promise<Blob> {
+    const { data } = await api.get(`/api/admin/payments/${id}/invoice/download`, {
+      responseType: 'arraybuffer',
+      headers: { Accept: 'application/pdf' },
+    })
+    return blobFromMaybeBase64Body(data as ArrayBuffer, 'application/pdf', 'pdf')
+  },
+
+  async regeneratePaymentInvoice(id: string, body?: { reason?: string }) {
+    const { data } = await api.post<{
+      ok: boolean
+      invoiceNumber?: string
+      invoiceVersion?: number
+      emailed?: boolean
+      message?: string
+    }>(`/api/admin/payments/${id}/invoice/regenerate`, body || {})
+    return data
+  },
+
+  async bulkDownloadInvoices(body: {
+    ids?: string[]
+    useFilters?: boolean
+    filters?: PaymentFilters
+  }): Promise<{ blob?: Blob; async?: boolean; jobId?: string; message?: string; count?: number }> {
+    const { data, headers, status } = await api.post('/api/admin/payments/bulk-invoice-download', body, {
+      responseType: 'arraybuffer',
+      headers: { Accept: 'application/zip, application/json' },
+      validateStatus: (s) => (s >= 200 && s < 300) || s === 202,
+    })
+    const ct = String(headers['content-type'] || '')
+    if (status === 202 || ct.includes('application/json')) {
+      const text = new TextDecoder().decode(data as ArrayBuffer)
+      const json = JSON.parse(text) as { async?: boolean; jobId?: string; message?: string; count?: number }
+      return { async: true, ...json }
+    }
+    return {
+      blob: blobFromMaybeBase64Body(data as ArrayBuffer, 'application/zip', 'zip'),
+    }
+  },
+
+  async getCourses(params?: {
+    search?: string
+    status?: string
+    includeDeleted?: boolean
+    category?: string
+    university?: string
+  }) {
+    const { data } = await api.get<{ items: unknown[] }>('/api/admin/courses', {
+      params: {
+        search: params?.search,
+        status: params?.status,
+        includeDeleted: params?.includeDeleted ? '1' : undefined,
+        category: params?.category,
+        university: params?.university,
+      },
+    })
+    return data
+  },
+
+  async setCourseStatus(id: string, active: boolean) {
+    const { data } = await api.patch(`/api/admin/courses/${id}/status`, { active })
+    return data
+  },
+
+  async deleteCourse(id: string, confirmTitle: string) {
+    const { data } = await api.delete<{ ok: boolean }>(`/api/admin/courses/${id}`, {
+      data: { confirmTitle },
+    })
+    return data
+  },
+
+  async restoreCourse(id: string) {
+    const { data } = await api.post(`/api/admin/courses/${id}/restore`)
+    return data
+  },
+
+  async getActivityLogs(params?: {
+    entityType?: string
+    entityId?: string
+    page?: number
+    limit?: number
+  }) {
+    const { data } = await api.get<{ items: unknown[]; total: number }>('/api/admin/activity-logs', {
+      params,
+    })
     return data
   },
 
@@ -704,12 +1054,32 @@ export const adminService = {
 
   async getSupportContentAdmin() {
     const { data } = await api.get<{
-      faqs: Array<{ id: string; question: string; answer: string; sortOrder: number }>
+      faqs: Array<{
+        id: string
+        question: string
+        answer: string
+        sortOrder: number
+        displayOrder?: number
+        category?: string
+        visibility?: string
+        active?: boolean
+      }>
     }>('/api/admin/support-content')
     return data
   },
 
-  async putSupportContentAdmin(faqs: Array<{ id: string; question: string; answer: string; sortOrder: number }>) {
+  async putSupportContentAdmin(
+    faqs: Array<{
+      id: string
+      question: string
+      answer: string
+      sortOrder: number
+      displayOrder?: number
+      category?: string
+      visibility?: string
+      active?: boolean
+    }>,
+  ) {
     const { data } = await api.put<{ ok: boolean; faqs: typeof faqs }>('/api/admin/support-content', { faqs })
     return data
   },

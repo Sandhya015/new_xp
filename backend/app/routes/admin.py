@@ -59,10 +59,13 @@ from app.db import (
     get_followups_collection,
     get_support_tickets_collection,
     get_app_settings_collection,
+    get_activity_logs_collection,
+    get_bulk_invoice_jobs_collection,
 )
 
+from app.activity_log import log_admin_action, serialize_activity_log
 from app.attendance_util import class_link_session_key, norm_attendance_status, parse_class_link_date
-from app.email_smtp import send_support_ticket_staff_reply, send_support_ticket_status_update
+from app.email_smtp import send_support_ticket_staff_reply, send_support_ticket_status_update, send_payment_success_email
 from app.course_legacy import migrate_legacy_course_fields
 from app.course_publish_notify import (
     newly_published_curriculum_topic_titles,
@@ -71,6 +74,23 @@ from app.course_publish_notify import (
     notify_enrolled_content_published,
 )
 from app.checkout_coupon import count_successful_redemptions_for_course
+from app.payment_admin import (
+    BULK_THRESHOLD,
+    BULK_CONCURRENT_LIMIT,
+    collect_payment_filter_params,
+    compute_payments_summary,
+    count_active_bulk_jobs,
+    create_bulk_job,
+    build_bulk_zip,
+    enrich_payment_row,
+    generate_and_store_invoice_pdf,
+    get_stored_invoice_pdf,
+    invoice_filename,
+    list_payments,
+    load_user_course_maps,
+    resolve_university_user_ids,
+    build_orders_mongo_query,
+)
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -130,16 +150,63 @@ def _admin_required():
     return None
 
 
+def _admin_actor() -> dict:
+    """Current admin identity for activity logs."""
+    claims = get_jwt() or {}
+    uid = get_jwt_identity()
+    email = (claims.get("email") or "").strip().lower()
+    name = ""
+    if uid and ObjectId.is_valid(str(uid)):
+        u = get_users_collection().find_one({"_id": ObjectId(str(uid))}, {"name": 1, "fullName": 1, "email": 1})
+        if u:
+            name = (u.get("name") or u.get("fullName") or "").strip()
+            if not email:
+                email = (u.get("email") or "").strip().lower()
+    return {
+        "actor_id": str(uid) if uid else "",
+        "actor_email": email,
+        "actor_name": name or email,
+    }
+
+
+def _log_admin(action: str, entity_type: str, entity_id: str | None = None, *, old_value=None, new_value=None, meta=None):
+    actor = _admin_actor()
+    log_admin_action(
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        old_value=old_value,
+        new_value=new_value,
+        meta=meta,
+        request=request,
+        actor_id=actor["actor_id"],
+        actor_email=actor["actor_email"],
+        actor_name=actor["actor_name"],
+    )
+
+
 def _user_to_row(u):
+    acct = (u.get("accountStatus") or "active").strip().lower()
+    if u.get("deleted") is True or acct == "deleted":
+        status_label = "Deleted"
+    elif acct == "suspended":
+        status_label = "Suspended"
+    else:
+        status_label = "Active"
     return {
         "id": str(u["_id"]),
         "name": u.get("name") or u.get("fullName") or "",
         "email": u.get("email", ""),
         "mobile": u.get("mobile") or "",
         "university": u.get("university") or "",
+        "collegeName": u.get("collegeName") or "",
         "course": u.get("course") or "",
+        "branch": u.get("branch") or u.get("stream") or u.get("subject") or "",
+        "semester": u.get("semester") or "",
         "registered": u.get("createdAt").strftime("%Y-%m-%d") if u.get("createdAt") else "",
-        "status": "Active",
+        "status": status_label,
+        "accountStatus": acct if acct in ("active", "suspended", "deleted") else "active",
+        "emailVerified": bool(u.get("emailVerified") or u.get("isEmailVerified")),
     }
 
 
@@ -159,6 +226,8 @@ def _lead_to_row(c):
 
 
 def _course_to_item(c):
+    deleted = bool(c.get("deleted"))
+    active = bool(c.get("active", True)) and not deleted
     return {
         "id": str(c["_id"]),
         "title": c.get("title", ""),
@@ -170,7 +239,9 @@ def _course_to_item(c):
         "universities": c.get("universities", ""),
         "price": c.get("price", 0),
         "tag": c.get("tag", ""),
-        "active": c.get("active", True),
+        "active": active,
+        "deleted": deleted,
+        "deletedAt": c.get("deletedAt").isoformat() + "Z" if hasattr(c.get("deletedAt"), "isoformat") else (c.get("deletedAt") or None),
         "slug": c.get("slug", "") or "",
         "featuredImageUrl": c.get("featuredImageUrl", "") or "",
     }
@@ -235,13 +306,34 @@ def courses():
         return jsonify({"error": "Database not configured"}), 503
     coll = get_courses_collection()
     if request.method == "GET":
-        q = {}
+        include_deleted = (request.args.get("includeDeleted") or "").strip().lower() in ("1", "true", "yes")
+        status_f = (request.args.get("status") or "").strip().lower()
         search = request.args.get("search", "").strip()
+        category = (request.args.get("category") or "").strip()
+        university = (request.args.get("university") or "").strip()
+        and_parts: list = []
+        if include_deleted:
+            and_parts.append({"deleted": True})
+        else:
+            and_parts.append({"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]})
+            if status_f == "active":
+                and_parts.append({"active": True})
+            elif status_f in ("inactive", "draft"):
+                and_parts.append({"active": False})
         if search:
-            q["$or"] = [
-                {"title": {"$regex": search, "$options": "i"}},
-                {"description": {"$regex": search, "$options": "i"}},
-            ]
+            and_parts.append(
+                {
+                    "$or": [
+                        {"title": {"$regex": search, "$options": "i"}},
+                        {"description": {"$regex": search, "$options": "i"}},
+                    ]
+                }
+            )
+        if category:
+            and_parts.append({"category": {"$regex": f"^{re.escape(category)}$", "$options": "i"}})
+        if university:
+            and_parts.append({"universities": {"$regex": re.escape(university), "$options": "i"}})
+        q = {"$and": and_parts} if len(and_parts) > 1 else (and_parts[0] if and_parts else {})
         cursor = coll.find(q).sort("createdAt", -1)
         items = [_course_to_item(c) for c in cursor]
         return jsonify({"items": items})
@@ -353,30 +445,155 @@ def courses():
                 return _bad
     result = coll.insert_one(doc)
     doc["_id"] = result.inserted_id
+    if "trainingKit" in data and isinstance(data.get("trainingKit"), dict):
+        coll.update_one({"_id": doc["_id"]}, {"$set": {"trainingKit": data["trainingKit"]}})
+        doc["trainingKit"] = data["trainingKit"]
+    if "enrollmentCoupons" in data and isinstance(data.get("enrollmentCoupons"), list):
+        coll.update_one({"_id": doc["_id"]}, {"$set": {"enrollmentCoupons": data["enrollmentCoupons"]}})
+        doc["enrollmentCoupons"] = data["enrollmentCoupons"]
+    _log_admin("course.create", "course", str(doc["_id"]), new_value={"title": title, "active": doc.get("active")})
     return jsonify(_course_to_item(doc)), 201
 
 
-@admin_bp.route("/students", methods=["GET"])
+@admin_bp.route("/activity-logs", methods=["GET"])
 @jwt_required()
-def students():
+def activity_logs():
     err = _admin_required()
     if err:
         return err
-    db = get_db()
-    if db is None:
-        return jsonify({"items": [], "message": "Database not configured"}), 503
-    search = request.args.get("search", "").strip()
-    q = {"role": "student"}
-    if search:
-        q["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"fullName": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
-            {"mobile": {"$regex": search, "$options": "i"}},
-        ]
-    cursor = get_users_collection().find(q).sort("createdAt", -1)
-    items = [_user_to_row(u) for u in cursor]
-    return jsonify({"items": items})
+    if get_db() is None:
+        return jsonify({"items": [], "total": 0}), 503
+    q: dict = {}
+    entity_type = (request.args.get("entityType") or "").strip()
+    entity_id = (request.args.get("entityId") or "").strip()
+    actor_email = (request.args.get("actorEmail") or "").strip().lower()
+    action = (request.args.get("action") or "").strip()
+    if entity_type:
+        q["entityType"] = entity_type
+    if entity_id:
+        q["entityId"] = entity_id
+    if actor_email:
+        q["actorEmail"] = actor_email
+    if action:
+        q["action"] = {"$regex": f"^{re.escape(action)}", "$options": "i"}
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = min(100, max(1, int(request.args.get("limit") or 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    coll = get_activity_logs_collection()
+    total = coll.count_documents(q)
+    cursor = coll.find(q).sort("createdAt", -1).skip((page - 1) * limit).limit(limit)
+    items = [serialize_activity_log(d) for d in cursor]
+    return jsonify({"items": items, "total": total, "page": page, "limit": limit})
+
+
+@admin_bp.route("/courses/<course_id>/status", methods=["PATCH"])
+@jwt_required()
+def patch_course_status(course_id):
+    """Activate or deactivate a training (CFRD §1)."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    if get_db() is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    if c.get("deleted"):
+        return jsonify({"error": "Cannot change status of a deleted training. Restore it first."}), 400
+    data = request.get_json() or {}
+    if "active" not in data:
+        return jsonify({"error": "active (boolean) is required"}), 400
+    active = bool(data["active"])
+    old = bool(c.get("active", True))
+    coll.update_one(
+        {"_id": ObjectId(course_id)},
+        {"$set": {"active": active, "updatedAt": datetime.utcnow()}},
+    )
+    _log_admin(
+        "course.activate" if active else "course.deactivate",
+        "course",
+        course_id,
+        old_value={"active": old},
+        new_value={"active": active},
+    )
+    updated = coll.find_one({"_id": ObjectId(course_id)})
+    return jsonify(_course_to_item(updated))
+
+
+@admin_bp.route("/courses/<course_id>", methods=["DELETE"])
+@jwt_required()
+def soft_delete_course(course_id):
+    """Soft-delete training (Super Admin). Body: { confirmTitle } must match title."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    if get_db() is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    if c.get("deleted"):
+        return jsonify({"error": "Training already deleted"}), 400
+    data = request.get_json(silent=True) or {}
+    confirm = (data.get("confirmTitle") or data.get("title") or "").strip()
+    title = (c.get("title") or "").strip()
+    if not confirm or confirm.casefold() != title.casefold():
+        return jsonify({"error": "Type the training title exactly to confirm delete"}), 400
+    actor = _admin_actor()
+    coll.update_one(
+        {"_id": ObjectId(course_id)},
+        {
+            "$set": {
+                "deleted": True,
+                "deletedAt": datetime.utcnow(),
+                "deletedBy": actor["actor_id"],
+                "active": False,
+                "updatedAt": datetime.utcnow(),
+            }
+        },
+    )
+    _log_admin("course.soft_delete", "course", course_id, old_value={"title": title, "active": c.get("active")}, new_value={"deleted": True})
+    return jsonify({"ok": True, "id": course_id})
+
+
+@admin_bp.route("/courses/<course_id>/restore", methods=["POST"])
+@jwt_required()
+def restore_course(course_id):
+    """Restore soft-deleted training (Super Admin)."""
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    if get_db() is None:
+        return jsonify({"error": "Database not configured"}), 503
+    coll = get_courses_collection()
+    c = coll.find_one({"_id": ObjectId(course_id)})
+    if not c:
+        return jsonify({"error": "Course not found"}), 404
+    if not c.get("deleted"):
+        return jsonify({"error": "Training is not deleted"}), 400
+    coll.update_one(
+        {"_id": ObjectId(course_id)},
+        {
+            "$set": {"deleted": False, "updatedAt": datetime.utcnow(), "active": False},
+            "$unset": {"deletedAt": "", "deletedBy": ""},
+        },
+    )
+    _log_admin("course.restore", "course", course_id, new_value={"deleted": False, "active": False})
+    updated = coll.find_one({"_id": ObjectId(course_id)})
+    return jsonify(_course_to_item(updated))
 
 
 @admin_bp.route("/leads", methods=["GET"])
@@ -412,26 +629,132 @@ def payments():
         return err
     db = get_db()
     if db is None:
-        return jsonify({"items": [], "message": "Database not configured"}), 503
-    search = request.args.get("search", "").strip()
-    q = {}
-    if search:
-        q["$or"] = [
-            {"studentId": {"$regex": search, "$options": "i"}},
-            {"orderId": {"$regex": search, "$options": "i"}},
-        ]
-    cursor = get_orders_collection().find(q).sort("createdAt", -1)
-    items = []
-    for o in cursor:
-        items.append({
-            "id": str(o["_id"]),
-            "orderId": o.get("orderId", ""),
-            "studentId": o.get("userId") or o.get("studentId", ""),
-            "amount": o.get("amount", 0),
-            "status": o.get("status", "pending"),
-            "createdAt": o.get("createdAt").strftime("%Y-%m-%d %H:%M") if o.get("createdAt") else "",
-        })
-    return jsonify({"items": items})
+        return jsonify({"items": [], "total": 0, "message": "Database not configured"}), 503
+    flt = collect_payment_filter_params(request.args)
+    items, total = list_payments(flt)
+    return jsonify({
+        "items": items,
+        "total": total,
+        "page": flt["page"],
+        "limit": flt["limit"],
+    })
+
+
+@admin_bp.route("/payments/summary", methods=["GET"])
+@jwt_required()
+def payments_summary():
+    err = _admin_required()
+    if err:
+        return err
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    flt = collect_payment_filter_params(request.args)
+    summary = compute_payments_summary(flt)
+    return jsonify(summary)
+
+
+@admin_bp.route("/payments/bulk-invoice-download", methods=["POST"])
+@jwt_required()
+def payments_bulk_invoice_download():
+    err = _admin_required()
+    if err:
+        return err
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    body = request.get_json(silent=True) or {}
+    # Filters: query string wins, then body filters
+    flt = collect_payment_filter_params(request.args)
+    body_filters = body.get("filters") if isinstance(body.get("filters"), dict) else body
+    for k in ("search", "status", "paymentMode", "dateFrom", "dateTo", "courseId", "university", "coupon"):
+        if body_filters.get(k) and not request.args.get(k):
+            flt[k] = str(body_filters.get(k) or "").strip()
+    for k in ("amountMin", "amountMax"):
+        if body_filters.get(k) is not None and flt.get(k) is None:
+            try:
+                flt[k] = float(body_filters[k])
+            except (TypeError, ValueError):
+                pass
+
+    ids_raw = body.get("ids") if isinstance(body.get("ids"), list) else []
+    use_filters = bool(body.get("useFilters"))
+    orders_coll = get_orders_collection()
+    orders: list = []
+
+    if ids_raw and not use_filters:
+        oids = [ObjectId(x) for x in ids_raw if ObjectId.is_valid(str(x))]
+        orders = list(orders_coll.find({"_id": {"$in": oids}, "status": "success"}))
+    else:
+        # Force success-only for bulk invoices
+        flt_bulk = dict(flt)
+        flt_bulk["status"] = "success"
+        uni_ids = resolve_university_user_ids(flt_bulk.get("university") or "")
+        if uni_ids is not None and len(uni_ids) == 0:
+            orders = []
+        else:
+            q = build_orders_mongo_query(flt_bulk, user_ids_for_university=uni_ids)
+            # Cap scan for safety; job path for huge sets
+            orders = list(orders_coll.find(q).sort("createdAt", -1).limit(BULK_THRESHOLD + 1))
+
+    count = len(orders)
+    actor = _admin_actor()
+    if count == 0:
+        return jsonify({"error": "No successful payments matched"}), 404
+
+    if count > BULK_THRESHOLD:
+        active = count_active_bulk_jobs(actor["actor_email"])
+        if active >= BULK_CONCURRENT_LIMIT:
+            return jsonify({
+                "error": f"Too many concurrent bulk invoice jobs (max {BULK_CONCURRENT_LIMIT}). Wait for one to finish.",
+                "code": "bulk_rate_limited",
+            }), 429
+        # Re-query all matching ids for the job (may be >501)
+        flt_bulk = dict(flt)
+        flt_bulk["status"] = "success"
+        uni_ids = resolve_university_user_ids(flt_bulk.get("university") or "")
+        q = build_orders_mongo_query(flt_bulk, user_ids_for_university=uni_ids) if (uni_ids is None or uni_ids) else {"_id": None}
+        all_ids = [o["_id"] for o in orders_coll.find(q, {"_id": 1}).sort("createdAt", -1)]
+        if ids_raw and not use_filters:
+            all_ids = [ObjectId(x) for x in ids_raw if ObjectId.is_valid(str(x))]
+        job = create_bulk_job(
+            admin_email=actor["actor_email"],
+            admin_id=actor["actor_id"],
+            order_ids=all_ids,
+            filters=flt,
+            app=current_app._get_current_object(),
+        )
+        _log_admin(
+            "payment.bulk_invoice_job",
+            "payment",
+            str(job["_id"]),
+            meta={"count": len(all_ids), "mode": "async"},
+        )
+        return jsonify({
+            "ok": True,
+            "async": True,
+            "jobId": str(job["_id"]),
+            "count": len(all_ids),
+            "message": (
+                f"More than {BULK_THRESHOLD} invoices — job queued. "
+                "You will receive an email when processing finishes."
+            ),
+        }), 202
+
+    zip_bytes = build_bulk_zip(orders)
+    _log_admin(
+        "payment.bulk_invoice_download",
+        "payment",
+        None,
+        meta={"count": count, "mode": "sync", "bytes": len(zip_bytes)},
+    )
+    return send_file(
+        BytesIO(zip_bytes),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"invoices_bulk_{datetime.utcnow().strftime('%Y%m%d')}.zip",
+    )
 
 
 # ----- Dashboard -----
@@ -1261,42 +1584,9 @@ def lead_by_id(lead_id):
     return jsonify(_lead_to_row(lead))
 
 
-# ----- Student by ID -----
-@admin_bp.route("/students/<student_id>", methods=["GET"])
-@jwt_required()
-def get_student(student_id):
-    err = _admin_required()
-    if err:
-        return err
-    if not ObjectId.is_valid(student_id):
-        return jsonify({"error": "Invalid student id"}), 400
-    db = get_db()
-    if db is None:
-        return jsonify({"error": "Database not configured"}), 503
-    users = get_users_collection()
-    u = users.find_one({"_id": ObjectId(student_id), "role": "student"})
-    if not u:
-        return jsonify({"error": "Student not found"}), 404
-    out = _user_to_row(u)
-    out["mobile"] = u.get("mobile") or ""
-    out["collegeName"] = u.get("collegeName") or ""
-    out["stream"] = u.get("stream") or ""
-    out["semester"] = u.get("semester") or ""
+# Student routes live in admin_students.py (CFRD §4).
 
-    enrollments = list(get_enrollments_collection().find({"userId": student_id}).sort("createdAt", -1))
-    out["enrollments"] = [
-        {"id": str(e["_id"]), "courseId": e.get("courseId", ""), "courseTitle": e.get("courseTitle", ""), "createdAt": e.get("createdAt").strftime("%Y-%m-%d") if e.get("createdAt") else ""}
-        for e in enrollments
-    ]
-    apps = list(get_applications_collection().find({"studentId": student_id}).sort("createdAt", -1))
-    out["applications"] = [
-        {"id": str(a["_id"]), "internshipId": a.get("internshipId", ""), "status": a.get("status", ""), "createdAt": a.get("createdAt").strftime("%Y-%m-%d") if a.get("createdAt") else ""}
-        for a in apps
-    ]
-    return jsonify(out)
-
-
-# ----- Payment by ID + verify / refund -----
+# ----- Payment by ID + verify / refund / invoice -----
 @admin_bp.route("/payments/<payment_id>", methods=["GET"])
 @jwt_required()
 def get_payment(payment_id):
@@ -1311,16 +1601,17 @@ def get_payment(payment_id):
     o = get_orders_collection().find_one({"_id": ObjectId(payment_id)})
     if not o:
         return jsonify({"error": "Payment not found"}), 404
-    return jsonify({
-        "id": str(o["_id"]),
-        "orderId": o.get("orderId", ""),
-        "studentId": o.get("userId") or o.get("studentId", ""),
-        "amount": o.get("amount", 0),
-        "status": o.get("status", "pending"),
-        "createdAt": o.get("createdAt").strftime("%Y-%m-%d %H:%M") if o.get("createdAt") else "",
-        "courseId": o.get("courseId", ""),
-        "gatewayRef": o.get("gatewayRef", ""),
+    users_by_id, courses_by_id = load_user_course_maps([o])
+    row = enrich_payment_row(o, users_by_id, courses_by_id)
+    row.update({
+        "verifiedAt": o.get("verifiedAt").strftime("%Y-%m-%d %H:%M") if o.get("verifiedAt") else "",
+        "verifiedNote": o.get("verifiedNote") or "",
+        "refundedAt": o.get("refundedAt").strftime("%Y-%m-%d %H:%M") if o.get("refundedAt") else "",
+        "refundGatewayRef": o.get("refundGatewayRef") or "",
+        "billingSnapshot": o.get("billingSnapshot") if isinstance(o.get("billingSnapshot"), dict) else {},
+        "hasInvoicePdf": bool(get_stored_invoice_pdf(o) or o.get("invoiceNumber")),
     })
+    return jsonify(row)
 
 
 @admin_bp.route("/payments/<payment_id>/verify", methods=["POST"])
@@ -1336,12 +1627,77 @@ def verify_payment(payment_id):
         return jsonify({"error": "Database not configured"}), 503
     data = request.get_json() or {}
     ref = (data.get("reference") or data.get("note") or "").strip()
-    result = get_orders_collection().update_one(
+    coll = get_orders_collection()
+    o = coll.find_one({"_id": ObjectId(payment_id)})
+    if not o:
+        return jsonify({"error": "Payment not found"}), 404
+    if (o.get("status") or "").lower() == "refunded":
+        return jsonify({"error": "Cannot verify a refunded payment"}), 400
+    if (o.get("status") or "").lower() == "success":
+        return jsonify({"ok": True, "message": "Payment already verified"})
+
+    now = datetime.utcnow()
+    gateway_ref = ref or o.get("transactionId") or o.get("orderId") or f"manual-{payment_id}"
+    coll.update_one(
         {"_id": ObjectId(payment_id)},
-        {"$set": {"status": "success", "verifiedAt": datetime.utcnow(), "verifiedNote": ref}}
+        {"$set": {
+            "status": "success",
+            "verifiedAt": now,
+            "invoiceReceiptAt": now,
+            "verifiedNote": ref,
+            "verifiedBy": _admin_actor()["actor_email"],
+            "transactionId": o.get("transactionId") or gateway_ref,
+            "gatewayRef": o.get("gatewayRef") or gateway_ref,
+        }},
     )
-    if result.modified_count == 0:
-        return jsonify({"error": "Payment not found or already verified"}), 404
+    o = coll.find_one({"_id": ObjectId(payment_id)}) or o
+
+    # Ensure enrollment (best-effort) then invoice
+    try:
+        from app.routes.payments import _ensure_enrollment_for_successful_order
+        uid = str(o.get("userId") or o.get("studentId") or "")
+        if uid:
+            _ensure_enrollment_for_successful_order(uid, o)
+    except Exception:
+        current_app.logger.exception("manual verify enrollment failed")
+
+    try:
+        pdf_bytes, upd = generate_and_store_invoice_pdf(o, force=True)
+        o.update(upd)
+        # Email student with PDF
+        uid = str(o.get("userId") or "")
+        if uid and ObjectId.is_valid(uid):
+            u = get_users_collection().find_one({"_id": ObjectId(uid)})
+            if u and (u.get("email") or "").strip():
+                title = ""
+                cid = str(o.get("courseId") or "")
+                if cid and ObjectId.is_valid(cid):
+                    c = get_courses_collection().find_one({"_id": ObjectId(cid)})
+                    title = (c.get("title") if c else "") or "Training"
+                amt = float(o.get("amount") or 0)
+                amount_display = f"₹{amt:,.0f}" if amt == int(amt) else f"₹{amt:,.2f}"
+                send_payment_success_email(
+                    current_app.config,
+                    u.get("name") or u.get("fullName") or "there",
+                    (u.get("email") or "").strip(),
+                    title or "your course",
+                    amount_display,
+                    gateway_ref,
+                    True,
+                    invoice_number=o.get("invoiceNumber") or upd.get("invoiceNumber"),
+                    pdf_bytes=pdf_bytes,
+                    pdf_filename=invoice_filename(o),
+                )
+    except Exception:
+        current_app.logger.exception("manual verify invoice generation failed")
+
+    _log_admin(
+        "payment.verify",
+        "payment",
+        payment_id,
+        old_value={"status": "pending"},
+        new_value={"status": "success", "reference": ref},
+    )
     return jsonify({"ok": True, "message": "Payment marked as verified"})
 
 
@@ -1364,12 +1720,134 @@ def refund_payment(payment_id):
     o = get_orders_collection().find_one({"_id": ObjectId(payment_id)})
     if not o:
         return jsonify({"error": "Payment not found"}), 404
-    refund_amount = int(amount) if amount is not None else o.get("amount", 0)
+    if (o.get("status") or "").lower() == "refunded":
+        return jsonify({"error": "Payment already refunded"}), 400
+    try:
+        refund_amount = int(amount) if amount is not None and str(amount).strip() != "" else int(o.get("amount", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid refund amount"}), 400
+    old_status = o.get("status")
     get_orders_collection().update_one(
         {"_id": ObjectId(payment_id)},
-        {"$set": {"status": "refunded", "refundedAt": datetime.utcnow(), "refundReason": reason, "refundAmount": refund_amount, "refundGatewayRef": data.get("gatewayRef", "")}}
+        {"$set": {
+            "status": "refunded",
+            "refundedAt": datetime.utcnow(),
+            "refundReason": reason,
+            "refundAmount": refund_amount,
+            "refundGatewayRef": (data.get("gatewayRef") or "").strip(),
+            "refundedBy": _admin_actor()["actor_email"],
+        }},
+    )
+    _log_admin(
+        "payment.refund",
+        "payment",
+        payment_id,
+        old_value={"status": old_status, "amount": o.get("amount")},
+        new_value={"status": "refunded", "refundAmount": refund_amount, "reason": reason},
     )
     return jsonify({"ok": True, "message": "Refund recorded"})
+
+
+@admin_bp.route("/payments/<payment_id>/invoice/download", methods=["GET"])
+@jwt_required()
+def download_payment_invoice(payment_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(payment_id):
+        return jsonify({"error": "Invalid payment id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    o = get_orders_collection().find_one({"_id": ObjectId(payment_id)})
+    if not o:
+        return jsonify({"error": "Payment not found"}), 404
+    if (o.get("status") or "").lower() not in ("success", "refunded"):
+        return jsonify({"error": "Invoice available only for successful (or refunded) payments"}), 400
+    try:
+        pdf_bytes, _ = generate_and_store_invoice_pdf(o, force=False)
+    except Exception as e:
+        current_app.logger.exception("invoice download failed")
+        return jsonify({"error": str(e) or "Could not generate invoice"}), 500
+    fn = invoice_filename(o)
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=fn,
+    )
+
+
+@admin_bp.route("/payments/<payment_id>/invoice/regenerate", methods=["POST"])
+@jwt_required()
+def regenerate_payment_invoice(payment_id):
+    err = _admin_required()
+    if err:
+        return err
+    if not ObjectId.is_valid(payment_id):
+        return jsonify({"error": "Invalid payment id"}), 400
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()
+    o = get_orders_collection().find_one({"_id": ObjectId(payment_id)})
+    if not o:
+        return jsonify({"error": "Payment not found"}), 404
+    if (o.get("status") or "").lower() not in ("success", "refunded"):
+        return jsonify({"error": "Can only regenerate invoice for successful payments"}), 400
+    try:
+        pdf_bytes, upd = generate_and_store_invoice_pdf(o, force=True, bump_version=True)
+        o.update(upd)
+    except Exception as e:
+        current_app.logger.exception("invoice regenerate failed")
+        return jsonify({"error": str(e) or "Could not regenerate invoice"}), 500
+
+    # Email student + BCC accounts
+    emailed = False
+    uid = str(o.get("userId") or "")
+    if uid and ObjectId.is_valid(uid):
+        u = get_users_collection().find_one({"_id": ObjectId(uid)})
+        if u and (u.get("email") or "").strip():
+            title = "Training"
+            cid = str(o.get("courseId") or "")
+            if cid and ObjectId.is_valid(cid):
+                c = get_courses_collection().find_one({"_id": ObjectId(cid)})
+                if c:
+                    title = c.get("title") or title
+            amt = float(o.get("amount") or 0)
+            amount_display = f"₹{amt:,.0f}" if amt == int(amt) else f"₹{amt:,.2f}"
+            emailed = send_payment_success_email(
+                current_app.config,
+                u.get("name") or u.get("fullName") or "there",
+                (u.get("email") or "").strip(),
+                title,
+                amount_display,
+                o.get("transactionId") or o.get("orderId") or payment_id,
+                False,
+                invoice_number=o.get("invoiceNumber"),
+                pdf_bytes=pdf_bytes,
+                pdf_filename=invoice_filename(o),
+            )
+
+    _log_admin(
+        "payment.invoice_regenerate",
+        "payment",
+        payment_id,
+        new_value={
+            "invoiceVersion": o.get("invoiceVersion"),
+            "invoiceNumber": o.get("invoiceNumber"),
+            "reason": reason,
+            "emailed": emailed,
+        },
+    )
+    return jsonify({
+        "ok": True,
+        "invoiceNumber": o.get("invoiceNumber") or "",
+        "invoiceVersion": int(o.get("invoiceVersion") or 1),
+        "emailed": emailed,
+        "message": "Invoice regenerated",
+    })
 
 
 # ----- Companies -----
@@ -2290,9 +2768,9 @@ def admin_put_course_attendance_session(course_id, session_key):
 
 
 _DEFAULT_SUPPORT_FAQS = [
-    {"id": "faq_invoice", "question": "How do I download my invoice?", "answer": "Open Payments & Invoices in your dashboard. For completed orders, use Download next to the transaction to get your GST tax invoice PDF (same file emailed after payment).", "sortOrder": 0},
-    {"id": "faq_certificate", "question": "How do I get a certificate?", "answer": "Complete your course requirements, including any completion quiz set by your trainer. When eligible, you can download or receive your certificate from the Certificate section of the course.", "sortOrder": 1},
-    {"id": "faq_change_course", "question": "Can I change my course after enrolling?", "answer": "Contact support through Raise a Ticket with your enrollment details. Our team will check eligibility and guide you on any transfer or refund policy.", "sortOrder": 2},
+    {"id": "faq_invoice", "question": "How do I download my invoice?", "answer": "Open Payments & Invoices in your dashboard. For completed orders, use Download next to the transaction to get your GST tax invoice PDF (same file emailed after payment).", "sortOrder": 0, "displayOrder": 0, "category": "Payment", "visibility": "both", "active": True},
+    {"id": "faq_certificate", "question": "How do I get a certificate?", "answer": "Complete your course requirements, including any completion quiz set by your trainer. When eligible, you can download or receive your certificate from the Certificate section of the course.", "sortOrder": 1, "displayOrder": 1, "category": "Certificate", "visibility": "both", "active": True},
+    {"id": "faq_change_course", "question": "Can I change my course after enrolling?", "answer": "Contact support through Raise a Ticket with your enrollment details. Our team will check eligibility and guide you on any transfer or refund policy.", "sortOrder": 2, "displayOrder": 2, "category": "Training", "visibility": "both", "active": True},
 ]
 
 
@@ -2302,27 +2780,14 @@ def admin_get_support_content():
     err = _admin_required()
     if err:
         return err
+    from app.support_faq import serialize_faqs_from_doc
+
     db = get_db()
     if db is None:
         return jsonify({"faqs": _DEFAULT_SUPPORT_FAQS}), 503
     coll = get_app_settings_collection()
     doc = coll.find_one({"_id": "global"}) or {}
-    raw = doc.get("supportFaqs")
-    faqs = raw if isinstance(raw, list) else []
-    safe = []
-    for i, x in enumerate(faqs[:80]):
-        if not isinstance(x, dict):
-            continue
-        q = str(x.get("question") or "").strip()
-        if not q:
-            continue
-        safe.append({
-            "id": str(x.get("id") or f"faq_{i}"),
-            "question": q[:500],
-            "answer": str(x.get("answer") or "").strip()[:20000],
-            "sortOrder": int(x.get("sortOrder") if x.get("sortOrder") is not None else i),
-        })
-    safe.sort(key=lambda z: z["sortOrder"])
+    safe = serialize_faqs_from_doc(doc, audience=None)
     return jsonify({"faqs": safe})
 
 
@@ -2332,6 +2797,8 @@ def admin_put_support_content():
     err = _admin_required()
     if err:
         return err
+    from app.support_faq import normalize_faq_row
+
     data = request.get_json() or {}
     raw = data.get("faqs")
     if not isinstance(raw, list):
@@ -2340,16 +2807,10 @@ def admin_put_support_content():
     for i, x in enumerate(raw[:80]):
         if not isinstance(x, dict):
             continue
-        q = str(x.get("question") or "").strip()
-        if not q:
-            continue
-        out.append({
-            "id": str(x.get("id") or f"faq_{i}")[:80],
-            "question": q[:500],
-            "answer": str(x.get("answer") or "").strip()[:20000],
-            "sortOrder": int(x.get("sortOrder") if x.get("sortOrder") is not None else i),
-        })
-    out.sort(key=lambda z: z["sortOrder"])
+        row = normalize_faq_row(x, i)
+        if row:
+            out.append(row)
+    out.sort(key=lambda z: z.get("displayOrder", 0))
     db = get_db()
     if db is None:
         return jsonify({"error": "Database not configured"}), 503
@@ -2359,6 +2820,7 @@ def admin_put_support_content():
         {"$set": {"supportFaqs": out, "supportFaqsUpdatedAt": datetime.utcnow()}, "$setOnInsert": {"_id": "global"}},
         upsert=True,
     )
+    _log_admin("faq.update", "support_faqs", "global", new_value={"count": len(out)})
     return jsonify({"ok": True, "faqs": out})
 
 

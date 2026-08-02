@@ -2,7 +2,36 @@ import { useEffect, useState } from 'react'
 import { Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 
-type FaqRow = { id: string; question: string; answer: string; sortOrder: number }
+const CATEGORIES = ['General', 'Payment', 'Certificate', 'Internship', 'Training', 'Account'] as const
+const VISIBILITIES = [
+  { value: 'both', label: 'Both (public + students)' },
+  { value: 'public', label: 'Public only' },
+  { value: 'students', label: 'Students only' },
+] as const
+
+type FaqRow = {
+  id: string
+  question: string
+  answer: string
+  sortOrder: number
+  displayOrder?: number
+  category?: string
+  visibility?: string
+  active?: boolean
+}
+
+function emptyRow(i: number): FaqRow {
+  return {
+    id: `faq_${Date.now()}_${i}`,
+    question: '',
+    answer: '',
+    sortOrder: i,
+    displayOrder: i,
+    category: 'General',
+    visibility: 'both',
+    active: true,
+  }
+}
 
 export function AdminSupportFAQ() {
   const [rows, setRows] = useState<FaqRow[]>([])
@@ -14,7 +43,18 @@ export function AdminSupportFAQ() {
     setLoading(true)
     adminService
       .getSupportContentAdmin()
-      .then((r) => setRows((r.faqs || []).map((x, i) => ({ ...x, sortOrder: x.sortOrder ?? i }))))
+      .then((r) =>
+        setRows(
+          (r.faqs || []).map((x, i) => ({
+            ...x,
+            sortOrder: x.sortOrder ?? i,
+            displayOrder: x.displayOrder ?? x.sortOrder ?? i,
+            category: x.category || 'General',
+            visibility: x.visibility || 'both',
+            active: x.active !== false,
+          })),
+        ),
+      )
       .catch(() => setRows([]))
       .finally(() => setLoading(false))
   }, [])
@@ -23,15 +63,21 @@ export function AdminSupportFAQ() {
     setSaving(true)
     setMessage(null)
     try {
-      const normalized = rows.map((r, i) => ({
-        id: r.id || `faq_${i}`,
-        question: r.question.trim(),
-        answer: r.answer.trim(),
-        sortOrder: r.sortOrder ?? i,
-      })).filter((r) => r.question.length > 0)
+      const normalized = rows
+        .map((r, i) => ({
+          id: r.id || `faq_${i}`,
+          question: r.question.trim(),
+          answer: r.answer.trim(),
+          sortOrder: r.displayOrder ?? r.sortOrder ?? i,
+          displayOrder: r.displayOrder ?? r.sortOrder ?? i,
+          category: r.category || 'General',
+          visibility: r.visibility || 'both',
+          active: r.active !== false,
+        }))
+        .filter((r) => r.question.length > 0)
       await adminService.putSupportContentAdmin(normalized)
       setRows(normalized)
-      setMessage({ text: 'Saved. Students will see updates on Help & Support.', ok: true })
+      setMessage({ text: 'Saved. Public and student FAQ pages will refresh (cache up to 5 min).', ok: true })
     } catch {
       setMessage({ text: 'Could not save. Try again.', ok: false })
     } finally {
@@ -44,8 +90,8 @@ export function AdminSupportFAQ() {
       <div>
         <h1 className="text-xl font-bold text-brand-navy">Help & Support — FAQs</h1>
         <p className="mt-1 text-sm text-slate-gray">
-          Questions and answers shown in the student Help & Support page (accordion). Contact details match the public
-          Contact page.
+          Single source of truth for the public FAQ page and student Help & Support. Use Visibility to control where
+          each entry appears.
         </p>
       </div>
       {loading ? (
@@ -56,18 +102,60 @@ export function AdminSupportFAQ() {
         <div className="space-y-4">
           {rows.map((r, i) => (
             <div key={r.id || i} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="block text-xs font-medium text-gray-600">
-                  Sort order
-                  <input
-                    type="number"
-                    className="mt-1 w-24 rounded border border-gray-300 px-2 py-1 text-sm"
-                    value={r.sortOrder}
-                    onChange={(e) =>
-                      setRows((prev) => prev.map((x, j) => (j === i ? { ...x, sortOrder: Number(e.target.value) || 0 } : x)))
-                    }
-                  />
-                </label>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div className="flex flex-wrap gap-3">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Display order
+                    <input
+                      type="number"
+                      className="mt-1 w-24 rounded border border-gray-300 px-2 py-1 text-sm"
+                      value={r.displayOrder ?? r.sortOrder}
+                      onChange={(e) =>
+                        setRows((prev) =>
+                          prev.map((x, j) =>
+                            j === i ? { ...x, displayOrder: Number(e.target.value) || 0, sortOrder: Number(e.target.value) || 0 } : x,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-gray-600">
+                    Category
+                    <select
+                      className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
+                      value={r.category || 'General'}
+                      onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, category: e.target.value } : x)))}
+                    >
+                      {CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs font-medium text-gray-600">
+                    Visibility
+                    <select
+                      className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
+                      value={r.visibility || 'both'}
+                      onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, visibility: e.target.value } : x)))}
+                    >
+                      {VISIBILITIES.map((v) => (
+                        <option key={v.value} value={v.value}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-600 mt-5">
+                    <input
+                      type="checkbox"
+                      checked={r.active !== false}
+                      onChange={(e) => setRows((prev) => prev.map((x, j) => (j === i ? { ...x, active: e.target.checked } : x)))}
+                    />
+                    Active
+                  </label>
+                </div>
                 <button
                   type="button"
                   onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
@@ -97,26 +185,23 @@ export function AdminSupportFAQ() {
           ))}
           <button
             type="button"
-            onClick={() =>
-              setRows((prev) => [
-                ...prev,
-                { id: `faq_${Date.now()}`, question: '', answer: '', sortOrder: prev.length },
-              ])
-            }
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+            onClick={() => setRows((prev) => [...prev, emptyRow(prev.length)])}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-brand-navy hover:bg-gray-50"
           >
             <Plus className="h-4 w-4" /> Add FAQ
           </button>
-          {message ? <p className={`text-sm ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</p> : null}
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void save()}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save all
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={save}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save FAQs
+            </button>
+            {message && <p className={`text-sm ${message.ok ? 'text-emerald-700' : 'text-red-600'}`}>{message.text}</p>}
+          </div>
         </div>
       )}
     </div>

@@ -42,6 +42,7 @@ def send_email_via_ses(
     html_body: str,
     text_body: Optional[str] = None,
     attachments: Optional[list[tuple[str, bytes, str]]] = None,
+    bcc: Optional[list[str]] = None,
 ) -> bool:
     if not ses_configured(config):
         logger.info("SES not configured; skipping email to %s", to_addr)
@@ -61,11 +62,14 @@ def send_email_via_ses(
     name = (config.get("MAIL_FROM_NAME") or "XpertIntern").strip()
     source = f"{name} <{from_email}>" if name else from_email
     text_body = text_body or _strip_html_simple(html_body)
+    bcc_list = [b.strip() for b in (bcc or []) if b and str(b).strip()]
 
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = source
     msg["To"] = to_addr
+    if bcc_list:
+        msg["Bcc"] = ", ".join(bcc_list)
     reply_to = (config.get("MAIL_REPLY_TO") or "").strip()
     if reply_to:
         msg["Reply-To"] = reply_to
@@ -82,15 +86,16 @@ def send_email_via_ses(
         part.add_header("Content-Disposition", "attachment", filename=fn)
         msg.attach(part)
 
+    destinations = [to_addr] + [b for b in bcc_list if b.lower() != to_addr.lower()]
     region = _ses_region(config)
     try:
         client = boto3.client("ses", region_name=region)
         client.send_raw_email(
             Source=from_email,
-            Destinations=[to_addr],
+            Destinations=destinations,
             RawMessage={"Data": msg.as_bytes()},
         )
-        logger.info("SES: sent mail to %s (region=%s)", to_addr, region)
+        logger.info("SES: sent mail to %s bcc=%s (region=%s)", to_addr, len(bcc_list), region)
         return True
     except ClientError as e:
         logger.error("SES send failed for %s: %s", to_addr, e.response.get("Error", {}).get("Message", e))

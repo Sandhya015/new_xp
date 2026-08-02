@@ -162,6 +162,16 @@ def get_password_reset_attempts_collection() -> Collection:
     return get_db()["password_reset_attempts"]
 
 
+def get_activity_logs_collection() -> Collection:
+    """Admin / system activity audit trail (CFRD)."""
+    return get_db()["activity_logs"]
+
+
+def get_bulk_invoice_jobs_collection() -> Collection:
+    """Background bulk invoice ZIP jobs (CFRD §10)."""
+    return get_db()["bulk_invoice_jobs"]
+
+
 def _ix(collection: Collection, keys, **kwargs) -> None:
     """Create one index; log and continue if it fails (e.g. duplicate keys on unique)."""
     try:
@@ -273,6 +283,22 @@ def ensure_indexes(db: Database) -> None:
         )
     except Exception as e:
         logger.warning("Mongo TTL index on password_reset_attempts skipped: %s", e)
+
+    _ix(db["activity_logs"], [("createdAt", -1)], name="idx_activity_created")
+    _ix(
+        db["activity_logs"],
+        [("entityType", 1), ("entityId", 1), ("createdAt", -1)],
+        name="idx_activity_entity_created",
+    )
+    _ix(
+        db["activity_logs"],
+        [("actorEmail", 1), ("createdAt", -1)],
+        name="idx_activity_actor_created",
+    )
+    _ix(db["courses"], [("deleted", 1), ("createdAt", -1)], name="idx_courses_deleted_created")
+    _ix(db["users"], [("role", 1), ("accountStatus", 1), ("createdAt", -1)], name="idx_users_role_acct_created")
+    _ix(db["bulk_invoice_jobs"], [("adminEmail", 1), ("status", 1), ("createdAt", -1)], name="idx_bulk_inv_admin_status")
+    _ix(db["bulk_invoice_jobs"], [("createdAt", -1)], name="idx_bulk_inv_created")
 
 
 def init_db(uri: str, database_name: str = "xpertintern") -> Database | None:

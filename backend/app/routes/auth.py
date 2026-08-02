@@ -844,6 +844,13 @@ def login():
                 "code": "admin_use_admin_portal",
             }), 403
 
+        acct = (user.get("accountStatus") or "active").strip().lower()
+        if acct == "suspended":
+            return jsonify({
+                "error": "Your account is suspended. Contact support.",
+                "code": "account_suspended",
+            }), 403
+
         if user.get("role") == "company":
             st = user.get("status")
             if st == "pending":

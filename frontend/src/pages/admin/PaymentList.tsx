@@ -1,30 +1,249 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CreditCard, Download, CheckCircle, XCircle, Clock } from 'lucide-react'
-import { adminService } from '@/services/adminService'
+import { CreditCard, Download, CheckCircle, XCircle, Clock, RotateCcw } from 'lucide-react'
+import {
+  adminService,
+  type PaymentDetail,
+  type PaymentFilters,
+  type PaymentsSummary,
+} from '@/services/adminService'
 
-const OVERVIEW_CARDS = [
-  { label: 'Total Revenue', value: '—', icon: CreditCard },
-  { label: 'Successful Payments', value: '—', sub: '', icon: CheckCircle },
-  { label: 'Failed Payments', value: '—', icon: XCircle },
-  { label: 'Pending Payments', value: '—', icon: Clock },
-  { label: 'Refunds Issued', value: '—', sub: '', icon: CreditCard },
-]
+const FILTERS_KEY = 'admin.payments.lastFilters'
+
+type FilterState = {
+  search: string
+  status: string
+  paymentMode: string
+  dateFrom: string
+  dateTo: string
+  courseId: string
+  university: string
+  amountMin: string
+  amountMax: string
+  coupon: string
+}
+
+const emptyFilters = (): FilterState => ({
+  search: '',
+  status: 'all',
+  paymentMode: '',
+  dateFrom: '',
+  dateTo: '',
+  courseId: '',
+  university: '',
+  amountMin: '',
+  amountMax: '',
+  coupon: '',
+})
+
+function loadStoredFilters(): FilterState {
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY)
+    if (!raw) return emptyFilters()
+    return { ...emptyFilters(), ...JSON.parse(raw) }
+  } catch {
+    return emptyFilters()
+  }
+}
+
+function toParams(f: FilterState, page: number, limit: number): PaymentFilters {
+  const p: PaymentFilters = { page, limit }
+  if (f.search.trim()) p.search = f.search.trim()
+  if (f.status && f.status !== 'all') p.status = f.status
+  if (f.paymentMode.trim()) p.paymentMode = f.paymentMode.trim()
+  if (f.dateFrom) p.dateFrom = f.dateFrom
+  if (f.dateTo) p.dateTo = f.dateTo
+  if (f.courseId.trim()) p.courseId = f.courseId.trim()
+  if (f.university.trim()) p.university = f.university.trim()
+  if (f.amountMin.trim()) p.amountMin = f.amountMin.trim()
+  if (f.amountMax.trim()) p.amountMax = f.amountMax.trim()
+  if (f.coupon.trim()) p.coupon = f.coupon.trim()
+  return p
+}
+
+function formatInr(n: number) {
+  return `₹${Number(n || 0).toLocaleString('en-IN')}`
+}
+
+function statusBadgeClass(status: string) {
+  const s = (status || '').toLowerCase()
+  if (s === 'success') return 'bg-emerald-100 text-emerald-800'
+  if (s === 'failed' || s === 'cancelled') return 'bg-red-100 text-red-800'
+  if (s === 'refunded') return 'bg-amber-100 text-amber-900'
+  return 'bg-slate-100 text-slate-700'
+}
 
 export function PaymentList() {
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [items, setItems] = useState<Array<{ id: string; orderId: string; studentId: string; amount: number; status: string; createdAt: string }>>([])
+  const [filters, setFilters] = useState<FilterState>(() => loadStoredFilters())
+  const [page, setPage] = useState(1)
+  const [items, setItems] = useState<PaymentDetail[]>([])
+  const [total, setTotal] = useState(0)
+  const [summary, setSummary] = useState<PaymentsSummary | null>(null)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkMsg, setBulkMsg] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const limit = 50
+
+  const params = useMemo(() => toParams(filters, page, limit), [filters, page])
 
   useEffect(() => {
-    let cancelled = false
-    adminService.getPayments({ search: search || undefined })
-      .then((res) => { if (!cancelled) setItems(res.items || []) })
-      .catch(() => { if (!cancelled) setItems([]) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [search])
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(filters))
+    } catch {
+      /* ignore */
+    }
+  }, [filters])
+
+  const load = useCallback(() => {
+    setLoading(true)
+    Promise.all([
+      adminService.getPayments(params),
+      adminService.getPaymentsSummary(params),
+    ])
+      .then(([listRes, sumRes]) => {
+        setItems(listRes.items || [])
+        setTotal(listRes.total ?? (listRes.items || []).length)
+        setSummary(sumRes)
+      })
+      .catch(() => {
+        setItems([])
+        setTotal(0)
+        setSummary(null)
+      })
+      .finally(() => setLoading(false))
+  }, [params])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const setFilter = <K extends keyof FilterState>(key: K, value: FilterState[K]) => {
+    setPage(1)
+    setFilters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const clearFilters = () => {
+    setFilters(emptyFilters())
+    setPage(1)
+    setSelected(new Set())
+  }
+
+  const overviewCards = [
+    {
+      key: 'revenue',
+      label: 'Total Revenue',
+      value: summary ? formatInr(summary.totalRevenue) : '—',
+      sub:
+        summary?.percentChange != null
+          ? `${summary.percentChange >= 0 ? '+' : ''}${summary.percentChange}% vs prior period`
+          : '',
+      icon: CreditCard,
+      status: '',
+    },
+    {
+      key: 'success',
+      label: 'Successful Payments',
+      value: summary ? String(summary.successfulCount) : '—',
+      sub: '',
+      icon: CheckCircle,
+      status: 'success',
+    },
+    {
+      key: 'failed',
+      label: 'Failed Payments',
+      value: summary ? String(summary.failedCount) : '—',
+      sub: '',
+      icon: XCircle,
+      status: 'failed',
+    },
+    {
+      key: 'pending',
+      label: 'Pending Payments',
+      value: summary ? String(summary.pendingCount) : '—',
+      sub: '>15 min unpaid',
+      icon: Clock,
+      status: 'pending',
+    },
+    {
+      key: 'refunds',
+      label: 'Refunds Issued',
+      value: summary ? formatInr(summary.refundsSum) : '—',
+      sub: summary ? `${summary.refundsCount} refunds` : '',
+      icon: RotateCcw,
+      status: 'refunded',
+    },
+  ]
+
+  const allOnPageSelected = items.length > 0 && items.every((r) => selected.has(r.id))
+
+  const toggleAll = () => {
+    if (allOnPageSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev)
+        items.forEach((r) => next.delete(r.id))
+        return next
+      })
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev)
+        items.forEach((r) => next.add(r.id))
+        return next
+      })
+    }
+  }
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkDownload = async () => {
+    setBulkBusy(true)
+    setBulkMsg('')
+    try {
+      const ids = Array.from(selected)
+      const res = await adminService.bulkDownloadInvoices(
+        ids.length
+          ? { ids, useFilters: false }
+          : { useFilters: true, filters: params },
+      )
+      if (res.async) {
+        setBulkMsg(res.message || `Bulk job queued (${res.jobId || ''}). Check your email.`)
+      } else if (res.blob) {
+        const url = URL.createObjectURL(res.blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `invoices_bulk_${new Date().toISOString().slice(0, 10)}.zip`
+        a.click()
+        URL.revokeObjectURL(url)
+        setBulkMsg(`Downloaded ZIP (${ids.length || 'filtered'} invoices).`)
+      }
+    } catch (e: unknown) {
+      const msg =
+        (e as { response?: { data?: ArrayBuffer | { error?: string } } })?.response?.data
+      if (msg instanceof ArrayBuffer) {
+        try {
+          const j = JSON.parse(new TextDecoder().decode(msg))
+          setBulkMsg(j.error || 'Bulk download failed')
+        } catch {
+          setBulkMsg('Bulk download failed')
+        }
+      } else if (msg && typeof msg === 'object' && 'error' in msg) {
+        setBulkMsg(String((msg as { error?: string }).error || 'Bulk download failed'))
+      } else {
+        setBulkMsg('Bulk download failed')
+      }
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / limit))
 
   return (
     <div className="space-y-6 w-full">
@@ -32,47 +251,152 @@ export function PaymentList() {
         <h2 className="text-lg font-semibold text-brand-navy">Payments & Invoices</h2>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          disabled={bulkBusy}
+          onClick={handleBulkDownload}
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
-          <Download className="h-4 w-4" /> Export
+          <Download className="h-4 w-4" />
+          {selected.size ? `Download selected (${selected.size})` : 'Bulk download (filters)'}
         </button>
       </div>
+      {bulkMsg && <p className="text-sm text-slate-gray">{bulkMsg}</p>}
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        {OVERVIEW_CARDS.map(({ label, value, sub, icon: Icon }) => (
-          <div key={label} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        {overviewCards.map(({ key, label, value, sub, icon: Icon, status }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => status && setFilter('status', status)}
+            className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm text-left hover:border-brand-accent/40 transition-colors"
+          >
             <div className="flex items-center gap-2 text-slate-gray">
               <Icon className="h-4 w-4" />
               <span className="text-xs font-medium">{label}</span>
             </div>
             <p className="mt-2 text-lg font-bold text-brand-navy">{value}</p>
-            {sub && <p className="text-xs text-slate-gray">{sub}</p>}
-          </div>
+            {sub ? <p className="text-xs text-slate-gray">{sub}</p> : null}
+          </button>
         ))}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-gray-200 flex flex-wrap gap-4">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+        <div className="p-4 border-b border-gray-200 flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Status</label>
+            <select
+              value={filters.status}
+              onChange={(e) => setFilter('status', e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent"
+            >
+              <option value="all">All Status</option>
+              <option value="success">Success</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+              <option value="refunded">Refunded</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Payment mode</label>
+            <input
+              value={filters.paymentMode}
+              onChange={(e) => setFilter('paymentMode', e.target.value)}
+              placeholder="upi / card / razorpay…"
+              className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">From</label>
+            <input
+              type="date"
+              value={filters.dateFrom}
+              onChange={(e) => setFilter('dateFrom', e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">To</label>
+            <input
+              type="date"
+              value={filters.dateTo}
+              onChange={(e) => setFilter('dateTo', e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Course ID</label>
+            <input
+              value={filters.courseId}
+              onChange={(e) => setFilter('courseId', e.target.value)}
+              className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">University</label>
+            <input
+              value={filters.university}
+              onChange={(e) => setFilter('university', e.target.value)}
+              className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Amount min</label>
+            <input
+              type="number"
+              value={filters.amountMin}
+              onChange={(e) => setFilter('amountMin', e.target.value)}
+              className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Amount max</label>
+            <input
+              type="number"
+              value={filters.amountMax}
+              onChange={(e) => setFilter('amountMax', e.target.value)}
+              className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Coupon</label>
+            <input
+              value={filters.coupon}
+              onChange={(e) => setFilter('coupon', e.target.value)}
+              placeholder="yes / no / CODE"
+              className="w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs text-gray-500 mb-1">Search</label>
+            <input
+              type="search"
+              placeholder="Name, email, phone, orderId, gateway…"
+              value={filters.search}
+              onChange={(e) => setFilter('search', e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            <option value="all">All Status</option>
-            <option value="success">Success</option>
-            <option value="failed">Failed</option>
-            <option value="pending">Pending</option>
-            <option value="refunded">Refunded</option>
-          </select>
-          <input type="search" placeholder="Search by student, TXN ID..." value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            Clear filters
+          </button>
         </div>
+
         {loading && <p className="p-4 text-sm text-gray-500">Loading...</p>}
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Transaction ID</th>
+                <th className="px-4 py-3 text-left">
+                  <input type="checkbox" checked={allOnPageSelected} onChange={toggleAll} className="rounded text-brand-accent" />
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Transaction</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Student</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Training</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Mode</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Coupon</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-600">Status</th>
@@ -82,22 +406,82 @@ export function PaymentList() {
             <tbody className="divide-y divide-gray-200 bg-white">
               {items.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm font-medium text-brand-navy">{row.orderId || row.id}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">{row.studentId || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-slate-gray">₹{row.amount?.toLocaleString('en-IN') ?? '—'}</td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggleOne(row.id)}
+                      className="rounded text-brand-accent"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-sm font-medium text-brand-navy">
+                    <div>{row.orderId || row.id}</div>
+                    {row.gatewayRef ? <div className="text-xs text-slate-gray font-normal">{row.gatewayRef}</div> : null}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">
+                    {row.studentId ? (
+                      <a
+                        href={`/admin/students/${row.studentId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-accent hover:underline"
+                      >
+                        <div className="font-medium text-brand-navy">{row.studentName || 'Student'}</div>
+                        <div className="text-xs">{row.studentEmail || row.studentId}</div>
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{row.courseTitle || row.courseId || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{row.paymentMode || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{row.couponCode || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-slate-gray">{formatInr(row.amount)}</td>
                   <td className="px-4 py-3 text-sm text-slate-gray">{row.createdAt}</td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
+                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClass(row.status)}`}>
                       {row.status}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/admin/payments/${row.id}`} className="text-sm font-medium text-brand-accent hover:underline">View</Link>
+                    <Link to={`/admin/payments/${row.id}`} className="text-sm font-medium text-brand-accent hover:underline">
+                      View
+                    </Link>
                   </td>
                 </tr>
               ))}
+              {!loading && items.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-500">
+                    No payments match these filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm text-slate-gray">
+          <span>
+            {total} total · page {page} / {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </div>

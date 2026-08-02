@@ -127,7 +127,8 @@ def schedule_payment_success_email(
     html_invoice_bytes: bytes | None = None,
     html_filename: str | None = None,
 ) -> None:
-    """After Razorpay verify — payment receipt (+ enrollment note if new) + tax invoice attachments."""
+    """After payment verify — receipt + PDF tax invoice only (no HTML attachment)."""
+    _ = (html_invoice_bytes, html_filename)
 
     def job():
         db = get_db()
@@ -165,8 +166,6 @@ def schedule_payment_success_email(
             invoice_number=invoice_number,
             pdf_bytes=pdf_bytes,
             pdf_filename=pdf_filename,
-            html_invoice_bytes=html_invoice_bytes,
-            html_filename=html_filename,
         )
         if ok:
             logger.info("Payment success email sent to %s", email)
