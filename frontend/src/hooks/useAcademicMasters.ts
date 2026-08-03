@@ -89,8 +89,14 @@ export function useAcademicMasters() {
 /** Training list for payment filters */
 export async function fetchAdminCoursesForFilter(): Promise<Array<{ id: string; title: string }>> {
   try {
-    const data = await adminService.getCourses({ status: 'active' })
-    return ((data.items || []) as Array<{ id: string; title: string }>).map((c) => ({
+    // Prefer active trainings; if empty, fall back to full list so filters still work
+    let data = await adminService.getCourses({ status: 'active' })
+    let items = (data.items || []) as Array<{ id: string; title: string }>
+    if (!items.length) {
+      data = await adminService.getCourses()
+      items = (data.items || []) as Array<{ id: string; title: string }>
+    }
+    return items.map((c) => ({
       id: c.id,
       title: c.title || c.id,
     }))

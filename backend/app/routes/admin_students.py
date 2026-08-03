@@ -37,6 +37,7 @@ from app.email_smtp import send_email, send_password_reset_email
 from app.email_templates import public_app_url
 from app.registration_otp import smtp_or_ses_configured, utcnow
 from app.routes.admin import (
+    _admin_actor,
     _admin_required,
     _log_admin,
     _ticket_serialize,
@@ -834,102 +835,126 @@ def delete_student(student_id):
 @jwt_required()
 def reset_student_password(student_id):
     """
-    Rev 2: Super Admin sets a new password directly (hashed with pbkdf2:sha256).
+    Super Admin sets a new password directly (hashed with pbkdf2:sha256).
     Optional notify email (does not include password). Force change on next login flag.
     Rate limit: 3 resets / student / admin / day.
     """
-    err = _admin_required()
-    if err:
-        return err
-    if get_db() is None:
-        return jsonify({"error": "Database not configured"}), 503
-    u, err_resp = _find_student(student_id)
-    if err_resp:
-        return err_resp
-
-    data = request.get_json(silent=True) or {}
-    new_pw = (data.get("password") or data.get("newPassword") or "").strip()
-    confirm = (data.get("confirmPassword") or data.get("confirm") or "").strip()
-    reason = (data.get("reason") or "").strip()[:500]
-    notify = data.get("notifyStudent", True)
-    if notify is None:
-        notify = True
-    force_change = data.get("forceChangeOnLogin", True)
-    if force_change is None:
-        force_change = True
-
-    # Backward compat: no body → old email-link flow for clients that still call empty POST
-    if not new_pw and not data:
-        return _reset_password_email_link(u, student_id)
-
-    if not new_pw or not confirm:
-        return jsonify({"error": "password and confirmPassword are required"}), 400
-    if new_pw != confirm:
-        return jsonify({"error": "Passwords do not match"}), 400
-    if len(new_pw) < 8 or not re.search(r"[A-Za-z]", new_pw) or not re.search(r"\d", new_pw):
-        return jsonify({"error": "Password must be 8+ characters with at least 1 letter and 1 number"}), 400
-
-    actor = _admin_actor()
-    # rate limit 3 / day for this admin+student
-    day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        recent = get_activity_logs_collection().count_documents({
-            "action": "student.set_password",
-            "entityId": student_id,
-            "actorEmail": actor.get("actor_email") or "",
-            "createdAt": {"$gte": day_start},
-        })
-        if recent >= 3:
-            return jsonify({"error": "Rate limit: max 3 password resets per student per day"}), 429
-    except Exception:
-        pass
+        err = _admin_required()
+        if err:
+            if isinstance(err, tuple) and len(err) >= 2 and err[1] == 403:
+                return jsonify({"error": "Only Super Admin can reset a student's password."}), 403
+            return err
+        if get_db() is None:
+            return jsonify({
+                "error": "Something went wrong on our side. Please try again in a moment.",
+            }), 503
+        u, err_resp = _find_student(student_id)
+        if err_resp:
+            return err_resp
 
-    from werkzeug.security import generate_password_hash
-    pw_hash = generate_password_hash(new_pw, method="pbkdf2:sha256")
-    get_users_collection().update_one(
-        {"_id": u["_id"]},
-        {"$set": {
-            "password": pw_hash,
-            "forcePasswordChange": bool(force_change),
-            "passwordResetAt": datetime.utcnow(),
-            "passwordResetBy": actor.get("actor_email") or "",
-            "sessionEpoch": int(datetime.utcnow().timestamp()),
-            "updatedAt": datetime.utcnow(),
-        }},
-    )
-    email = (u.get("email") or "").strip().lower()
-    emailed = False
-    if notify and email and smtp_or_ses_configured(current_app.config):
-        name = u.get("name") or u.get("fullName") or email.split("@")[0]
-        html = (
-            f"<p>Hi {name},</p>"
-            f"<p>Your XpertIntern account password was reset by support. "
-            f"Please log in and change your password from your account settings.</p>"
-            f"<p>— Team XpertIntern</p>"
+        data = request.get_json(silent=True) or {}
+        new_pw = (data.get("password") or data.get("newPassword") or "").strip()
+        confirm = (data.get("confirmPassword") or data.get("confirm") or "").strip()
+        reason = (data.get("reason") or "").strip()[:500]
+        notify = data.get("notifyStudent", True)
+        if notify is None:
+            notify = True
+        force_change = data.get("forceChangeOnLogin", True)
+        if force_change is None:
+            force_change = True
+
+        # Backward compat: no body → old email-link flow
+        if not new_pw and not data:
+            return _reset_password_email_link(u, student_id)
+
+        if not new_pw or not confirm:
+            return jsonify({
+                "error": "New password and Confirm password must be the same.",
+            }), 400
+        if new_pw != confirm:
+            return jsonify({
+                "error": "New password and Confirm password must be the same.",
+            }), 400
+        if len(new_pw) < 8 or not re.search(r"[A-Za-z]", new_pw) or not re.search(r"\d", new_pw):
+            return jsonify({
+                "error": "Password must be at least 8 characters and include a letter and a number.",
+            }), 400
+
+        actor = _admin_actor()
+        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            recent = get_activity_logs_collection().count_documents({
+                "action": "student.set_password",
+                "entityId": student_id,
+                "actorEmail": actor.get("actor_email") or "",
+                "createdAt": {"$gte": day_start},
+            })
+            if recent >= 3:
+                return jsonify({
+                    "error": "You have already reset this student's password 3 times today. Please try again tomorrow.",
+                }), 429
+        except Exception:
+            current_app.logger.exception("password reset rate-limit check failed")
+
+        from werkzeug.security import generate_password_hash
+        from app.auth_session import new_session_epoch
+
+        pw_hash = generate_password_hash(new_pw, method="pbkdf2:sha256")
+        get_users_collection().update_one(
+            {"_id": u["_id"]},
+            {"$set": {
+                "password": pw_hash,
+                "forcePasswordChange": bool(force_change),
+                "passwordResetAt": datetime.utcnow(),
+                "passwordResetBy": actor.get("actor_email") or "",
+                "sessionEpoch": new_session_epoch(),
+                "updatedAt": datetime.utcnow(),
+            }},
         )
-        emailed = bool(send_email(
-            current_app.config,
-            email,
-            "Your XpertIntern password was reset by support",
-            html,
-            bcc=["support@xpertintern.com"],
-        ))
-    _log_admin(
-        "student.set_password",
-        "student",
-        student_id,
-        new_value={
+        email = (u.get("email") or "").strip().lower()
+        emailed = False
+        if notify and email and smtp_or_ses_configured(current_app.config):
+            name = u.get("name") or u.get("fullName") or email.split("@")[0]
+            html = (
+                f"<p>Hi {name},</p>"
+                f"<p>Your XpertIntern account password was reset by support. "
+                f"Please log in and change your password from your account settings.</p>"
+                f"<p>— Team XpertIntern</p>"
+            )
+            try:
+                emailed = bool(send_email(
+                    current_app.config,
+                    email,
+                    "Your XpertIntern password was reset by support",
+                    html,
+                    bcc=["support@xpertintern.com"],
+                ))
+            except Exception:
+                current_app.logger.exception("password reset notify email failed")
+                emailed = False
+        _log_admin(
+            "student.set_password",
+            "student",
+            student_id,
+            new_value={
+                "forceChangeOnLogin": bool(force_change),
+                "notifyEmail": emailed,
+                "reason": reason or None,
+            },
+            meta={"reason": reason or None},
+        )
+        return jsonify({
+            "ok": True,
+            "message": "Password updated successfully",
+            "notifyEmailSent": emailed,
             "forceChangeOnLogin": bool(force_change),
-            "notifyEmail": emailed,
-            "reason": reason or None,
-        },
-    )
-    return jsonify({
-        "ok": True,
-        "message": "Password updated successfully",
-        "notifyEmailSent": emailed,
-        "forceChangeOnLogin": bool(force_change),
-    })
+        })
+    except Exception:
+        current_app.logger.exception("reset_student_password failed for %s", student_id)
+        return jsonify({
+            "error": "Something went wrong on our side. Please try again in a moment.",
+        }), 500
 
 
 def _reset_password_email_link(u: dict, student_id: str):

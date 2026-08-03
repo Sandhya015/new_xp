@@ -396,85 +396,116 @@ def list_payments(flt: dict) -> tuple[list[dict], int]:
 
 
 def compute_payments_summary(flt: dict, *, include_pct: bool = True) -> dict:
-    cache_k = filter_cache_key(flt)
-    now = time.time()
-    hit = _SUMMARY_CACHE.get(cache_k)
-    if hit and now - hit[0] < _SUMMARY_TTL_SEC:
-        return dict(hit[1])
-
-    uni_ids = resolve_university_user_ids(flt.get("universities") or flt.get("university") or "")
-    if uni_ids is not None and len(uni_ids) == 0:
-        empty = {
-            "totalRevenue": 0,
-            "successfulCount": 0,
-            "failedCount": 0,
-            "pendingCount": 0,
-            "refundsSum": 0,
-            "refundsCount": 0,
-            "percentChange": None,
-        }
-        _SUMMARY_CACHE[cache_k] = (now, empty)
-        return empty
-
-    base_q = build_orders_mongo_query(flt, user_ids_for_university=uni_ids)
-    # Summary ignores status filter from cards context when status is set for list —
-    # but CFRD says "same filters". Keep status in match.
-    coll = get_orders_collection()
-    pending_cutoff = datetime.utcnow() - timedelta(minutes=15)
-
-    def _and(extra: dict) -> dict:
-        if not base_q:
-            return extra
-        return {"$and": [base_q, extra]}
-
-    # Revenue: success excluding refunds
-    rev_match = _and({"status": "success"})
-    pipeline = [
-        {"$match": rev_match},
-        {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$amount", 0]}}, "count": {"$sum": 1}}},
-    ]
-    rev_rows = list(coll.aggregate(pipeline))
-    total_revenue = float(rev_rows[0]["total"]) if rev_rows else 0.0
-    successful_count = int(rev_rows[0]["count"]) if rev_rows else 0
-
-    failed_count = coll.count_documents(_and({"status": {"$in": ["failed", "cancelled"]}}))
-    pending_count = coll.count_documents(_and({
-        "status": {"$in": ["created", "pending", "attempted"]},
-        "createdAt": {"$lte": pending_cutoff},
-    }))
-
-    ref_pipe = [
-        {"$match": _and({"status": "refunded"})},
-        {"$group": {
-            "_id": None,
-            "total": {"$sum": {"$ifNull": ["$refundAmount", {"$ifNull": ["$amount", 0]}]}},
-            "count": {"$sum": 1},
-        }},
-    ]
-    ref_rows = list(coll.aggregate(ref_pipe))
-    refunds_sum = float(ref_rows[0]["total"]) if ref_rows else 0.0
-    refunds_count = int(ref_rows[0]["count"]) if ref_rows else 0
-
-    percent_change = None
-    if include_pct:
-        percent_change = _percent_change_vs_previous(flt, total_revenue)
-
-    out = {
-        "totalRevenue": total_revenue,
-        "successfulCount": successful_count,
-        "failedCount": failed_count,
-        "pendingCount": pending_count,
-        "refundsSum": refunds_sum,
-        "refundsCount": refunds_count,
-        "percentChange": percent_change,
+    empty = {
+        "totalRevenue": 0.0,
+        "successfulCount": 0,
+        "failedCount": 0,
+        "pendingCount": 0,
+        "refundsSum": 0.0,
+        "refundsCount": 0,
+        "percentChange": None,
     }
-    _SUMMARY_CACHE[cache_k] = (now, out)
-    # Cap cache size
-    if len(_SUMMARY_CACHE) > 200:
-        oldest = sorted(_SUMMARY_CACHE.items(), key=lambda x: x[1][0])[:50]
-        for k, _ in oldest:
-            _SUMMARY_CACHE.pop(k, None)
-    return dict(out)
+    try:
+        cache_k = filter_cache_key(flt)
+        now = time.time()
+        hit = _SUMMARY_CACHE.get(cache_k)
+        if hit and now - hit[0] < _SUMMARY_TTL_SEC:
+            return dict(hit[1])
+
+        uni_ids = resolve_university_user_ids(flt.get("universities") or flt.get("university") or "")
+        if uni_ids is not None and len(uni_ids) == 0:
+            _SUMMARY_CACHE[cache_k] = (now, empty)
+            return dict(empty)
+
+        base_q = build_orders_mongo_query(flt, user_ids_for_university=uni_ids)
+        coll = get_orders_collection()
+        pending_cutoff = datetime.utcnow() - timedelta(minutes=15)
+
+        def _and(extra: dict) -> dict:
+            if not base_q:
+                return extra
+            return {"$and": [base_q, extra]}
+
+        # Revenue: successful payment amounts (refunds excluded — status success only)
+        rev_match = _and({"status": "success"})
+        # Sum amount coercing number/string via $toDouble when possible
+        pipeline = [
+            {"$match": rev_match},
+            {"$group": {
+                "_id": None,
+                "total": {
+                    "$sum": {
+                        "$convert": {
+                            "input": {"$ifNull": ["$amount", 0]},
+                            "to": "double",
+                            "onError": 0,
+                            "onNull": 0,
+                        }
+                    }
+                },
+                "count": {"$sum": 1},
+            }},
+        ]
+        rev_rows = list(coll.aggregate(pipeline))
+        total_revenue = float(rev_rows[0]["total"]) if rev_rows else 0.0
+        successful_count = int(rev_rows[0]["count"]) if rev_rows else 0
+
+        failed_count = coll.count_documents(_and({"status": {"$in": ["failed", "cancelled"]}}))
+        pending_count = coll.count_documents(_and({
+            "status": {"$in": ["created", "pending", "attempted"]},
+            "createdAt": {"$lte": pending_cutoff},
+        }))
+
+        ref_pipe = [
+            {"$match": _and({"status": "refunded"})},
+            {"$group": {
+                "_id": None,
+                "total": {
+                    "$sum": {
+                        "$convert": {
+                            "input": {
+                                "$ifNull": [
+                                    "$refundAmount",
+                                    {"$ifNull": ["$amount", 0]},
+                                ]
+                            },
+                            "to": "double",
+                            "onError": 0,
+                            "onNull": 0,
+                        }
+                    }
+                },
+                "count": {"$sum": 1},
+            }},
+        ]
+        ref_rows = list(coll.aggregate(ref_pipe))
+        refunds_sum = float(ref_rows[0]["total"]) if ref_rows else 0.0
+        refunds_count = int(ref_rows[0]["count"]) if ref_rows else 0
+
+        percent_change = None
+        if include_pct:
+            try:
+                percent_change = _percent_change_vs_previous(flt, total_revenue)
+            except Exception:
+                percent_change = None
+
+        out = {
+            "totalRevenue": total_revenue,
+            "successfulCount": successful_count,
+            "failedCount": failed_count,
+            "pendingCount": pending_count,
+            "refundsSum": refunds_sum,
+            "refundsCount": refunds_count,
+            "percentChange": percent_change,
+        }
+        _SUMMARY_CACHE[cache_k] = (now, out)
+        if len(_SUMMARY_CACHE) > 200:
+            oldest = sorted(_SUMMARY_CACHE.items(), key=lambda x: x[1][0])[:50]
+            for k, _ in oldest:
+                _SUMMARY_CACHE.pop(k, None)
+        return dict(out)
+    except Exception:
+        return dict(empty)
 
 
 def _percent_change_vs_previous(flt: dict, current_revenue: float) -> float | None:

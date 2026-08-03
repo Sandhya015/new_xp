@@ -53,7 +53,7 @@ const TABS = [
 type ModalKind = 'edit' | 'suspend' | 'delete' | 'message' | 'password' | null
 
 function errMsg(e: unknown, fallback: string) {
-  const ax = e as { response?: { data?: { error?: string; message?: string } } }
+  const ax = e as { response?: { data?: { error?: string; message?: string }; status?: number } }
   return ax?.response?.data?.error || ax?.response?.data?.message || fallback
 }
 
@@ -88,6 +88,7 @@ export function StudentDetail() {
   const [msgBody, setMsgBody] = useState('')
   const [msgFiles, setMsgFiles] = useState<File[]>([])
   const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [editDepNote, setEditDepNote] = useState<string | null>(null)
   const [pwForm, setPwForm] = useState({
     newPassword: '',
     confirmPassword: '',
@@ -199,6 +200,7 @@ export function StudentDetail() {
       addressPincode: student.addressPincode || '',
       addressCountry: student.addressCountry || '',
     })
+    setEditDepNote(null)
     setModal('edit')
   }
 
@@ -799,7 +801,12 @@ export function StudentDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h3 className="font-semibold text-brand-navy">Edit student (override)</h3>
-            <p className="mt-1 text-sm text-slate-gray">Registration masters for academic fields. Dependent fields reset when parent changes.</p>
+            <p className="mt-1 text-sm text-slate-gray">
+              Academic masters use searchable dropdowns (closed until opened). Dependent fields reset when parent changes.
+            </p>
+            {editDepNote ? (
+              <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{editDepNote}</p>
+            ) : null}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="block text-sm">
                 <span className="font-medium text-gray-700">Name</span>
@@ -839,12 +846,17 @@ export function StudentDetail() {
                 label="University"
                 options={universities.map((u) => ({ value: u.value, label: u.label }))}
                 value={editForm.university || ''}
-                onChange={(v) => setEditForm((f) => ({ ...f, university: v, collegeName: '' }))}
+                placeholder="Select university…"
+                onChange={(v) => {
+                  setEditForm((f) => ({ ...f, university: v, collegeName: '' }))
+                  setEditDepNote('Dependent fields cleared because you changed University (College).')
+                }}
               />
               <SearchableSingleSelect
                 label="College"
                 options={collegeOpts}
                 value={editForm.collegeName || ''}
+                placeholder="Select college…"
                 onChange={(v) => setEditForm((f) => ({ ...f, collegeName: v }))}
                 disabled={!editForm.university}
               />
@@ -852,12 +864,19 @@ export function StudentDetail() {
                 label="Course"
                 options={courses.map((c) => ({ value: c, label: c }))}
                 value={editForm.course || ''}
-                onChange={(v) => setEditForm((f) => ({ ...f, course: v, branch: '', semester: '' }))}
+                placeholder="Select course…"
+                onChange={(v) => {
+                  setEditForm((f) => ({ ...f, course: v, branch: '', semester: '' }))
+                  setEditDepNote(
+                    `Dependent fields cleared because you changed Course (${branchLabel} and Semester).`,
+                  )
+                }}
               />
               <SearchableSingleSelect
                 label={branchLabel}
                 options={branchOpts}
                 value={editForm.branch || ''}
+                placeholder={`Select ${branchLabel.toLowerCase()}…`}
                 onChange={(v) => setEditForm((f) => ({ ...f, branch: v }))}
                 disabled={!editForm.course}
               />
@@ -865,6 +884,7 @@ export function StudentDetail() {
                 label="Semester"
                 options={semesterOpts}
                 value={editForm.semester || ''}
+                placeholder="Select semester…"
                 onChange={(v) => setEditForm((f) => ({ ...f, semester: v }))}
                 disabled={!editForm.course}
               />
@@ -896,6 +916,7 @@ export function StudentDetail() {
                 label="State"
                 options={states.map((s) => ({ value: s, label: s }))}
                 value={editForm.addressState || ''}
+                placeholder="Select state…"
                 onChange={(v) => setEditForm((f) => ({ ...f, addressState: v }))}
               />
               <label className="block text-sm">
@@ -909,7 +930,7 @@ export function StudentDetail() {
               <label className="block text-sm">
                 <span className="font-medium text-gray-700">Country</span>
                 <input
-                  value={editForm.addressCountry || ''}
+                  value={editForm.addressCountry || 'India'}
                   onChange={(e) => setEditForm((f) => ({ ...f, addressCountry: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />

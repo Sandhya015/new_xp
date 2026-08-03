@@ -258,6 +258,7 @@ export function StudentList() {
           label="University"
           options={universities.map((u) => ({ value: u.value, label: u.label }))}
           values={universitiesSel}
+          placeholder="Select university…"
           onChange={(v) => {
             setUniversitiesSel(v)
             setPage(1)
@@ -267,6 +268,7 @@ export function StudentList() {
           label="College"
           options={collegeOptions}
           values={collegesSel}
+          placeholder="Select college…"
           onChange={(v) => {
             setCollegesSel(v)
             setPage(1)
@@ -276,6 +278,7 @@ export function StudentList() {
           label="Course"
           options={courses.map((c) => ({ value: c, label: c }))}
           values={coursesSel}
+          placeholder="Select course…"
           onChange={(v) => {
             setCoursesSel(v)
             setBranchesSel([])
@@ -287,6 +290,7 @@ export function StudentList() {
           label={branchLabel}
           options={branchOpts}
           values={branchesSel}
+          placeholder={`Select ${branchLabel.toLowerCase()}…`}
           onChange={(v) => {
             setBranchesSel(v)
             setPage(1)
@@ -297,11 +301,12 @@ export function StudentList() {
           label="Semester"
           options={semesterOpts}
           value={semester}
+          placeholder="Select semester…"
+          emptyLabel="All"
           onChange={(v) => {
             setSemester(v)
             setPage(1)
           }}
-          emptyLabel="All"
         />
         <label className="text-sm">
           <span className="block text-[11px] font-medium text-gray-600 mb-0.5">Account</span>

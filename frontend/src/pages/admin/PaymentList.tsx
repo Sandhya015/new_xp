@@ -116,21 +116,46 @@ export function PaymentList() {
 
   const load = useCallback(() => {
     setLoading(true)
-    Promise.all([
-      adminService.getPayments(params),
-      adminService.getPaymentsSummary(params),
-    ])
-      .then(([listRes, sumRes]) => {
+    const listP = adminService.getPayments(params)
+    // Summary without status so cards stay meaningful when list is status-filtered
+    const summaryParams = { ...params, status: undefined }
+    const summaryP = adminService.getPaymentsSummary(summaryParams)
+
+    listP
+      .then((listRes) => {
         setItems(listRes.items || [])
         setTotal(listRes.total ?? (listRes.items || []).length)
-        setSummary(sumRes)
       })
       .catch(() => {
         setItems([])
         setTotal(0)
-        setSummary(null)
       })
       .finally(() => setLoading(false))
+
+    summaryP
+      .then((sumRes) => {
+        setSummary({
+          totalRevenue: Number(sumRes?.totalRevenue ?? 0),
+          successfulCount: Number(sumRes?.successfulCount ?? 0),
+          failedCount: Number(sumRes?.failedCount ?? 0),
+          pendingCount: Number(sumRes?.pendingCount ?? 0),
+          refundsSum: Number(sumRes?.refundsSum ?? 0),
+          refundsCount: Number(sumRes?.refundsCount ?? 0),
+          percentChange: sumRes?.percentChange ?? null,
+        })
+      })
+      .catch(() => {
+        // Keep zeros visible instead of em dashes when API fails
+        setSummary({
+          totalRevenue: 0,
+          successfulCount: 0,
+          failedCount: 0,
+          pendingCount: 0,
+          refundsSum: 0,
+          refundsCount: 0,
+          percentChange: null,
+        })
+      })
   }, [params])
 
   useEffect(() => {
@@ -152,7 +177,7 @@ export function PaymentList() {
     {
       key: 'revenue',
       label: 'Total Revenue',
-      value: summary ? formatInr(summary.totalRevenue) : '—',
+      value: formatInr(summary?.totalRevenue ?? 0),
       sub:
         summary?.percentChange != null
           ? `${summary.percentChange >= 0 ? '+' : ''}${summary.percentChange}% vs prior period`
@@ -163,7 +188,7 @@ export function PaymentList() {
     {
       key: 'success',
       label: 'Successful Payments',
-      value: summary ? String(summary.successfulCount) : '—',
+      value: String(summary?.successfulCount ?? 0),
       sub: '',
       icon: CheckCircle,
       status: 'success',
@@ -171,7 +196,7 @@ export function PaymentList() {
     {
       key: 'failed',
       label: 'Failed Payments',
-      value: summary ? String(summary.failedCount) : '—',
+      value: String(summary?.failedCount ?? 0),
       sub: '',
       icon: XCircle,
       status: 'failed',
@@ -179,7 +204,7 @@ export function PaymentList() {
     {
       key: 'pending',
       label: 'Pending Payments',
-      value: summary ? String(summary.pendingCount) : '—',
+      value: String(summary?.pendingCount ?? 0),
       sub: '>15 min unpaid',
       icon: Clock,
       status: 'pending',
@@ -187,8 +212,8 @@ export function PaymentList() {
     {
       key: 'refunds',
       label: 'Refunds Issued',
-      value: summary ? formatInr(summary.refundsSum) : '—',
-      sub: summary ? `${summary.refundsCount} refunds` : '',
+      value: formatInr(summary?.refundsSum ?? 0),
+      sub: `${summary?.refundsCount ?? 0} refunds`,
       icon: RotateCcw,
       status: 'refunded',
     },
@@ -346,12 +371,14 @@ export function PaymentList() {
             options={courseOptions.map((c) => ({ value: c.id, label: c.title }))}
             values={filters.courseIds}
             onChange={(v) => setFilter('courseIds', v)}
+            placeholder="Select training…"
           />
           <SearchableMultiSelect
             label="University"
             options={universities.map((u) => ({ value: u.value, label: u.label }))}
             values={filters.universities}
             onChange={(v) => setFilter('universities', v)}
+            placeholder="Select university…"
           />
           <div>
             <label className="block text-xs text-gray-500 mb-1">Amount min</label>

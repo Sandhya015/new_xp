@@ -648,10 +648,36 @@ def payments_summary():
         return err
     db = get_db()
     if db is None:
-        return jsonify({"error": "Database not configured"}), 503
-    flt = collect_payment_filter_params(request.args)
-    summary = compute_payments_summary(flt)
-    return jsonify(summary)
+        return jsonify({
+            "totalRevenue": 0,
+            "successfulCount": 0,
+            "failedCount": 0,
+            "pendingCount": 0,
+            "refundsSum": 0,
+            "refundsCount": 0,
+            "percentChange": None,
+            "error": "Database not configured",
+        }), 503
+    try:
+        flt = collect_payment_filter_params(request.args)
+        # Summary cards are aggregate metrics — never apply status filter to totals so
+        # revenue/success/failed/pending/refunds always reflect the filter set except status.
+        # Date/course/university/coupon still apply. Status remains for list, not cards.
+        flt_cards = dict(flt)
+        flt_cards["status"] = ""
+        summary = compute_payments_summary(flt_cards)
+        return jsonify(summary)
+    except Exception:
+        current_app.logger.exception("payments_summary failed")
+        return jsonify({
+            "totalRevenue": 0,
+            "successfulCount": 0,
+            "failedCount": 0,
+            "pendingCount": 0,
+            "refundsSum": 0,
+            "refundsCount": 0,
+            "percentChange": None,
+        })
 
 
 @admin_bp.route("/payments/bulk-invoice-download", methods=["POST"])
