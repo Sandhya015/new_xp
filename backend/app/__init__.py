@@ -35,7 +35,35 @@ def create_app(config_class=None):
                 exc,
             )
 
-    JWTManager(app)
+    jwt = JWTManager(app)
+
+    @jwt.token_in_blocklist_loader
+    def _token_revoked_callback(jwt_header, jwt_payload):
+        """Reject tokens whose sessionEpoch claim does not match the user document."""
+        try:
+            from bson import ObjectId
+            from app.db import get_users_collection
+            from app.auth_session import session_epoch_of
+
+            uid = jwt_payload.get("sub")
+            if not uid or not ObjectId.is_valid(str(uid)):
+                return True
+            claim_se = int(jwt_payload.get("se") or 0)
+            user = get_users_collection().find_one(
+                {"_id": ObjectId(str(uid))},
+                {"sessionEpoch": 1, "accountStatus": 1},
+            )
+            if not user:
+                return True
+            status = (user.get("accountStatus") or "active").strip().lower()
+            if status in ("deleted", "suspended"):
+                return True
+            return session_epoch_of(user) != claim_se
+        except Exception:
+            # Avoid locking all users if DB flickers mid-request
+            import logging
+            logging.getLogger(__name__).exception("token blocklist check failed")
+            return False
 
     # Parse CORS_ORIGINS: support list or comma-separated string (e.g. from Lambda env)
     _raw = app.config.get("CORS_ORIGINS")
@@ -132,6 +160,7 @@ def create_app(config_class=None):
     from app.routes.student_routes import student_bp
     from app.routes.reviews import reviews_bp
     from app.routes.settings_public import settings_public_bp
+    from app.routes.masters import masters_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -150,6 +179,7 @@ def create_app(config_class=None):
     app.register_blueprint(student_bp, url_prefix="/api")
     app.register_blueprint(reviews_bp, url_prefix="/api/reviews")
     app.register_blueprint(settings_public_bp, url_prefix="/api/settings")
+    app.register_blueprint(masters_bp, url_prefix="/api/masters")
 
     @app.route("/")
     def index():

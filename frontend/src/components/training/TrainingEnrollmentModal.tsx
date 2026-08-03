@@ -41,6 +41,8 @@ type Props = {
     includeTrainingKit?: boolean
     enrollmentSnapshot?: Record<string, string | undefined>
     billingSnapshot?: Record<string, string | undefined>
+    shippingSameAsProfile?: boolean
+    shippingAddress?: Record<string, string | undefined>
     onSuccess?: () => void
   }) => Promise<void>
   payBusy: boolean
@@ -117,6 +119,13 @@ export function TrainingEnrollmentModal({
   const [state, setState] = useState('')
   const [pincode, setPincode] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  const [shippingSameAsProfile, setShippingSameAsProfile] = useState(true)
+  const [shipStreet, setShipStreet] = useState('')
+  const [shipApartment, setShipApartment] = useState('')
+  const [shipCity, setShipCity] = useState('')
+  const [shipState, setShipState] = useState('')
+  const [shipPincode, setShipPincode] = useState('')
+  const [shipCountry, setShipCountry] = useState('India')
 
   useEffect(() => {
     if (!course?.id) {
@@ -355,6 +364,24 @@ export function TrainingEnrollmentModal({
       setFormError('Please enter a valid email address.')
       return false
     }
+    if (includeKit && kitPrice > 0 && !shippingSameAsProfile) {
+      if (!shipStreet.trim()) {
+        setFormError('Please enter kit shipping street address.')
+        return false
+      }
+      if (!shipCity.trim()) {
+        setFormError('Please enter kit shipping city.')
+        return false
+      }
+      if (!shipState) {
+        setFormError('Please select kit shipping state.')
+        return false
+      }
+      if (shipPincode.replace(/\D/g, '').length !== 6) {
+        setFormError('Please enter a valid 6-digit shipping PIN code.')
+        return false
+      }
+    }
     setFormError(null)
     return true
   }
@@ -406,6 +433,21 @@ export function TrainingEnrollmentModal({
   const runPayment = async () => {
     if (!validateStep3()) return
     clearPayError()
+    const withKit = includeKit && kitPrice > 0
+    const shippingAddress =
+      withKit && !shippingSameAsProfile
+        ? {
+            fullName: fullName.trim(),
+            country: shipCountry,
+            street: shipStreet.trim(),
+            apartment: shipApartment.trim(),
+            city: shipCity.trim(),
+            state: shipState,
+            pincode: shipPincode.replace(/\D/g, ''),
+            phone: mobile.replace(/\D/g, '').slice(-10),
+            email: email.trim(),
+          }
+        : undefined
     await startCheckout({
       courseId: course.id,
       courseTitle: course.title,
@@ -416,9 +458,11 @@ export function TrainingEnrollmentModal({
         contact: mobile.replace(/\D/g, '').slice(-10),
       },
       couponCode: couponApplied || undefined,
-      includeTrainingKit: includeKit && kitPrice > 0,
+      includeTrainingKit: withKit,
       enrollmentSnapshot: buildEnrollmentSnapshot(),
       billingSnapshot: buildBillingSnapshot(),
+      shippingSameAsProfile: withKit ? shippingSameAsProfile : true,
+      shippingAddress,
       onSuccess: onClose,
     })
   }
@@ -789,6 +833,84 @@ export function TrainingEnrollmentModal({
                     <input value={mobile} onChange={(e) => setMobile(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm" />
                   </div>
                 </div>
+                {includeKit && kitPrice > 0 ? (
+                  <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 space-y-3">
+                    <p className="text-sm font-semibold text-gray-900">Kit shipping address</p>
+                    <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={shippingSameAsProfile}
+                        onChange={(e) => setShippingSameAsProfile(e.target.checked)}
+                      />
+                      Shipping same as registered / billing address above
+                    </label>
+                    {!shippingSameAsProfile ? (
+                      <div className="space-y-3 pt-1">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Shipping street</label>
+                          <input
+                            value={shipStreet}
+                            onChange={(e) => setShipStreet(e.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Apartment (optional)</label>
+                          <input
+                            value={shipApartment}
+                            onChange={(e) => setShipApartment(e.target.value)}
+                            className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                            <input
+                              value={shipCity}
+                              onChange={(e) => setShipCity(e.target.value)}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                            <select
+                              value={shipState}
+                              onChange={(e) => setShipState(e.target.value)}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                            >
+                              <option value="">Select state</option>
+                              {INDIAN_STATES_UTS.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">PIN</label>
+                            <input
+                              value={shipPincode}
+                              onChange={(e) => setShipPincode(e.target.value)}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                            <select
+                              value={shipCountry}
+                              onChange={(e) => setShipCountry(e.target.value)}
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+                            >
+                              <option value="India">India</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm">
                   <p className="font-semibold text-gray-900">Pay {formatInr(totalGross)}</p>
                   <p className="text-xs text-gray-600 mt-1">

@@ -19,7 +19,12 @@ api.interceptors.request.use(async (config) => {
 export const authService = {
   async login(email: string, password: string) {
     const { data } = await api.post('/api/auth/login', { email, password })
-    return data as { token: string; user: User; expiresIn?: number }
+    return data as {
+      token: string
+      user: User
+      expiresIn?: number
+      forcePasswordChange?: boolean
+    }
   },
   /** Super-admin panel only; backend enforces allowed email + admin role + password. */
   async loginAdmin(email: string, password: string) {
@@ -72,12 +77,19 @@ export const authService = {
     const { data } = await api.patch('/api/auth/me', payload)
     return data
   },
-  async changePassword(currentPassword: string, newPassword: string) {
+  async changePassword(currentPassword: string, newPassword: string, confirmPassword?: string) {
     const { data } = await api.post('/api/auth/change-password', {
       currentPassword,
       newPassword,
+      confirmPassword: confirmPassword ?? newPassword,
     })
-    return data
+    return data as {
+      message?: string
+      token?: string
+      expiresIn?: number
+      user?: User
+      forcePasswordChange?: boolean
+    }
   },
   async refresh() {
     const { data } = await api.post('/api/auth/refresh')

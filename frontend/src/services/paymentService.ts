@@ -77,6 +77,8 @@ export const paymentService = {
       includeTrainingKit?: boolean
       enrollmentSnapshot?: Record<string, string | undefined>
       billingSnapshot?: Record<string, string | undefined>
+      shippingSameAsProfile?: boolean
+      shippingAddress?: Record<string, string | undefined>
     },
   ): Promise<PaymentCreateOrderResponse> {
     const { data } = await api.post<PaymentCreateOrderResponse>('/api/payments/create-order', {
@@ -86,6 +88,8 @@ export const paymentService = {
       includeTrainingKit: opts?.includeTrainingKit,
       enrollmentSnapshot: opts?.enrollmentSnapshot,
       billingSnapshot: opts?.billingSnapshot,
+      shippingSameAsProfile: opts?.shippingSameAsProfile,
+      shippingAddress: opts?.shippingAddress,
     })
     return data
   },

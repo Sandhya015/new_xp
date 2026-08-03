@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 from bson import ObjectId
 from io import BytesIO
 
-from flask import Blueprint, current_app, request, jsonify, send_file
+from flask import Blueprint, current_app, request, jsonify, send_file, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 from app.routes.enrollments import _serialize_curriculum_quiz_attempts, _serialize_submission
@@ -827,7 +827,171 @@ def dashboard():
         else:
             r["time"] = ""
 
-    return jsonify({"kpis": kpis, "pendingItems": pending_items, "recentActivity": recent})
+    recent_kit = []
+    kit_pending = 0
+    try:
+        from app.kit_orders import recent_kit_orders, sync_kit_orders_from_orders
+        sync_kit_orders_from_orders(50)
+        recent_kit, kit_pending = recent_kit_orders(5)
+    except Exception:
+        current_app.logger.exception("kit orders dashboard widget")
+
+    return jsonify({
+        "kpis": kpis,
+        "pendingItems": pending_items,
+        "recentActivity": recent,
+        "recentKitOrders": recent_kit,
+        "kitOrdersPendingCount": kit_pending,
+    })
+
+
+@admin_bp.route("/kit-orders", methods=["GET"])
+@jwt_required()
+def admin_kit_orders_list():
+    err = _admin_required()
+    if err:
+        return err
+    if get_db() is None:
+        return jsonify({"items": [], "total": 0}), 503
+    from app.kit_orders import list_kit_orders, sync_kit_orders_from_orders
+    try:
+        sync_kit_orders_from_orders(100)
+    except Exception:
+        pass
+    items, total = list_kit_orders(request.args)
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        limit = min(200, max(1, int(request.args.get("limit") or 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    return jsonify({"items": items, "total": total, "page": page, "limit": limit})
+
+
+@admin_bp.route("/kit-orders/<kit_id>/status", methods=["PATCH"])
+@jwt_required()
+def admin_kit_order_status(kit_id):
+    err = _admin_required()
+    if err:
+        return err
+    from app.kit_orders import get_kit_orders_collection, serialize_kit_order
+    if not ObjectId.is_valid(kit_id):
+        return jsonify({"error": "Invalid id"}), 400
+    data = request.get_json() or {}
+    status = (data.get("status") or "").strip().lower()
+    allowed = {"pending", "packed", "dispatched", "delivered", "returned", "cancelled"}
+    if status not in allowed:
+        return jsonify({"error": f"status must be one of {sorted(allowed)}"}), 400
+    tracking = (data.get("trackingNo") or data.get("tracking") or "").strip()
+    coll = get_kit_orders_collection()
+    doc = coll.find_one({"_id": ObjectId(kit_id)})
+    if not doc:
+        return jsonify({"error": "Kit order not found"}), 404
+    upd = {"status": status, "updatedAt": datetime.utcnow()}
+    if tracking or status == "dispatched":
+        if tracking:
+            upd["trackingNo"] = tracking
+    coll.update_one({"_id": ObjectId(kit_id)}, {"$set": upd})
+    _log_admin(
+        "kit_order.status",
+        "kit_order",
+        kit_id,
+        old_value={"status": doc.get("status")},
+        new_value={"status": status, "trackingNo": tracking or doc.get("trackingNo")},
+    )
+    updated = coll.find_one({"_id": ObjectId(kit_id)})
+    return jsonify(serialize_kit_order(updated))
+
+
+@admin_bp.route("/kit-orders/export", methods=["GET"])
+@jwt_required()
+def admin_kit_orders_export():
+    err = _admin_required()
+    if err:
+        return err
+    from app.kit_orders import list_kit_orders
+    import csv
+    from io import StringIO
+    items, _ = list_kit_orders({**request.args, "page": "1", "limit": "5000"})
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Kit Order ID", "Kit", "Training", "Student", "Email", "Phone", "City", "State", "Status", "Tracking", "Ordered At", "Amount"])
+    for r in items:
+        ship = r.get("shippingAddress") or {}
+        w.writerow([
+            r.get("kitOrderId"), r.get("kitName"), r.get("courseTitle"), r.get("studentName"),
+            r.get("studentEmail"), r.get("studentPhone"), ship.get("city"), ship.get("state"),
+            r.get("status"), r.get("trackingNo"), r.get("orderedAt"), r.get("amount"),
+        ])
+    _log_admin("kit_order.export", "kit_order", None, meta={"count": len(items)})
+    return Response(
+        buf.getvalue().encode("utf-8-sig"),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=kit-orders.csv"},
+    )
+
+
+@admin_bp.route("/kit-orders/shipping-labels", methods=["POST"])
+@jwt_required()
+def admin_kit_shipping_labels():
+    """Simple multi-label PDF (approx 4x6 inch cells on A4)."""
+    err = _admin_required()
+    if err:
+        return err
+    from app.kit_orders import get_kit_orders_collection, serialize_kit_order
+    from fpdf import FPDF
+    data = request.get_json() or {}
+    ids = data.get("ids") if isinstance(data.get("ids"), list) else []
+    coll = get_kit_orders_collection()
+    docs = []
+    for i in ids[:100]:
+        if ObjectId.is_valid(str(i)):
+            d = coll.find_one({"_id": ObjectId(str(i))})
+            if d:
+                docs.append(serialize_kit_order(d))
+    if not docs:
+        return jsonify({"error": "No kit orders selected"}), 400
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(False)
+    for r in docs:
+        pdf.add_page()
+        ship = r.get("shippingAddress") or {}
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "XpertIntern Shipping Label", ln=1)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 7, f"Order: {r.get('kitOrderId')}", ln=1)
+        pdf.cell(0, 7, f"Kit: {r.get('kitName')}", ln=1)
+        pdf.cell(0, 7, f"Training: {(r.get('courseTitle') or '')[:60]}", ln=1)
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 7, "Ship To:", ln=1)
+        pdf.set_font("Helvetica", "", 11)
+        for line in (
+            r.get("studentName"),
+            ship.get("line1"),
+            ship.get("line2"),
+            f"{ship.get('city') or ''}, {ship.get('state') or ''} {ship.get('pincode') or ''}",
+            f"Phone: {ship.get('phone') or r.get('studentPhone') or ''}",
+        ):
+            if line and str(line).strip():
+                pdf.cell(0, 6, str(line)[:90], ln=1)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 5, f"TXN: {r.get('orderId') or r.get('paymentId')}", ln=1)
+    out = pdf.output()
+    if isinstance(out, (bytes, bytearray)):
+        payload = bytes(out)
+    else:
+        payload = str(out).encode("latin-1", errors="ignore")
+    _log_admin("kit_order.print_labels", "kit_order", None, meta={"count": len(docs)})
+    return send_file(
+        BytesIO(payload),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="shipping-labels.pdf",
+    )
 
 
 def _hosted_course_media_missing_response(url: str):

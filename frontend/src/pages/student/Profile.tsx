@@ -255,8 +255,15 @@ export function Profile() {
     setPwError('')
     setPwLoading(true)
     authService
-      .changePassword(pwForm.current, pwForm.new)
-      .then(() => {
+      .changePassword(pwForm.current, pwForm.new, pwForm.confirm)
+      .then((res) => {
+        if (res.token && res.user) {
+          useAuthStore.getState().setSession(
+            res.user as ReturnType<typeof useAuthStore.getState>['user'],
+            res.token,
+            res.expiresIn,
+          )
+        }
         setPwSuccess(true)
         setPwForm({ current: '', new: '', confirm: '' })
         setTimeout(() => setPwSuccess(false), 3000)

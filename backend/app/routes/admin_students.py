@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import re
 import secrets
 import uuid
@@ -16,6 +17,7 @@ from urllib.parse import quote
 from bson import ObjectId
 from flask import Blueprint, Response, current_app, jsonify, request, send_file
 from flask_jwt_extended import jwt_required
+from werkzeug.utils import secure_filename
 
 from app.activity_log import serialize_activity_log
 from app.db import (
@@ -194,19 +196,36 @@ def _build_students_query(args) -> dict:
         ("course", "course"),
         ("semester", "semester"),
     ):
+        # Support multi-value: university=A,B or universities=A&universities=B
+        multi = args.getlist(key + "s") if hasattr(args, "getlist") else []
         val = (args.get(key) or "").strip()
+        vals = [v.strip() for v in multi if v and str(v).strip()]
         if val:
-            clauses.append({field: {"$regex": f"^{re.escape(val)}$", "$options": "i"}})
+            vals.extend([x.strip() for x in val.split(",") if x.strip()])
+        vals = list(dict.fromkeys(vals))
+        if len(vals) == 1:
+            clauses.append({field: {"$regex": f"^{re.escape(vals[0])}$", "$options": "i"}})
+        elif len(vals) > 1:
+            clauses.append({
+                "$or": [{field: {"$regex": f"^{re.escape(v)}$", "$options": "i"}} for v in vals]
+            })
 
     branch = (args.get("branch") or args.get("stream") or args.get("subject") or "").strip()
+    branches = []
+    if hasattr(args, "getlist"):
+        branches = [b.strip() for b in args.getlist("branches") if b and str(b).strip()]
     if branch:
-        clauses.append({
-            "$or": [
-                {"branch": {"$regex": re.escape(branch), "$options": "i"}},
-                {"stream": {"$regex": re.escape(branch), "$options": "i"}},
-                {"subject": {"$regex": re.escape(branch), "$options": "i"}},
-            ]
-        })
+        branches.extend([x.strip() for x in branch.split(",") if x.strip()])
+    branches = list(dict.fromkeys(branches))
+    if branches:
+        or_b = []
+        for b in branches:
+            or_b.extend([
+                {"branch": {"$regex": re.escape(b), "$options": "i"}},
+                {"stream": {"$regex": re.escape(b), "$options": "i"}},
+                {"subject": {"$regex": re.escape(b), "$options": "i"}},
+            ])
+        clauses.append({"$or": or_b})
 
     registered_from = (args.get("registeredFrom") or "").strip()
     registered_to = (args.get("registeredTo") or "").strip()
@@ -814,6 +833,11 @@ def delete_student(student_id):
 @admin_students_bp.route("/students/<student_id>/reset-password", methods=["POST"])
 @jwt_required()
 def reset_student_password(student_id):
+    """
+    Rev 2: Super Admin sets a new password directly (hashed with pbkdf2:sha256).
+    Optional notify email (does not include password). Force change on next login flag.
+    Rate limit: 3 resets / student / admin / day.
+    """
     err = _admin_required()
     if err:
         return err
@@ -822,13 +846,99 @@ def reset_student_password(student_id):
     u, err_resp = _find_student(student_id)
     if err_resp:
         return err_resp
+
+    data = request.get_json(silent=True) or {}
+    new_pw = (data.get("password") or data.get("newPassword") or "").strip()
+    confirm = (data.get("confirmPassword") or data.get("confirm") or "").strip()
+    reason = (data.get("reason") or "").strip()[:500]
+    notify = data.get("notifyStudent", True)
+    if notify is None:
+        notify = True
+    force_change = data.get("forceChangeOnLogin", True)
+    if force_change is None:
+        force_change = True
+
+    # Backward compat: no body → old email-link flow for clients that still call empty POST
+    if not new_pw and not data:
+        return _reset_password_email_link(u, student_id)
+
+    if not new_pw or not confirm:
+        return jsonify({"error": "password and confirmPassword are required"}), 400
+    if new_pw != confirm:
+        return jsonify({"error": "Passwords do not match"}), 400
+    if len(new_pw) < 8 or not re.search(r"[A-Za-z]", new_pw) or not re.search(r"\d", new_pw):
+        return jsonify({"error": "Password must be 8+ characters with at least 1 letter and 1 number"}), 400
+
+    actor = _admin_actor()
+    # rate limit 3 / day for this admin+student
+    day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        recent = get_activity_logs_collection().count_documents({
+            "action": "student.set_password",
+            "entityId": student_id,
+            "actorEmail": actor.get("actor_email") or "",
+            "createdAt": {"$gte": day_start},
+        })
+        if recent >= 3:
+            return jsonify({"error": "Rate limit: max 3 password resets per student per day"}), 429
+    except Exception:
+        pass
+
+    from werkzeug.security import generate_password_hash
+    pw_hash = generate_password_hash(new_pw, method="pbkdf2:sha256")
+    get_users_collection().update_one(
+        {"_id": u["_id"]},
+        {"$set": {
+            "password": pw_hash,
+            "forcePasswordChange": bool(force_change),
+            "passwordResetAt": datetime.utcnow(),
+            "passwordResetBy": actor.get("actor_email") or "",
+            "sessionEpoch": int(datetime.utcnow().timestamp()),
+            "updatedAt": datetime.utcnow(),
+        }},
+    )
+    email = (u.get("email") or "").strip().lower()
+    emailed = False
+    if notify and email and smtp_or_ses_configured(current_app.config):
+        name = u.get("name") or u.get("fullName") or email.split("@")[0]
+        html = (
+            f"<p>Hi {name},</p>"
+            f"<p>Your XpertIntern account password was reset by support. "
+            f"Please log in and change your password from your account settings.</p>"
+            f"<p>— Team XpertIntern</p>"
+        )
+        emailed = bool(send_email(
+            current_app.config,
+            email,
+            "Your XpertIntern password was reset by support",
+            html,
+            bcc=["support@xpertintern.com"],
+        ))
+    _log_admin(
+        "student.set_password",
+        "student",
+        student_id,
+        new_value={
+            "forceChangeOnLogin": bool(force_change),
+            "notifyEmail": emailed,
+            "reason": reason or None,
+        },
+    )
+    return jsonify({
+        "ok": True,
+        "message": "Password updated successfully",
+        "notifyEmailSent": emailed,
+        "forceChangeOnLogin": bool(force_change),
+    })
+
+
+def _reset_password_email_link(u: dict, student_id: str):
     email = (u.get("email") or "").strip().lower()
     if not email:
         return jsonify({"error": "Student has no email"}), 400
     cfg = current_app.config
     if not smtp_or_ses_configured(cfg):
         return jsonify({"error": "Email transport not configured"}), 503
-
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_password_reset_token(raw_token)
     expires_at = utcnow() + _PASSWORD_RESET_ADMIN_EXPIRY
@@ -869,9 +979,30 @@ def message_student(student_id):
     u, err_resp = _find_student(student_id)
     if err_resp:
         return err_resp
-    data = request.get_json() or {}
-    subject = (data.get("subject") or "").strip()
-    body = (data.get("body") or data.get("html") or data.get("text") or "").strip()
+
+    # JSON or multipart
+    if request.content_type and "multipart/form-data" in (request.content_type or ""):
+        subject = (request.form.get("subject") or "").strip()
+        body = (request.form.get("body") or request.form.get("html") or "").strip()
+        files = request.files.getlist("files") or request.files.getlist("attachments") or []
+    else:
+        data = request.get_json() or {}
+        subject = (data.get("subject") or "").strip()
+        body = (data.get("body") or data.get("html") or data.get("text") or "").strip()
+        files = []
+        raw_atts = data.get("attachments") if isinstance(data.get("attachments"), list) else []
+        for a in raw_atts[:5]:
+            if isinstance(a, dict) and a.get("contentBase64") and a.get("filename"):
+                import base64
+                try:
+                    files.append({
+                        "filename": str(a["filename"])[:200],
+                        "data": base64.b64decode(a["contentBase64"]),
+                        "mime": str(a.get("mime") or "application/octet-stream"),
+                    })
+                except Exception:
+                    continue
+
     if not subject:
         return jsonify({"error": "subject is required"}), 400
     if not body:
@@ -881,45 +1012,113 @@ def message_student(student_id):
     if not email:
         return jsonify({"error": "Student has no email"}), 400
 
+    ALLOWED_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".zip"}
+    attachments: list[tuple[str, bytes, str]] = []
+    total_size = 0
+    file_meta = []
+
+    def _add_file(filename: str, raw: bytes, mime: str):
+        nonlocal total_size
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ALLOWED_EXT:
+            raise ValueError(f"File type not allowed: {ext or filename}")
+        if len(raw) > 10 * 1024 * 1024:
+            raise ValueError(f"{filename} exceeds 10 MB")
+        if total_size + len(raw) > 25 * 1024 * 1024:
+            raise ValueError("Total attachments exceed 25 MB")
+        from app.attachment_scan import scan_attachment_bytes, AttachmentScanError
+        try:
+            scan_attachment_bytes(filename, raw)
+        except AttachmentScanError as se:
+            raise ValueError(str(se)) from se
+        total_size += len(raw)
+        attachments.append((filename, raw, mime or "application/octet-stream"))
+        file_meta.append({"filename": filename, "size": len(raw), "mime": mime})
+
+    try:
+        for f in files:
+            if isinstance(f, dict):
+                _add_file(f["filename"], f["data"], f.get("mime") or "application/octet-stream")
+            else:
+                raw = f.read()
+                name = secure_filename(f.filename or "file.bin") or "file.bin"
+                mime = f.mimetype or "application/octet-stream"
+                _add_file(name, raw, mime)
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    if len(attachments) > 5:
+        return jsonify({"error": "Maximum 5 attachments"}), 400
+
+    # Light sanitize: strip script tags
+    html_body = re.sub(r"(?is)<script[^>]*>.*?</script>", "", body)
+    text_body = re.sub(r"<[^>]+>", " ", html_body)
+    text_body = re.sub(r"\s+", " ", text_body).strip()
+
     cfg = current_app.config
-    html_body = body if "<" in body else f"<pre style='font-family:inherit;white-space:pre-wrap'>{body}</pre>"
-    text_body = re.sub(r"<[^>]+>", "", body) if "<" in body else body
     sent = False
+    send_error = ""
     if smtp_or_ses_configured(cfg):
-        sent = bool(send_email(cfg, email, subject, html_body, text_body=text_body))
+        try:
+            sent = bool(send_email(
+                cfg,
+                email,
+                subject,
+                html_body,
+                text_body=text_body,
+                attachments=attachments or None,
+                bcc=["support@xpertintern.com"],
+            ))
+            if not sent:
+                send_error = "Email provider returned failure"
+        except Exception as ex:
+            send_error = str(ex)[:300]
+    else:
+        send_error = "Email not configured"
 
     now = datetime.utcnow()
+    status = "open" if sent else "send_failed"
     ticket_doc = {
         "userId": student_id,
         "ticketId": "TKT-" + uuid.uuid4().hex[:8].upper(),
         "subject": subject,
         "category": "Admin Message",
         "description": text_body[:5000],
-        "status": "open",
+        "status": status,
         "priority": "medium",
         "createdAt": now,
         "updatedAt": now,
         "origin": "admin_outbound",
-        "messages": [{"from": "admin", "body": text_body[:20000], "createdAt": now}],
+        "direction": "outbound",
+        "htmlBody": html_body[:50000],
+        "attachments": file_meta,
+        "messages": [{"from": "admin", "body": text_body[:20000], "html": html_body[:50000], "createdAt": now}],
     }
     result = get_support_tickets_collection().insert_one(ticket_doc)
     _log_admin(
         "student.message",
         "student",
         student_id,
-        new_value={"subject": subject, "emailSent": sent, "ticketId": str(result.inserted_id)},
+        new_value={
+            "subject": subject,
+            "emailSent": sent,
+            "ticketId": str(result.inserted_id),
+            "attachmentCount": len(attachments),
+            "status": status,
+        },
     )
-    if not sent and smtp_or_ses_configured(cfg):
+    if not sent:
         return jsonify({
             "ok": False,
-            "error": "Ticket created but email failed to send",
+            "error": send_error or "Ticket created but email failed",
             "ticketId": str(result.inserted_id),
+            "canRetry": True,
         }), 502
     return jsonify({
         "ok": True,
-        "message": "Message sent" if sent else "Support ticket created (email not configured)",
+        "message": f"Message sent to {email}",
         "ticketId": str(result.inserted_id),
-        "emailSent": sent,
+        "email": email,
     })
 
 

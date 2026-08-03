@@ -275,6 +275,12 @@ def _finalize_successful_charge(
 
     enrollment_created = _ensure_enrollment_for_successful_order(user_id, order)
 
+    try:
+        from app.kit_orders import ensure_kit_order_for_payment
+        ensure_kit_order_for_payment(order)
+    except Exception:
+        current_app.logger.exception("kit_order create failed for order %s", oid)
+
     _build_and_store_invoice_if_needed(
         current_app._get_current_object(),
         coll,
@@ -650,6 +656,14 @@ def create_order():
     include_kit = bool(data.get("includeTrainingKit"))
     enrollment_snapshot = data.get("enrollmentSnapshot") if isinstance(data.get("enrollmentSnapshot"), dict) else {}
     billing_snapshot = data.get("billingSnapshot") if isinstance(data.get("billingSnapshot"), dict) else {}
+    shipping_same = data.get("shippingSameAsProfile")
+    if shipping_same is None:
+        shipping_same = True
+    shipping_same = bool(shipping_same)
+    shipping_address = data.get("shippingAddress") if isinstance(data.get("shippingAddress"), dict) else None
+    if include_kit and shipping_same:
+        # Copy registered profile / billing as shipping
+        shipping_address = dict(billing_snapshot) if billing_snapshot else shipping_address
 
     if not course_id or not ObjectId.is_valid(course_id):
         return jsonify({"error": "Valid courseId is required"}), 400
@@ -773,6 +787,8 @@ def create_order():
             "enrollmentSnapshot": enrollment_snapshot,
             "billingSnapshot": billing_snapshot,
             "includeTrainingKit": include_kit,
+            "shippingSameAsProfile": shipping_same,
+            "shippingAddress": shipping_address if include_kit else None,
         }
         result = coll.insert_one(doc)
         return jsonify({
@@ -828,6 +844,8 @@ def create_order():
         "enrollmentSnapshot": enrollment_snapshot,
         "billingSnapshot": billing_snapshot,
         "includeTrainingKit": include_kit,
+        "shippingSameAsProfile": shipping_same,
+        "shippingAddress": shipping_address if include_kit else None,
     }
     result = coll.insert_one(doc)
 

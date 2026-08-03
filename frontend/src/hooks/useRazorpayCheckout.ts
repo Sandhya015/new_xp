@@ -34,6 +34,8 @@ export function useRazorpayCheckout() {
       includeTrainingKit?: boolean
       enrollmentSnapshot?: Record<string, string | undefined>
       billingSnapshot?: Record<string, string | undefined>
+      shippingSameAsProfile?: boolean
+      shippingAddress?: Record<string, string | undefined>
     }) => {
       const {
         courseId,
@@ -45,6 +47,8 @@ export function useRazorpayCheckout() {
         includeTrainingKit,
         enrollmentSnapshot,
         billingSnapshot,
+        shippingSameAsProfile,
+        shippingAddress,
       } = opts
       setError(null)
 
@@ -93,6 +97,8 @@ export function useRazorpayCheckout() {
           includeTrainingKit,
           enrollmentSnapshot,
           billingSnapshot,
+          shippingSameAsProfile,
+          shippingAddress,
         })
 
         const gw =

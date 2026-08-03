@@ -14,6 +14,7 @@ import {
   Zap,
   Plus,
   CheckCircle,
+  Package,
 } from 'lucide-react'
 import { adminService } from '@/services/adminService'
 
@@ -52,6 +53,18 @@ export function AdminDashboard() {
   const [kpis, setKpis] = useState<Record<string, number>>({})
   const [pendingItems, setPendingItems] = useState<Array<{ label: string; count: number; to: string }>>([])
   const [recentActivity, setRecentActivity] = useState<Array<{ type: string; text: string; time: string; entityId: string }>>([])
+  const [recentKitOrders, setRecentKitOrders] = useState<
+    Array<{
+      id: string
+      kitOrderId?: string
+      studentName?: string
+      kitName?: string
+      status?: string
+      orderedAt?: string
+      shippingSameAsProfile?: boolean
+    }>
+  >([])
+  const [kitPending, setKitPending] = useState(0)
 
   useEffect(() => {
     adminService.getDashboard()
@@ -59,6 +72,8 @@ export function AdminDashboard() {
         setKpis(d.kpis || {})
         setPendingItems(d.pendingItems || [])
         setRecentActivity(d.recentActivity || [])
+        setRecentKitOrders(d.recentKitOrders || [])
+        setKitPending(d.kitOrdersPendingCount || 0)
       })
       .catch(() => setError('Failed to load dashboard'))
       .finally(() => setLoading(false))
@@ -132,6 +147,50 @@ export function AdminDashboard() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-bold text-brand-navy flex items-center gap-2">
+              <Package className="h-5 w-5 text-brand-accent" />
+              Recent Kit Orders
+            </h3>
+            <div className="flex items-center gap-2">
+              {kitPending > 0 && (
+                <span className="flex h-6 min-w-[24px] items-center justify-center rounded-full bg-amber-500 px-2 text-xs font-semibold text-white">
+                  {kitPending} pending
+                </span>
+              )}
+              <Link to="/admin/kit-orders" className="text-xs font-medium text-brand-accent hover:underline">
+                View all
+              </Link>
+            </div>
+          </div>
+          <ul className="mt-4 space-y-2">
+            {recentKitOrders.length === 0 ? (
+              <li className="text-sm text-slate-gray">No kit orders yet.</li>
+            ) : (
+              recentKitOrders.map((k) => (
+                <li key={k.id}>
+                  <Link
+                    to="/admin/kit-orders"
+                    className="flex items-start justify-between gap-2 rounded-lg px-2 py-2 text-sm hover:bg-gray-50"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800 truncate">
+                        {k.studentName || 'Student'} · {k.kitName || 'Kit'}
+                      </p>
+                      <p className="text-xs text-slate-gray">
+                        {k.kitOrderId || k.id}
+                        {k.shippingSameAsProfile === false ? ' · custom ship' : ''}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-xs capitalize text-slate-gray">{k.status || 'pending'}</span>
+                  </Link>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <h3 className="font-bold text-brand-navy">Recent Activity</h3>
           <p className="text-xs text-slate-gray mt-0.5">Last 15 platform events</p>
           <ul className="mt-4 space-y-3">
@@ -153,14 +212,16 @@ export function AdminDashboard() {
             )}
           </ul>
         </div>
+      </div>
 
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Quick actions — doc 4.4 */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm lg:col-span-2">
           <h3 className="font-bold text-brand-navy flex items-center gap-2">
             <Zap className="h-5 w-5 text-brand-accent" />
             Quick Actions
           </h3>
-          <div className="mt-4 flex flex-col gap-2">
+          <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {QUICK_ACTIONS.map(({ to, label, icon: Icon }) => (
               <Link
                 key={label}
@@ -171,6 +232,13 @@ export function AdminDashboard() {
                 {label}
               </Link>
             ))}
+            <Link
+              to="/admin/kit-orders"
+              className="flex items-center gap-3 rounded-lg bg-brand-accent px-4 py-3 text-sm font-semibold text-white hover:bg-primary-600 transition shadow-sm"
+            >
+              <Package className="h-4 w-4 shrink-0" />
+              Kit Orders
+            </Link>
           </div>
         </div>
       </div>

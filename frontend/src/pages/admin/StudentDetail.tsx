@@ -1,8 +1,7 @@
 /**
- * Admin — Student detail (AD-WF-15 / CFRD §4).
- * Tabs: Profile, Enrolled Trainings, Applied Internships, Documents, Payments, Support Tickets, Activity Log.
+ * Admin — Student detail (AD-WF-15 / CFRD §4 + Rev 2 S3/S4/S5).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -16,6 +15,9 @@ import {
   Shield,
   Mail,
   Trash2,
+  Eye,
+  EyeOff,
+  RefreshCw,
 } from 'lucide-react'
 import {
   adminService,
@@ -28,6 +30,15 @@ import {
   type StudentTicketRow,
 } from '@/services/adminService'
 import { showAppToast } from '@/components/AppToastHost'
+import { RichTextEditor, type RichTextEditorHandle } from '@/components/admin/RichTextEditor'
+import { SearchableSingleSelect } from '@/components/admin/SearchableSelect'
+import {
+  useAcademicMasters,
+  collegeOptionsForUniversities,
+  branchSubjectOptions,
+  semesterLabelsForCourse,
+  isBranchCourse,
+} from '@/hooks/useAcademicMasters'
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -39,16 +50,33 @@ const TABS = [
   { id: 'activity', label: 'Activity Log', icon: Clock },
 ] as const
 
-type ModalKind = 'edit' | 'suspend' | 'delete' | 'message' | null
+type ModalKind = 'edit' | 'suspend' | 'delete' | 'message' | 'password' | null
 
 function errMsg(e: unknown, fallback: string) {
   const ax = e as { response?: { data?: { error?: string; message?: string } } }
   return ax?.response?.data?.error || ax?.response?.data?.message || fallback
 }
 
+function genPassword(len = 12): string {
+  const letters = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ'
+  const digits = '23456789'
+  const all = letters + digits
+  const arr = new Uint8Array(len)
+  crypto.getRandomValues(arr)
+  let out = ''
+  // ensure letter + digit
+  out += letters[arr[0] % letters.length]
+  out += digits[arr[1] % digits.length]
+  for (let i = 2; i < len; i++) out += all[arr[i] % all.length]
+  return out
+}
+
 export function StudentDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { universities, courses, states } = useAcademicMasters()
+  const msgEditorRef = useRef<RichTextEditorHandle>(null)
+
   const [student, setStudent] = useState<StudentDetailType | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -58,7 +86,16 @@ export function StudentDetail() {
   const [confirmEmail, setConfirmEmail] = useState('')
   const [msgSubject, setMsgSubject] = useState('')
   const [msgBody, setMsgBody] = useState('')
+  const [msgFiles, setMsgFiles] = useState<File[]>([])
   const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [pwForm, setPwForm] = useState({
+    newPassword: '',
+    confirmPassword: '',
+    notifyStudent: true,
+    forceChangeOnLogin: true,
+    reason: '',
+  })
+  const [showPw, setShowPw] = useState(false)
 
   const [enrollments, setEnrollments] = useState<StudentEnrollmentRow[]>([])
   const [applications, setApplications] = useState<StudentApplicationRow[]>([])
@@ -67,6 +104,24 @@ export function StudentDetail() {
   const [tickets, setTickets] = useState<StudentTicketRow[]>([])
   const [activity, setActivity] = useState<StudentActivityRow[]>([])
   const [tabLoading, setTabLoading] = useState(false)
+
+  const collegeOpts = useMemo(
+    () => collegeOptionsForUniversities(editForm.university ? [editForm.university] : []).map((c) => ({ value: c, label: c })),
+    [editForm.university],
+  )
+  const branchOpts = useMemo(
+    () => branchSubjectOptions(editForm.course || ''),
+    [editForm.course],
+  )
+  const semesterOpts = useMemo(
+    () => semesterLabelsForCourse(editForm.course || '').map((s) => ({ value: s, label: s })),
+    [editForm.course],
+  )
+  const branchLabel = editForm.course
+    ? isBranchCourse(editForm.course)
+      ? 'Branch'
+      : 'Subject'
+    : 'Branch / Subject'
 
   const reload = useCallback(async () => {
     if (!id) return
@@ -147,6 +202,19 @@ export function StudentDetail() {
     setModal('edit')
   }
 
+  const openPassword = () => {
+    const g = genPassword()
+    setPwForm({
+      newPassword: g,
+      confirmPassword: g,
+      notifyStudent: true,
+      forceChangeOnLogin: true,
+      reason: '',
+    })
+    setShowPw(true)
+    setModal('password')
+  }
+
   const runAction = async (fn: () => Promise<unknown>, success: string, opts?: { skipReload?: boolean }) => {
     if (!id) return
     setBusy(true)
@@ -208,9 +276,7 @@ export function StudentDetail() {
             <button
               type="button"
               disabled={busy || isDeleted}
-              onClick={() =>
-                runAction(() => adminService.resetStudentPassword(id!), 'Password reset email sent')
-              }
+              onClick={openPassword}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Reset Password
@@ -221,6 +287,7 @@ export function StudentDetail() {
               onClick={() => {
                 setMsgSubject('')
                 setMsgBody('')
+                setMsgFiles([])
                 setModal('message')
               }}
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -349,34 +416,16 @@ export function StudentDetail() {
                     <thead className="bg-gray-50 text-left text-xs uppercase text-gray-600">
                       <tr>
                         <th className="px-3 py-2">Title</th>
-                        <th className="px-3 py-2">University</th>
-                        <th className="px-3 py-2">Category</th>
-                        <th className="px-3 py-2">Mode</th>
-                        <th className="px-3 py-2">Duration</th>
-                        <th className="px-3 py-2">Fee</th>
-                        <th className="px-3 py-2">Enrolled</th>
-                        <th className="px-3 py-2">Progress</th>
-                        <th className="px-3 py-2">Certificate</th>
+                        <th className="px-3 py-2">Date</th>
+                        <th className="px-3 py-2">Status</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y">
                       {enrollments.map((e) => (
                         <tr key={e.id}>
-                          <td className="px-3 py-2 font-medium text-brand-navy">
-                            {e.title || e.courseTitle || e.courseId}
-                          </td>
-                          <td className="px-3 py-2 text-slate-gray">{e.university || '—'}</td>
-                          <td className="px-3 py-2 text-slate-gray">{e.category || '—'}</td>
-                          <td className="px-3 py-2 text-slate-gray">{e.mode || '—'}</td>
-                          <td className="px-3 py-2 text-slate-gray">{e.duration || '—'}</td>
-                          <td className="px-3 py-2 text-slate-gray">{e.feePaid ? 'Paid' : '—'}</td>
-                          <td className="px-3 py-2 text-slate-gray">
-                            {e.enrollmentDate || e.createdAt || '—'}
-                          </td>
-                          <td className="px-3 py-2 text-slate-gray">
-                            {e.progressPercent != null ? `${e.progressPercent}%` : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-slate-gray">{e.certificateStatus || '—'}</td>
+                          <td className="px-3 py-2">{e.title || e.courseTitle || e.courseId}</td>
+                          <td className="px-3 py-2">{e.enrollmentDate || e.createdAt || '—'}</td>
+                          <td className="px-3 py-2">{e.status || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -393,27 +442,9 @@ export function StudentDetail() {
               ) : (
                 <ul className="space-y-2">
                   {applications.map((a) => (
-                    <li key={a.id} className="rounded-lg border border-gray-200 px-4 py-3 text-sm">
-                      <div className="font-medium text-brand-navy">
-                        {a.role || 'Internship'} · {a.company || '—'}
-                      </div>
-                      <div className="mt-1 text-slate-gray">
-                        {a.status}
-                        {a.appliedAt || a.createdAt ? ` · Applied ${a.appliedAt || a.createdAt}` : ''}
-                        {a.startDate || a.endDate
-                          ? ` · ${a.startDate || '?'} → ${a.endDate || '?'}`
-                          : ''}
-                      </div>
-                      {a.offerLetter && (
-                        <a
-                          href={a.offerLetter}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 inline-block text-brand-accent hover:underline"
-                        >
-                          Offer letter
-                        </a>
-                      )}
+                    <li key={a.id} className="rounded-lg border border-gray-200 px-4 py-2 text-sm">
+                      <div className="font-medium">{a.company || '—'} — {a.role || a.internshipId}</div>
+                      <div className="text-slate-gray">{a.status} · {a.appliedAt || a.createdAt || ''}</div>
                     </li>
                   ))}
                 </ul>
@@ -424,25 +455,15 @@ export function StudentDetail() {
           {activeTab === 'documents' && (
             <div>
               {documents.length === 0 ? (
-                <p className="text-sm text-slate-gray">No certificates or offer letters.</p>
+                <p className="text-sm text-slate-gray">No documents.</p>
               ) : (
                 <ul className="space-y-2">
                   {documents.map((d) => (
-                    <li key={d.id} className="rounded-lg border border-gray-200 px-4 py-3 text-sm flex flex-wrap justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-brand-navy">{d.title}</span>
-                        <span className="ml-2 text-xs uppercase text-slate-gray">{d.type}</span>
-                        {d.certNo && <span className="ml-2 text-slate-gray">{d.certNo}</span>}
-                        <div className="text-slate-gray">
-                          {d.status || ''}
-                          {d.issuedAt ? ` · ${d.issuedAt}` : ''}
-                        </div>
-                      </div>
-                      {d.url && (
-                        <a href={d.url} target="_blank" rel="noreferrer" className="text-brand-accent hover:underline">
-                          Open
-                        </a>
-                      )}
+                    <li key={d.id} className="rounded-lg border border-gray-200 px-4 py-2 text-sm flex justify-between">
+                      <span>
+                        {d.title || d.type} {d.certNo ? `(${d.certNo})` : ''}
+                      </span>
+                      <span className="text-slate-gray">{d.status || d.issuedAt || ''}</span>
                     </li>
                   ))}
                 </ul>
@@ -455,20 +476,30 @@ export function StudentDetail() {
               {payments.length === 0 ? (
                 <p className="text-sm text-slate-gray">No payments.</p>
               ) : (
-                <ul className="space-y-2">
-                  {payments.map((p) => (
-                    <li key={p.id} className="rounded-lg border border-gray-200 px-4 py-2 text-sm flex flex-wrap justify-between gap-2">
-                      <span>
-                        <Link to={`/admin/payments/${p.id}`} className="font-medium text-brand-accent hover:underline">
-                          {p.orderId || p.id}
-                        </Link>
-                        <span className="ml-2 text-slate-gray">₹{p.amount}</span>
-                        <span className="ml-2 text-slate-gray">{p.status}</span>
-                      </span>
-                      <span className="text-slate-gray">{p.createdAt}</span>
-                    </li>
-                  ))}
-                </ul>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-left text-xs uppercase text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2">Order</th>
+                        <th className="px-3 py-2">Amount</th>
+                        <th className="px-3 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {payments.map((p) => (
+                        <tr key={p.id}>
+                          <td className="px-3 py-2">
+                            <Link className="text-brand-accent hover:underline" to={`/admin/payments/${p.id}`}>
+                              {p.orderId || p.id}
+                            </Link>
+                          </td>
+                          <td className="px-3 py-2">₹{Number(p.amount || 0).toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-2">{p.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}
@@ -476,16 +507,13 @@ export function StudentDetail() {
           {activeTab === 'support' && (
             <div>
               {tickets.length === 0 ? (
-                <p className="text-sm text-slate-gray">No support tickets.</p>
+                <p className="text-sm text-slate-gray">No tickets.</p>
               ) : (
                 <ul className="space-y-2">
                   {tickets.map((t) => (
                     <li key={t.id} className="rounded-lg border border-gray-200 px-4 py-2 text-sm">
-                      <span className="font-medium text-brand-navy">{t.ticketId}</span>
-                      <span className="ml-2">{t.subject}</span>
-                      <span className="ml-2 text-slate-gray">
-                        {t.status} · {t.createdAt}
-                      </span>
+                      <div className="font-medium">{t.subject || t.id}</div>
+                      <div className="text-slate-gray">{t.status}</div>
                     </li>
                   ))}
                 </ul>
@@ -496,7 +524,7 @@ export function StudentDetail() {
           {activeTab === 'activity' && (
             <div>
               {activity.length === 0 ? (
-                <p className="text-sm text-slate-gray">No activity logged yet.</p>
+                <p className="text-sm text-slate-gray">No activity yet.</p>
               ) : (
                 <ul className="space-y-2">
                   {activity.map((a) => (
@@ -525,36 +553,22 @@ export function StudentDetail() {
             <h3 className="font-semibold text-brand-navy flex items-center gap-2">
               <Shield className="h-5 w-5 text-amber-500" /> Suspend account
             </h3>
-            <p className="mt-2 text-sm text-slate-gray">
-              Student will be blocked from login. Reason is recommended.
-            </p>
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700">Reason</label>
-              <textarea
-                rows={3}
-                value={suspendReason}
-                onChange={(e) => setSuspendReason(e.target.value)}
-                placeholder="Reason for suspension"
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
+            <p className="mt-2 text-sm text-slate-gray">Student will be blocked from login. Reason is recommended.</p>
+            <textarea
+              rows={3}
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+              placeholder="Reason for suspension"
+              className="mt-4 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
             <div className="mt-4 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setModal(null)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
-              >
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() =>
-                  runAction(
-                    () => adminService.suspendStudent(id!, suspendReason.trim()),
-                    'Student suspended',
-                  )
-                }
+                onClick={() => runAction(() => adminService.suspendStudent(id!, suspendReason.trim()), 'Student suspended')}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Suspend
@@ -567,7 +581,7 @@ export function StudentDetail() {
       {modal === 'delete' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h3 className="font-semibold text-brand-navy flex items-center gap-2 text-red-700">
+            <h3 className="font-semibold text-red-700 flex items-center gap-2">
               <Trash2 className="h-5 w-5" /> Soft-delete student
             </h3>
             <p className="mt-2 text-sm text-slate-gray">
@@ -578,14 +592,9 @@ export function StudentDetail() {
               value={confirmEmail}
               onChange={(e) => setConfirmEmail(e.target.value)}
               className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="confirmEmail"
             />
             <div className="mt-4 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setModal(null)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
-              >
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
                 Cancel
               </button>
               <button
@@ -610,13 +619,111 @@ export function StudentDetail() {
         </div>
       )}
 
+      {modal === 'password' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="font-semibold text-brand-navy">Set new password (SA)</h3>
+            <p className="mt-1 text-sm text-slate-gray">
+              Direct set — hashed with pbkdf2. Max 3 resets/day. Sessions are invalidated.
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">New password</span>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    value={pwForm.newPassword}
+                    onChange={(e) => setPwForm((f) => ({ ...f, newPassword: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                  />
+                  <button type="button" className="rounded border px-2" onClick={() => setShowPw((s) => !s)} title="Show/hide">
+                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border px-2"
+                    title="Generate"
+                    onClick={() => {
+                      const g = genPassword()
+                      setPwForm((f) => ({ ...f, newPassword: g, confirmPassword: g }))
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </button>
+                </div>
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Confirm password</span>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={pwForm.confirmPassword}
+                  onChange={(e) => setPwForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={pwForm.notifyStudent}
+                  onChange={(e) => setPwForm((f) => ({ ...f, notifyStudent: e.target.checked }))}
+                />
+                Notify student by email (password not included)
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={pwForm.forceChangeOnLogin}
+                  onChange={(e) => setPwForm((f) => ({ ...f, forceChangeOnLogin: e.target.checked }))}
+                />
+                Force password change on next login
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Reason (optional)</span>
+                <input
+                  value={pwForm.reason}
+                  onChange={(e) => setPwForm((f) => ({ ...f, reason: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex gap-2 justify-end">
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy || !pwForm.newPassword || pwForm.newPassword !== pwForm.confirmPassword}
+                onClick={() =>
+                  runAction(
+                    () =>
+                      adminService.setStudentPassword(id!, {
+                        newPassword: pwForm.newPassword,
+                        confirmPassword: pwForm.confirmPassword,
+                        notifyStudent: pwForm.notifyStudent,
+                        forceChangeOnLogin: pwForm.forceChangeOnLogin,
+                        reason: pwForm.reason || undefined,
+                      }),
+                    'Password updated',
+                  )
+                }
+                className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Set password
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modal === 'message' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h3 className="font-semibold text-brand-navy flex items-center gap-2">
               <Mail className="h-5 w-5" /> Send message
             </h3>
-            <p className="mt-1 text-sm text-slate-gray">Emails the student and opens a support ticket.</p>
+            <p className="mt-1 text-sm text-slate-gray">
+              Emails the student (BCC support@), creates a support ticket. Max 5 attachments (10 MB each, 25 MB total).
+            </p>
             <input
               type="text"
               value={msgSubject}
@@ -624,34 +731,61 @@ export function StudentDetail() {
               placeholder="Subject"
               className="mt-4 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
-            <textarea
-              rows={5}
-              value={msgBody}
-              onChange={(e) => setMsgBody(e.target.value)}
-              placeholder="Message body (text or HTML)"
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
+            <div className="mt-3">
+              <RichTextEditor
+                ref={msgEditorRef}
+                label="Message"
+                value={msgBody}
+                onChange={setMsgBody}
+                placeholder="Write your message…"
+                minHeightClass="min-h-[160px]"
+              />
+            </div>
+            <label className="mt-3 block text-sm">
+              <span className="font-medium text-gray-700">Attachments (optional)</span>
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.zip"
+                className="mt-1 block w-full text-sm"
+                onChange={(e) => {
+                  const list = Array.from(e.target.files || []).slice(0, 5)
+                  setMsgFiles(list)
+                }}
+              />
+              {msgFiles.length > 0 && (
+                <ul className="mt-1 text-xs text-slate-gray">
+                  {msgFiles.map((f) => (
+                    <li key={f.name}>
+                      {f.name} ({Math.round(f.size / 1024)} KB)
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </label>
             <div className="mt-4 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setModal(null)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
-              >
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={busy || !msgSubject.trim() || !msgBody.trim()}
-                onClick={() =>
-                  runAction(
+                disabled={busy || !msgSubject.trim()}
+                onClick={() => {
+                  const html = msgEditorRef.current?.getHtml() || msgBody
+                  if (!html.trim() || html === '<p></p>') {
+                    showAppToast('Message body is required', 'error')
+                    return
+                  }
+                  void runAction(
                     () =>
                       adminService.messageStudent(id!, {
                         subject: msgSubject.trim(),
-                        body: msgBody.trim(),
+                        body: html,
+                        files: msgFiles,
                       }),
                     'Message sent',
                   )
-                }
+                }}
                 className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Send
@@ -665,52 +799,130 @@ export function StudentDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h3 className="font-semibold text-brand-navy">Edit student (override)</h3>
-            <p className="mt-1 text-sm text-slate-gray">Each changed field is written to the activity log.</p>
+            <p className="mt-1 text-sm text-slate-gray">Registration masters for academic fields. Dependent fields reset when parent changes.</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {(
-                [
-                  ['name', 'Name'],
-                  ['email', 'Email'],
-                  ['mobile', 'Mobile'],
-                  ['dateOfBirth', 'Date of birth'],
-                  ['university', 'University'],
-                  ['collegeName', 'College'],
-                  ['course', 'Course'],
-                  ['branch', 'Branch'],
-                  ['semester', 'Semester'],
-                  ['addressLine1', 'Address line 1'],
-                  ['addressApartment', 'Apartment'],
-                  ['addressCity', 'City'],
-                  ['addressState', 'State'],
-                  ['addressPincode', 'Pincode'],
-                  ['addressCountry', 'Country'],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="block text-sm">
-                  <span className="font-medium text-gray-700">{label}</span>
-                  <input
-                    type={key === 'dateOfBirth' ? 'date' : key === 'email' ? 'email' : 'text'}
-                    value={editForm[key] || ''}
-                    onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                  />
-                </label>
-              ))}
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Name</span>
+                <input
+                  value={editForm.name || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Email</span>
+                <input
+                  type="email"
+                  value={editForm.email || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Mobile</span>
+                <input
+                  value={editForm.mobile || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, mobile: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Date of birth</span>
+                <input
+                  type="date"
+                  value={editForm.dateOfBirth || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, dateOfBirth: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <SearchableSingleSelect
+                label="University"
+                options={universities.map((u) => ({ value: u.value, label: u.label }))}
+                value={editForm.university || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, university: v, collegeName: '' }))}
+              />
+              <SearchableSingleSelect
+                label="College"
+                options={collegeOpts}
+                value={editForm.collegeName || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, collegeName: v }))}
+                disabled={!editForm.university}
+              />
+              <SearchableSingleSelect
+                label="Course"
+                options={courses.map((c) => ({ value: c, label: c }))}
+                value={editForm.course || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, course: v, branch: '', semester: '' }))}
+              />
+              <SearchableSingleSelect
+                label={branchLabel}
+                options={branchOpts}
+                value={editForm.branch || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, branch: v }))}
+                disabled={!editForm.course}
+              />
+              <SearchableSingleSelect
+                label="Semester"
+                options={semesterOpts}
+                value={editForm.semester || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, semester: v }))}
+                disabled={!editForm.course}
+              />
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Address line 1</span>
+                <input
+                  value={editForm.addressLine1 || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, addressLine1: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Apartment</span>
+                <input
+                  value={editForm.addressApartment || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, addressApartment: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">City</span>
+                <input
+                  value={editForm.addressCity || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, addressCity: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <SearchableSingleSelect
+                label="State"
+                options={states.map((s) => ({ value: s, label: s }))}
+                value={editForm.addressState || ''}
+                onChange={(v) => setEditForm((f) => ({ ...f, addressState: v }))}
+              />
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Pincode</span>
+                <input
+                  value={editForm.addressPincode || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, addressPincode: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="font-medium text-gray-700">Country</span>
+                <input
+                  value={editForm.addressCountry || ''}
+                  onChange={(e) => setEditForm((f) => ({ ...f, addressCountry: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
             </div>
             <div className="mt-4 flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setModal(null)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700"
-              >
+              <button type="button" onClick={() => setModal(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() =>
-                  runAction(() => adminService.updateStudent(id!, editForm), 'Student updated')
-                }
+                onClick={() => runAction(() => adminService.updateStudent(id!, editForm), 'Student updated')}
                 className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Save

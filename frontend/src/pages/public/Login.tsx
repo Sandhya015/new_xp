@@ -43,6 +43,10 @@ export function Login() {
           return
         }
         setSession(res.user, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
+        if (res.user?.forcePasswordChange || res.forcePasswordChange) {
+          navigate('/change-password?forced=1', { replace: true })
+          return
+        }
         const r = safeRedirect(searchParams.get('redirect') || searchParams.get('next'))
         navigate(r || '/dashboard', { replace: true })
       } else {
@@ -52,6 +56,10 @@ export function Login() {
           return
         }
         setSession(res.user, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
+        if (res.user?.forcePasswordChange || res.forcePasswordChange) {
+          navigate('/change-password?forced=1', { replace: true })
+          return
+        }
         navigate('/company', { replace: true })
       }
     } catch (err: unknown) {

@@ -101,6 +101,11 @@ export function StudentLayout() {
     }
     if (!isStudentUser(user)) {
       navigate('/login', { replace: true })
+      return
+    }
+    if (user.forcePasswordChange && !location.pathname.startsWith('/change-password')) {
+      const dest = `${location.pathname}${location.search}`
+      navigate(`/change-password?forced=1&next=${encodeURIComponent(dest)}`, { replace: true })
     }
   }, [token, user, navigate, location.pathname, location.search])
 

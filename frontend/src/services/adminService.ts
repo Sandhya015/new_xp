@@ -72,6 +72,29 @@ export type AdminCertificateFormPayload = {
   autoGenerateCertNo?: boolean
 }
 
+export type KitOrderRow = {
+  id: string
+  kitOrderId: string
+  paymentId?: string
+  orderId?: string
+  userId?: string
+  courseId?: string
+  courseTitle?: string
+  kitName?: string
+  kitType?: string
+  studentName?: string
+  studentEmail?: string
+  studentPhone?: string
+  shippingAddress?: Record<string, string>
+  shippingSummary?: string
+  shippingSameAsProfile?: boolean
+  status: string
+  trackingNo?: string
+  amount?: number
+  couponCode?: string
+  orderedAt?: string
+}
+
 export type DashboardData = {
   kpis: {
     totalStudents: number
@@ -87,6 +110,8 @@ export type DashboardData = {
   }
   pendingItems: Array<{ label: string; count: number; to: string }>
   recentActivity: Array<{ type: string; text: string; time: string; entityId: string }>
+  recentKitOrders?: KitOrderRow[]
+  kitOrdersPendingCount?: number
 }
 
 export type LeadDetail = {
@@ -271,7 +296,11 @@ export type PaymentFilters = {
   dateFrom?: string
   dateTo?: string
   courseId?: string
+  /** Comma-separated multi course ids */
+  courseIds?: string
   university?: string
+  /** Comma-separated multi universities */
+  universities?: string
   amountMin?: number | string
   amountMax?: number | string
   coupon?: string
@@ -375,19 +404,109 @@ export const adminService = {
     return data
   },
 
-  async resetStudentPassword(id: string) {
-    const { data } = await api.post<{ ok: boolean; message?: string }>(
-      `/api/admin/students/${id}/reset-password`,
+  /** Email-link fallback (empty body) or direct set when body has newPassword. */
+  async resetStudentPassword(
+    id: string,
+    body?: {
+      newPassword?: string
+      confirmPassword?: string
+      notifyStudent?: boolean
+      forceChangeOnLogin?: boolean
+      reason?: string
+    },
+  ) {
+    const { data } = await api.post<{
+      ok: boolean
+      message?: string
+      notifyEmailSent?: boolean
+      forceChangeOnLogin?: boolean
+    }>(`/api/admin/students/${id}/reset-password`, body && Object.keys(body).length ? body : undefined)
+    return data
+  },
+
+  async setStudentPassword(
+    id: string,
+    body: {
+      newPassword: string
+      confirmPassword: string
+      notifyStudent?: boolean
+      forceChangeOnLogin?: boolean
+      reason?: string
+    },
+  ) {
+    return this.resetStudentPassword(id, body)
+  },
+
+  async messageStudent(
+    id: string,
+    body: { subject: string; body: string; files?: File[] },
+  ) {
+    if (body.files?.length) {
+      const fd = new FormData()
+      fd.append('subject', body.subject)
+      fd.append('body', body.body)
+      for (const f of body.files.slice(0, 5)) {
+        fd.append('files', f)
+      }
+      const { data } = await api.post<{
+        ok: boolean
+        message?: string
+        ticketId?: string
+        emailSent?: boolean
+      }>(`/api/admin/students/${id}/message`, fd)
+      return data
+    }
+    const { data } = await api.post<{
+      ok: boolean
+      message?: string
+      ticketId?: string
+      emailSent?: boolean
+    }>(`/api/admin/students/${id}/message`, {
+      subject: body.subject,
+      body: body.body,
+    })
+    return data
+  },
+
+  async getKitOrders(params?: {
+    search?: string
+    status?: string
+    courseId?: string
+    kitName?: string
+    state?: string
+    dateFrom?: string
+    dateTo?: string
+    page?: number
+    limit?: number
+  }) {
+    const { data } = await api.get<{ items: KitOrderRow[]; total: number; page?: number; limit?: number }>(
+      '/api/admin/kit-orders',
+      { params },
     )
     return data
   },
 
-  async messageStudent(id: string, body: { subject: string; body: string }) {
-    const { data } = await api.post<{ ok: boolean; message?: string; ticketId?: string; emailSent?: boolean }>(
-      `/api/admin/students/${id}/message`,
-      body,
-    )
+  async updateKitOrderStatus(id: string, body: { status: string; trackingNo?: string }) {
+    const { data } = await api.patch<KitOrderRow>(`/api/admin/kit-orders/${id}/status`, body)
     return data
+  },
+
+  async exportKitOrders(params?: Record<string, string | number | undefined>): Promise<Blob> {
+    const { data } = await api.get('/api/admin/kit-orders/export', {
+      params,
+      responseType: 'blob',
+      headers: { Accept: 'text/csv' },
+    })
+    return data
+  },
+
+  async printKitShippingLabels(ids: string[]): Promise<Blob> {
+    const { data } = await api.post(
+      '/api/admin/kit-orders/shipping-labels',
+      { ids },
+      { responseType: 'arraybuffer', headers: { Accept: 'application/pdf' } },
+    )
+    return blobFromMaybeBase64Body(data as ArrayBuffer, 'application/pdf', 'pdf')
   },
 
   async verifyStudentEmail(id: string) {

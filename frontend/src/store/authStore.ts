@@ -18,6 +18,8 @@ export interface User {
   stream?: string
   collegeName?: string
   collegeRegNo?: string
+  /** Set when SA forces password rotation after direct password reset */
+  forcePasswordChange?: boolean
   /** Public URL path e.g. `/api/auth/media/profile/....jpg` */
   profilePhotoUrl?: string
 }

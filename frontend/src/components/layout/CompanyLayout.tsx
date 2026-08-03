@@ -83,8 +83,12 @@ export function CompanyLayout() {
     }
     if (!isCompanyUser(user)) {
       navigate('/login', { replace: true })
+      return
     }
-  }, [token, user, navigate])
+    if (user.forcePasswordChange) {
+      navigate(`/change-password?forced=1&next=${encodeURIComponent(location.pathname)}`, { replace: true })
+    }
+  }, [token, user, navigate, location.pathname])
 
   const handleLogout = () => {
     setLogoutConfirmOpen(false)

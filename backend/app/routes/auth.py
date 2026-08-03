@@ -13,6 +13,8 @@ from flask import Blueprint, current_app, jsonify, request, send_file, Response
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from app.auth_session import jwt_claims_for_user, new_session_epoch
+
 from app.company_registration_validate import (
     normalized_company_to_user_payload,
     validate_company_registration,
@@ -128,6 +130,7 @@ def _user_to_response(user: dict) -> dict:
         "role": user.get("role", "student"),
         "companyName": user.get("companyName"),
         "hrName": user.get("hrName"),
+        "forcePasswordChange": bool(user.get("forcePasswordChange")),
     }
     if user.get("role") == "student":
         out["university"] = user.get("university") or ""
@@ -612,7 +615,7 @@ def register_verify_otp():
 
     token = create_access_token(
         identity=str(result.inserted_id),
-        additional_claims={"email": email, "role": "student"},
+        additional_claims=jwt_claims_for_user(user),
     )
     return jsonify({
         "message": "Account created successfully! Welcome to XpertIntern.",
@@ -812,7 +815,14 @@ def reset_password():
         tok_col.delete_one({"_id": doc["_id"]})
         return jsonify({"error": "This reset link is invalid or has expired. Please request a new one."}), 400
 
-    users.update_one({"_id": user["_id"]}, {"$set": {"password": _hash_password(new_pw)}})
+    users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {
+            "password": _hash_password(new_pw),
+            "forcePasswordChange": False,
+            "sessionEpoch": new_session_epoch(),
+        }},
+    )
     tok_col.delete_one({"_id": doc["_id"]})
     tok_col.delete_many({"email": email, "used": {"$ne": True}})
     return jsonify({"message": "Your password has been updated. You can sign in with your new password."}), 200
@@ -866,12 +876,13 @@ def login():
 
         token = create_access_token(
             identity=str(user["_id"]),
-            additional_claims={"email": user["email"], "role": user.get("role", "student")},
+            additional_claims=jwt_claims_for_user(user),
         )
         return jsonify({
             "token": token,
             "expiresIn": _jwt_expires_seconds(),
             "user": _user_to_response(user),
+            "forcePasswordChange": bool(user.get("forcePasswordChange")),
         })
     except Exception as e:
         current_app.logger.exception("Login error")
@@ -910,11 +921,7 @@ def admin_login():
 
         token = create_access_token(
             identity=str(user["_id"]),
-            additional_claims={
-                "email": user["email"],
-                "role": "admin",
-                "admin_portal": True,
-            },
+            additional_claims=jwt_claims_for_user(user, admin_portal=True),
         )
         return jsonify({"token": token, "expiresIn": _jwt_expires_seconds(), "user": _user_to_response(user)})
     except Exception as e:
@@ -1043,7 +1050,7 @@ def serve_profile_photo(fname):
 @auth_bp.route("/change-password", methods=["POST"])
 @jwt_required()
 def change_password():
-    """Change password (SD-WF-18). Requires current password."""
+    """Change password (SD-WF-18). Requires current password. Clears forcePasswordChange."""
     from bson import ObjectId
     db = get_db()
     if db is None:
@@ -1052,32 +1059,73 @@ def change_password():
     data = request.get_json() or {}
     current = (data.get("currentPassword") or data.get("current_password") or "").strip()
     new_pw = (data.get("newPassword") or data.get("new_password") or "").strip()
+    confirm = (data.get("confirmPassword") or data.get("confirm_password") or "").strip()
     if not current:
         return jsonify({"error": "Current password is required"}), 400
     if not new_pw:
         return jsonify({"error": "New password is required"}), 400
+    if confirm and confirm != new_pw:
+        return jsonify({"error": "Passwords do not match"}), 400
     ok, msg = _validate_password(new_pw)
     if not ok:
         return jsonify({"error": msg}), 400
+    if new_pw == current:
+        return jsonify({"error": "New password must be different from the current password"}), 400
     users = get_users_collection()
     user = users.find_one({"_id": ObjectId(user_id)})
     if not user or not _check_password(current, user.get("password", "")):
         return jsonify({"error": "Current password is incorrect"}), 401
+    epoch = new_session_epoch()
     users.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": {"password": _hash_password(new_pw)}},
+        {"$set": {
+            "password": _hash_password(new_pw),
+            "forcePasswordChange": False,
+            "sessionEpoch": epoch,
+            "passwordChangedAt": datetime.utcnow(),
+        }},
     )
-    return jsonify({"message": "Password updated successfully"})
+    user = users.find_one({"_id": ObjectId(user_id)}) or user
+    user["sessionEpoch"] = epoch
+    user["forcePasswordChange"] = False
+    claims = jwt_claims_for_user(user)
+    # Preserve admin portal claim if present on current JWT
+    jwt_claims = get_jwt() or {}
+    if jwt_claims.get("admin_portal") is True:
+        claims["admin_portal"] = True
+    token = create_access_token(identity=str(user_id), additional_claims=claims)
+    return jsonify({
+        "message": "Password updated successfully",
+        "token": token,
+        "expiresIn": _jwt_expires_seconds(),
+        "user": _user_to_response(user),
+        "forcePasswordChange": False,
+    })
 
 
 @auth_bp.route("/refresh", methods=["POST"])
 @jwt_required()
 def refresh():
-    """Issue a new access token (same identity)."""
+    """Issue a new access token (same identity + current sessionEpoch from DB)."""
+    from bson import ObjectId
     identity = get_jwt_identity()
-    claims = get_jwt()
-    extra = {"email": claims.get("email"), "role": claims.get("role", "student")}
-    if claims.get("admin_portal") is True:
+    claims_in = get_jwt() or {}
+    extra = {}
+    if claims_in.get("admin_portal") is True:
         extra["admin_portal"] = True
-    token = create_access_token(identity=identity, additional_claims=extra)
+    user = None
+    try:
+        user = get_users_collection().find_one({"_id": ObjectId(str(identity))})
+    except Exception:
+        user = None
+    if user:
+        claims = jwt_claims_for_user(user, **extra)
+    else:
+        claims = {
+            "email": claims_in.get("email"),
+            "role": claims_in.get("role", "student"),
+            "se": int(claims_in.get("se") or 0),
+            **extra,
+        }
+    token = create_access_token(identity=identity, additional_claims=claims)
     return jsonify({"token": token, "expiresIn": _jwt_expires_seconds()})

@@ -15,6 +15,7 @@ import { Login } from './pages/public/Login'
 import { Register } from './pages/public/Register'
 import { ForgotPassword } from './pages/public/ForgotPassword'
 import { ResetPassword } from './pages/public/ResetPassword'
+import { ForcedChangePassword } from './pages/public/ForcedChangePassword'
 import { Dashboard } from './pages/student/Dashboard'
 import { StudentTraining } from './pages/student/StudentTraining'
 import { StudentTrainingDetail } from './pages/student/StudentTrainingDetail'
@@ -47,6 +48,7 @@ import { LeadTracker } from './pages/admin/LeadTracker'
 import { LeadDetail } from './pages/admin/LeadDetail'
 import { PaymentList } from './pages/admin/PaymentList'
 import { PaymentDetail } from './pages/admin/PaymentDetail'
+import { KitOrders } from './pages/admin/KitOrders'
 import { SystemSettings } from './pages/admin/SystemSettings'
 import { CompanyManagement } from './pages/admin/CompanyManagement'
 import { InternshipManagement } from './pages/admin/InternshipManagement'
@@ -110,6 +112,7 @@ function App() {
         <Route path="leads/:id" element={<LeadDetail />} />
         <Route path="payments" element={<PaymentList />} />
         <Route path="payments/:id" element={<PaymentDetail />} />
+        <Route path="kit-orders" element={<KitOrders />} />
         <Route path="companies" element={<CompanyManagement />} />
         <Route path="internships" element={<InternshipManagement />} />
         <Route path="reports" element={<AdminReports />} />
@@ -137,6 +140,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/change-password" element={<ForcedChangePassword />} />
             <Route path="/payments/cashfree-complete" element={<PaymentsCashfreeComplete />} />
             <Route path="/terms" element={<LegalPlaceholder title="Terms and Conditions" />} />
             <Route path="/privacy" element={<LegalPlaceholder title="Privacy Policy" />} />

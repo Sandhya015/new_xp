@@ -7,6 +7,8 @@ import {
   type PaymentFilters,
   type PaymentsSummary,
 } from '@/services/adminService'
+import { SearchableMultiSelect } from '@/components/admin/SearchableSelect'
+import { useAcademicMasters, fetchAdminCoursesForFilter } from '@/hooks/useAcademicMasters'
 
 const FILTERS_KEY = 'admin.payments.lastFilters'
 
@@ -16,8 +18,8 @@ type FilterState = {
   paymentMode: string
   dateFrom: string
   dateTo: string
-  courseId: string
-  university: string
+  courseIds: string[]
+  universities: string[]
   amountMin: string
   amountMax: string
   coupon: string
@@ -29,8 +31,8 @@ const emptyFilters = (): FilterState => ({
   paymentMode: '',
   dateFrom: '',
   dateTo: '',
-  courseId: '',
-  university: '',
+  courseIds: [],
+  universities: [],
   amountMin: '',
   amountMax: '',
   coupon: '',
@@ -40,7 +42,18 @@ function loadStoredFilters(): FilterState {
   try {
     const raw = localStorage.getItem(FILTERS_KEY)
     if (!raw) return emptyFilters()
-    return { ...emptyFilters(), ...JSON.parse(raw) }
+    const parsed = JSON.parse(raw) as Partial<FilterState> & { courseId?: string; university?: string }
+    const base = { ...emptyFilters(), ...parsed }
+    // migrate old single-value filters
+    if ((!base.courseIds || !base.courseIds.length) && parsed.courseId) {
+      base.courseIds = [String(parsed.courseId)]
+    }
+    if ((!base.universities || !base.universities.length) && parsed.university) {
+      base.universities = [String(parsed.university)]
+    }
+    if (!Array.isArray(base.courseIds)) base.courseIds = []
+    if (!Array.isArray(base.universities)) base.universities = []
+    return base
   } catch {
     return emptyFilters()
   }
@@ -53,8 +66,8 @@ function toParams(f: FilterState, page: number, limit: number): PaymentFilters {
   if (f.paymentMode.trim()) p.paymentMode = f.paymentMode.trim()
   if (f.dateFrom) p.dateFrom = f.dateFrom
   if (f.dateTo) p.dateTo = f.dateTo
-  if (f.courseId.trim()) p.courseId = f.courseId.trim()
-  if (f.university.trim()) p.university = f.university.trim()
+  if (f.courseIds.length) p.courseIds = f.courseIds.join(',')
+  if (f.universities.length) p.universities = f.universities.join(',')
   if (f.amountMin.trim()) p.amountMin = f.amountMin.trim()
   if (f.amountMax.trim()) p.amountMax = f.amountMax.trim()
   if (f.coupon.trim()) p.coupon = f.coupon.trim()
@@ -74,6 +87,7 @@ function statusBadgeClass(status: string) {
 }
 
 export function PaymentList() {
+  const { universities } = useAcademicMasters()
   const [filters, setFilters] = useState<FilterState>(() => loadStoredFilters())
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<PaymentDetail[]>([])
@@ -83,7 +97,12 @@ export function PaymentList() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkMsg, setBulkMsg] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [courseOptions, setCourseOptions] = useState<Array<{ id: string; title: string }>>([])
   const limit = 50
+
+  useEffect(() => {
+    fetchAdminCoursesForFilter().then(setCourseOptions)
+  }, [])
 
   const params = useMemo(() => toParams(filters, page, limit), [filters, page])
 
@@ -322,22 +341,18 @@ export function PaymentList() {
               className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Course ID</label>
-            <input
-              value={filters.courseId}
-              onChange={(e) => setFilter('courseId', e.target.value)}
-              className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">University</label>
-            <input
-              value={filters.university}
-              onChange={(e) => setFilter('university', e.target.value)}
-              className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
+          <SearchableMultiSelect
+            label="Training (title)"
+            options={courseOptions.map((c) => ({ value: c.id, label: c.title }))}
+            values={filters.courseIds}
+            onChange={(v) => setFilter('courseIds', v)}
+          />
+          <SearchableMultiSelect
+            label="University"
+            options={universities.map((u) => ({ value: u.value, label: u.label }))}
+            values={filters.universities}
+            onChange={(v) => setFilter('universities', v)}
+          />
           <div>
             <label className="block text-xs text-gray-500 mb-1">Amount min</label>
             <input
@@ -369,7 +384,7 @@ export function PaymentList() {
             <label className="block text-xs text-gray-500 mb-1">Search</label>
             <input
               type="search"
-              placeholder="Name, email, phone, orderId, gateway…"
+              placeholder="Name, email, phone, orderId, course title, gateway…"
               value={filters.search}
               onChange={(e) => setFilter('search', e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"

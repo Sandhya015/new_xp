@@ -100,14 +100,34 @@ def collect_payment_filter_params(src: Any) -> dict[str, Any]:
     except ValueError:
         pass
 
+    course_ids = []
+    if hasattr(args, "getlist"):
+        course_ids = [x for x in args.getlist("courseIds") if x]
+    if g("courseIds"):
+        course_ids.extend([x.strip() for x in g("courseIds").split(",") if x.strip()])
+    if g("courseId"):
+        course_ids.append(g("courseId"))
+
+    unis = []
+    if hasattr(args, "getlist"):
+        unis = [x for x in args.getlist("universities") if x]
+    if g("universities"):
+        unis.extend([x.strip() for x in g("universities").split(",") if x.strip()])
+    uni = g("university")
+    if uni:
+        unis.append(uni)
+
     return {
         "search": g("search"),
         "status": g("status"),
         "paymentMode": g("paymentMode") or g("method"),
         "dateFrom": g("dateFrom"),
         "dateTo": g("dateTo"),
-        "courseId": g("courseId"),
-        "university": g("university"),
+        "courseId": course_ids[0] if len(course_ids) == 1 else "",
+        "courseIds": list(dict.fromkeys(course_ids)),
+        "courseTitle": g("courseTitle"),
+        "university": unis[0] if len(unis) == 1 else ",".join(unis) if unis else "",
+        "universities": list(dict.fromkeys(unis)),
         "amountMin": amount_min,
         "amountMax": amount_max,
         "coupon": g("coupon"),
@@ -167,8 +187,34 @@ def build_orders_mongo_query(flt: dict[str, Any], *, user_ids_for_university: li
         and_parts.append({"createdAt": created})
 
     course_id = (flt.get("courseId") or "").strip()
+    course_ids_raw = flt.get("courseIds")
+    course_ids: list[str] = []
+    if isinstance(course_ids_raw, list):
+        course_ids = [str(x).strip() for x in course_ids_raw if str(x).strip()]
+    elif isinstance(course_ids_raw, str) and course_ids_raw.strip():
+        course_ids = [x.strip() for x in course_ids_raw.split(",") if x.strip()]
     if course_id:
-        and_parts.append({"courseId": course_id})
+        course_ids.append(course_id)
+    course_ids = list(dict.fromkeys(course_ids))
+    if len(course_ids) == 1:
+        and_parts.append({"courseId": course_ids[0]})
+    elif len(course_ids) > 1:
+        and_parts.append({"courseId": {"$in": course_ids}})
+
+    # Optional free-text title match when courseTitleSearch is set
+    title_q = (flt.get("courseTitle") or "").strip()
+    if title_q and not course_ids:
+        cids = []
+        for c in get_courses_collection().find(
+            {"title": {"$regex": re.escape(title_q), "$options": "i"}},
+            {"_id": 1},
+        ).limit(100):
+            cids.append(str(c["_id"]))
+        if cids:
+            and_parts.append({"courseId": {"$in": cids}})
+        else:
+            and_parts.append({"courseId": "__none__"})
+
 
     amin, amax = flt.get("amountMin"), flt.get("amountMax")
     if amin is not None or amax is not None:
@@ -228,6 +274,12 @@ def build_orders_mongo_query(flt: dict[str, Any], *, user_ids_for_university: li
         if uid_hits:
             search_or.append({"userId": {"$in": uid_hits}})
             search_or.append({"studentId": {"$in": uid_hits}})
+        # Match course titles
+        title_hits = []
+        for c in get_courses_collection().find({"title": rx}, {"_id": 1}).limit(50):
+            title_hits.append(str(c["_id"]))
+        if title_hits:
+            search_or.append({"courseId": {"$in": title_hits}})
         and_parts.append({"$or": search_or})
 
     if not and_parts:
@@ -237,24 +289,34 @@ def build_orders_mongo_query(flt: dict[str, Any], *, user_ids_for_university: li
     return {"$and": and_parts}
 
 
-def resolve_university_user_ids(university: str) -> list[str] | None:
-    uni = (university or "").strip()
-    if not uni:
+def resolve_university_user_ids(university: str | list | None) -> list[str] | None:
+    if isinstance(university, list):
+        unis = [str(u).strip() for u in university if str(u).strip()]
+    else:
+        raw = (university or "").strip()
+        if not raw:
+            return None
+        unis = [x.strip() for x in raw.split(",") if x.strip()]
+    if not unis:
         return None
-    rx = {"$regex": re.escape(uni), "$options": "i"}
+    ors = []
+    for uni in unis:
+        rx = {"$regex": re.escape(uni), "$options": "i"}
+        ors.append({"university": rx})
+        ors.append({"collegeName": rx})
     ids = []
     for u in get_users_collection().find(
-        {"role": "student", "$or": [{"university": rx}, {"collegeName": rx}]},
+        {"role": "student", "$or": ors},
         {"_id": 1},
-    ).limit(5000):
+    ).limit(8000):
         ids.append(str(u["_id"]))
     return ids
 
 
 def filter_cache_key(flt: dict) -> str:
     keys = (
-        "search", "status", "paymentMode", "dateFrom", "dateTo", "courseId",
-        "university", "amountMin", "amountMax", "coupon",
+        "search", "status", "paymentMode", "dateFrom", "dateTo", "courseId", "courseIds",
+        "university", "universities", "amountMin", "amountMax", "coupon",
     )
     return "|".join(f"{k}={flt.get(k)!s}" for k in keys)
 
@@ -316,7 +378,8 @@ def load_user_course_maps(orders: list[dict]) -> tuple[dict, dict]:
 
 
 def list_payments(flt: dict) -> tuple[list[dict], int]:
-    uni_ids = resolve_university_user_ids(flt.get("university") or "")
+    unis = flt.get("universities") if flt.get("universities") else flt.get("university")
+    uni_ids = resolve_university_user_ids(unis)
     if uni_ids is not None and len(uni_ids) == 0:
         return [], 0
     q = build_orders_mongo_query(flt, user_ids_for_university=uni_ids)
@@ -339,7 +402,7 @@ def compute_payments_summary(flt: dict, *, include_pct: bool = True) -> dict:
     if hit and now - hit[0] < _SUMMARY_TTL_SEC:
         return dict(hit[1])
 
-    uni_ids = resolve_university_user_ids(flt.get("university") or "")
+    uni_ids = resolve_university_user_ids(flt.get("universities") or flt.get("university") or "")
     if uni_ids is not None and len(uni_ids) == 0:
         empty = {
             "totalRevenue": 0,
