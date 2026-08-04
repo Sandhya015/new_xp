@@ -24,6 +24,7 @@ from app.tax_invoice import (
 )
 
 # Bump when PDF geometry changes so stored order PDFs are regenerated on next download.
+# Deploy probe: header layout v2 (Vercel/GitHub pipeline check).
 INVOICE_PDF_LAYOUT_VERSION = 2
 
 _LOGO_PATH = Path(__file__).resolve().parent / "static" / "xpertintern_logo.png"
