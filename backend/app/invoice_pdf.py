@@ -26,6 +26,7 @@ from app.tax_invoice import (
 # Bump when PDF geometry changes so stored order PDFs are regenerated on next download.
 # Deploy probe: header layout v2 (Vercel/GitHub pipeline check).
 # Re-trigger Vercel deploy with known-good commit author.
+# Redeploy check as Sandhya015 (repo owner) after Vercel GitHub app access.
 INVOICE_PDF_LAYOUT_VERSION = 2
 
 _LOGO_PATH = Path(__file__).resolve().parent / "static" / "xpertintern_logo.png"
