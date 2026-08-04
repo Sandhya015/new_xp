@@ -27,6 +27,7 @@ from app.tax_invoice import (
 # Deploy probe: header layout v2 (Vercel/GitHub pipeline check).
 # Re-trigger Vercel deploy with known-good commit author.
 # Redeploy check as Sandhya015 (repo owner) after Vercel GitHub app access.
+# Repo public again — re-trigger Vercel deploy.
 INVOICE_PDF_LAYOUT_VERSION = 2
 
 _LOGO_PATH = Path(__file__).resolve().parent / "static" / "xpertintern_logo.png"
