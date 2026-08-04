@@ -27,7 +27,7 @@ from app.db import (
     get_users_collection,
 )
 from app.indian_gst_state_codes import gst_state_code_for_name
-from app.invoice_pdf import render_invoice_pdf
+from app.invoice_pdf import INVOICE_PDF_LAYOUT_VERSION, render_invoice_pdf
 from app.tax_invoice import allocate_invoice_serial, render_invoice_html
 
 logger = logging.getLogger(__name__)
@@ -624,7 +624,12 @@ def generate_and_store_invoice_pdf(
     coll = get_orders_collection()
     if not force:
         existing = get_stored_invoice_pdf(order)
-        if existing and order.get("invoiceNumber"):
+        # Re-render when layout version changes so old broken PDFs are not re-served
+        if (
+            existing
+            and order.get("invoiceNumber")
+            and int(order.get("invoicePdfLayoutVersion") or 0) == INVOICE_PDF_LAYOUT_VERSION
+        ):
             return existing, {}
 
     db = get_db()
@@ -699,6 +704,7 @@ def generate_and_store_invoice_pdf(
         "invoiceHtml": html_doc,
         "invoicePdf": Binary(pdf_bytes),
         "invoiceVersion": ver,
+        "invoicePdfLayoutVersion": INVOICE_PDF_LAYOUT_VERSION,
     }
     coll.update_one({"_id": order["_id"]}, {"$set": update})
     return pdf_bytes, update
