@@ -101,16 +101,16 @@ def collect_payment_filter_params(src: Any) -> dict[str, Any]:
         pass
 
     course_ids = []
-    if hasattr(args, "getlist"):
-        course_ids = [x for x in args.getlist("courseIds") if x]
+    if hasattr(src, "getlist"):
+        course_ids = [x for x in src.getlist("courseIds") if x]
     if g("courseIds"):
         course_ids.extend([x.strip() for x in g("courseIds").split(",") if x.strip()])
     if g("courseId"):
         course_ids.append(g("courseId"))
 
     unis = []
-    if hasattr(args, "getlist"):
-        unis = [x for x in args.getlist("universities") if x]
+    if hasattr(src, "getlist"):
+        unis = [x for x in src.getlist("universities") if x]
     if g("universities"):
         unis.extend([x.strip() for x in g("universities").split(",") if x.strip()])
     uni = g("university")
