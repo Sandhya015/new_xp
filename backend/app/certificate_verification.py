@@ -240,6 +240,7 @@ def log_certificate_audit(
 
 
 def certificate_admin_detail_fields(c: dict) -> dict:
+    bulk_at = c.get("bulkUploadedAt")
     return {
         "collegeName": c.get("collegeName") or c.get("university") or "",
         "course": c.get("course") or c.get("programName") or "",
@@ -258,4 +259,10 @@ def certificate_admin_detail_fields(c: dict) -> dict:
         "certificatePdfKey": c.get("certificatePdfKey") or "",
         "hasUploadedPdf": bool((c.get("certificatePdfKey") or "").strip()),
         "verifyUrl": verify_url_for_cert(str(c.get("certNo") or "")),
+        "pdfStatus": c.get("pdfStatus")
+        or ("uploaded" if (c.get("certificatePdfKey") or "").strip() else "generated"),
+        "pdfError": c.get("pdfError") or "",
+        "bulkUploadedAt": bulk_at.strftime("%Y-%m-%d") if hasattr(bulk_at, "strftime") else str(bulk_at or "")[:10],
+        "bulkJobId": str(c.get("bulkJobId") or ""),
+        "source": c.get("source") or "",
     }

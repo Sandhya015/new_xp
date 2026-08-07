@@ -20,13 +20,15 @@ api.interceptors.request.use(async (config) => {
 function blobFromMaybeBase64Body(
   buffer: ArrayBuffer,
   mime: string,
-  kind: 'zip' | 'pdf',
+  kind: 'zip' | 'pdf' | 'xlsx' | 'csv',
 ): Blob {
   const u8 = new Uint8Array(buffer)
   const magicOk =
-    kind === 'zip'
-      ? u8.length >= 2 && u8[0] === 0x50 && u8[1] === 0x4b
-      : u8.length >= 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46
+    kind === 'csv'
+      ? true
+      : kind === 'zip' || kind === 'xlsx'
+        ? u8.length >= 2 && u8[0] === 0x50 && u8[1] === 0x4b
+        : u8.length >= 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46
   if (magicOk) return new Blob([buffer], { type: mime })
   const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim()
   if (text.startsWith('{')) return new Blob([buffer], { type: mime })
@@ -42,9 +44,11 @@ function blobFromMaybeBase64Body(
     const out = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
     const ok2 =
-      kind === 'zip'
-        ? out.length >= 2 && out[0] === 0x50 && out[1] === 0x4b
-        : out.length >= 4 && out[0] === 0x25 && out[1] === 0x50 && out[2] === 0x44 && out[3] === 0x46
+      kind === 'csv'
+        ? true
+        : kind === 'zip' || kind === 'xlsx'
+          ? out.length >= 2 && out[0] === 0x50 && out[1] === 0x4b
+          : out.length >= 4 && out[0] === 0x25 && out[1] === 0x50 && out[2] === 0x44 && out[3] === 0x46
     if (ok2) return new Blob([out], { type: mime })
   } catch {
     /* ignore */
@@ -997,6 +1001,10 @@ export const adminService = {
         status: string
         source: string
         hasUploadedPdf?: boolean
+        pdfStatus?: string
+        pdfError?: string
+        bulkUploadedAt?: string
+        bulkJobId?: string
       }>
     }>('/api/admin/certificates', { params })
     return data
@@ -1036,6 +1044,10 @@ export const adminService = {
       revokedAt: string
       hasUploadedPdf?: boolean
       verifyUrl?: string
+      pdfStatus?: string
+      pdfError?: string
+      bulkUploadedAt?: string
+      bulkJobId?: string
     }>(`/api/admin/certificates/${id}`)
     return data
   },
@@ -1077,6 +1089,142 @@ export const adminService = {
       headers: { Accept: 'application/pdf' },
     })
     return blobFromMaybeBase64Body(data as ArrayBuffer, 'application/pdf', 'pdf')
+  },
+
+  async downloadBulkCertificateTemplate(format: 'xlsx' | 'csv' = 'xlsx'): Promise<Blob> {
+    const { data } = await api.get(`/api/admin/certificates/bulk/template.${format}`, {
+      responseType: 'arraybuffer',
+    })
+    const mime =
+      format === 'csv'
+        ? 'text/csv'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    return blobFromMaybeBase64Body(data as ArrayBuffer, mime, format)
+  },
+
+  async previewBulkCertificates(file: File) {
+    const fd = new FormData()
+    fd.append('file', file)
+    const { data } = await api.post<{
+      fileName: string
+      total: number
+      validCount: number
+      errorCount: number
+      rows: Array<{
+        row: number
+        status: 'valid' | 'error'
+        errorReason: string
+        errors: string[]
+        studentName: string
+        domain: string
+        certNo: string
+        payload: AdminCertificateFormPayload & { studentEmail?: string; autoGenerateCertNo?: boolean } | null
+        raw: Record<string, string> | null
+      }>
+      trainingTitles: string[]
+    }>('/api/admin/certificates/bulk/preview', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+
+  async downloadBulkCertificateErrors(rows: Array<{ status?: string; raw?: Record<string, string> | null; errorReason?: string }>) {
+    const { data } = await api.post('/api/admin/certificates/bulk/errors.xlsx', { rows }, { responseType: 'arraybuffer' })
+    return blobFromMaybeBase64Body(
+      data as ArrayBuffer,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'xlsx',
+    )
+  },
+
+  async generateBulkCertificates(body: {
+    fileName: string
+    totalRows: number
+    errorRows: number
+    rows: Array<{ payload: AdminCertificateFormPayload & { studentEmail?: string; autoGenerateCertNo?: boolean } }>
+  }) {
+    const { data } = await api.post<{
+      job: {
+        id: string
+        createdCount: number
+        validRows: number
+        errorRows: number
+        status: string
+        pdfDone: number
+      }
+      message: string
+    }>('/api/admin/certificates/bulk/generate', body)
+    return data
+  },
+
+  async getBulkCertificateJobs() {
+    const { data } = await api.get<{
+      items: Array<{
+        id: string
+        adminName: string
+        adminEmail: string
+        fileName: string
+        totalRows: number
+        validRows: number
+        errorRows: number
+        createdCount: number
+        pdfDone: number
+        pdfFailed: number
+        status: string
+        createdAt: string
+        completedAt: string
+        message: string
+      }>
+    }>('/api/admin/certificates/bulk/jobs')
+    return data
+  },
+
+  async getActiveBulkCertificateJob() {
+    const { data } = await api.get<{
+      job: {
+        id: string
+        createdCount: number
+        pdfDone: number
+        pdfFailed: number
+        status: string
+        fileName: string
+      } | null
+    }>('/api/admin/certificates/bulk/jobs/active')
+    return data
+  },
+
+  async getBulkCertificateJob(id: string) {
+    const { data } = await api.get<{
+      id: string
+      adminName: string
+      adminEmail: string
+      fileName: string
+      totalRows: number
+      validRows: number
+      errorRows: number
+      createdCount: number
+      pdfDone: number
+      pdfFailed: number
+      status: string
+      createdAt: string
+      completedAt: string
+      message: string
+      certificates: Array<{
+        id: string
+        certNo: string
+        studentName: string
+        domain: string
+        pdfStatus: string
+        pdfError: string
+        status: string
+      }>
+    }>(`/api/admin/certificates/bulk/jobs/${id}`)
+    return data
+  },
+
+  async retryCertificatePdf(id: string) {
+    const { data } = await api.post(`/api/admin/certificates/${id}/retry-pdf`)
+    return data
   },
 
   async revokeCertificate(id: string, reason: string) {

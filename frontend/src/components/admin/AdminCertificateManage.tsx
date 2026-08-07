@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Pencil, Trash2, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Loader2, Plus, Pencil, Trash2, Upload, RefreshCw, AlertCircle } from 'lucide-react'
 import { adminService, type AdminCertificateFormPayload } from '@/services/adminService'
+import { BulkCertificateWizard } from '@/components/admin/BulkCertificateWizard'
 
 const emptyForm = (): AdminCertificateFormPayload => ({
   certNo: '',
@@ -22,6 +24,19 @@ const emptyForm = (): AdminCertificateFormPayload => ({
   autoGenerateCertNo: false,
 })
 
+function pdfLabel(c: {
+  pdfStatus?: string
+  hasUploadedPdf?: boolean
+  pdfError?: string
+}) {
+  const s = (c.pdfStatus || '').toLowerCase()
+  if (s === 'pending') return { text: 'Pending PDF', className: 'text-amber-700' }
+  if (s === 'failed') return { text: 'Failed', className: 'text-red-600', title: c.pdfError || 'PDF generation failed' }
+  if (s === 'uploaded' || c.hasUploadedPdf) return { text: 'Uploaded', className: 'text-emerald-700' }
+  if (s === 'generated') return { text: 'Generated', className: 'text-emerald-700' }
+  return { text: c.hasUploadedPdf ? 'Uploaded' : 'Generated', className: 'text-gray-700' }
+}
+
 export function AdminCertificateManage() {
   const [items, setItems] = useState<Awaited<ReturnType<typeof adminService.getCertificates>>['items']>([])
   const [loading, setLoading] = useState(true)
@@ -29,10 +44,20 @@ export function AdminCertificateManage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<AdminCertificateFormPayload>(emptyForm())
+  const [editMeta, setEditMeta] = useState<{ bulkUploadedAt?: string; source?: string }>({})
   const pdfRef = useRef<HTMLInputElement>(null)
   const [uploadTargetId, setUploadTargetId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{
+    id: string
+    createdCount: number
+    pdfDone: number
+    pdfFailed: number
+    status: string
+    fileName: string
+  } | null>(null)
 
   const reload = () => {
     setLoading(true)
@@ -47,9 +72,32 @@ export function AdminCertificateManage() {
     reload()
   }, [search])
 
+  useEffect(() => {
+    let cancelled = false
+    const tick = () => {
+      adminService
+        .getActiveBulkCertificateJob()
+        .then((r) => {
+          if (cancelled) return
+          setProgress(r.job)
+          if (r.job && r.job.status === 'in_progress') reload()
+        })
+        .catch(() => {
+          if (!cancelled) setProgress(null)
+        })
+    }
+    tick()
+    const id = window.setInterval(tick, 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
+
   const openCreate = () => {
     setEditingId(null)
     setForm(emptyForm())
+    setEditMeta({})
     setModalOpen(true)
     setNotice(null)
   }
@@ -59,6 +107,10 @@ export function AdminCertificateManage() {
     try {
       const d = await adminService.getCertificateDetail(id)
       setEditingId(id)
+      setEditMeta({
+        bulkUploadedAt: (d as { bulkUploadedAt?: string }).bulkUploadedAt,
+        source: d.source,
+      })
       setForm({
         certNo: d.certNo,
         studentName: d.studentName,
@@ -132,6 +184,19 @@ export function AdminCertificateManage() {
     }
   }
 
+  const retryPdf = async (id: string) => {
+    setBusy(id)
+    try {
+      await adminService.retryCertificatePdf(id)
+      setNotice('PDF regenerated.')
+      reload()
+    } catch {
+      setNotice('PDF retry failed.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const onPdfPicked = async (ev: React.ChangeEvent<HTMLInputElement>) => {
     const f = ev.target.files?.[0]
     ev.target.value = ''
@@ -156,15 +221,35 @@ export function AdminCertificateManage() {
         <div>
           <h3 className="font-semibold text-brand-navy">Internship Certificate Management</h3>
           <p className="text-sm text-slate-gray">Add, edit, upload PDF, and delete internship certificates for public verification.</p>
+          <Link to="/admin/certificates/bulk-history" className="mt-1 inline-block text-xs font-medium text-brand-accent hover:underline">
+            View bulk upload history
+          </Link>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
-        >
-          <Plus className="h-4 w-4" /> Add Certificate
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setBulkOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-brand-accent px-4 py-2 text-sm font-semibold text-brand-accent hover:bg-brand-accent/5"
+          >
+            <Plus className="h-4 w-4" /> Bulk Add Certificates
+          </button>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
+          >
+            <Plus className="h-4 w-4" /> Add Certificate
+          </button>
+        </div>
       </div>
+
+      {progress && progress.status === 'in_progress' ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Generating certificates: {progress.pdfDone} of {progress.createdCount} done
+          {progress.pdfFailed ? ` · ${progress.pdfFailed} failed` : ''}
+          {progress.fileName ? ` · ${progress.fileName}` : ''}…
+        </div>
+      ) : null}
 
       <input
         type="search"
@@ -198,58 +283,88 @@ export function AdminCertificateManage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {items.map((c) => (
-                <tr key={c.id}>
-                  <td className="px-3 py-2 font-mono text-xs">{c.certNo}</td>
-                  <td className="px-3 py-2">{c.studentName}</td>
-                  <td className="px-3 py-2">{c.domain || c.programName}</td>
-                  <td className="px-3 py-2 capitalize">{c.status}</td>
-                  <td className="px-3 py-2">{c.hasUploadedPdf ? 'Uploaded' : 'Generated'}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        title="Edit"
-                        disabled={busy === c.id}
-                        onClick={() => void openEdit(c.id)}
-                        className="rounded p-1.5 text-gray-600 hover:bg-gray-100"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="Upload PDF"
-                        disabled={busy === c.id}
-                        onClick={() => {
-                          setUploadTargetId(c.id)
-                          pdfRef.current?.click()
-                        }}
-                        className="rounded p-1.5 text-gray-600 hover:bg-gray-100"
-                      >
-                        <Upload className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="Delete"
-                        disabled={busy === c.id}
-                        onClick={() => void deleteCert(c.id, c.certNo)}
-                        className="rounded p-1.5 text-red-600 hover:bg-red-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {items.map((c) => {
+                const pdf = pdfLabel(c)
+                return (
+                  <tr key={c.id}>
+                    <td className="px-3 py-2 font-mono text-xs">{c.certNo}</td>
+                    <td className="px-3 py-2">{c.studentName}</td>
+                    <td className="px-3 py-2">{c.domain || c.programName}</td>
+                    <td className="px-3 py-2 capitalize">{c.status}</td>
+                    <td className={`px-3 py-2 ${pdf.className}`}>
+                      <span className="inline-flex items-center gap-1" title={pdf.title}>
+                        {pdf.text}
+                        {(c.pdfStatus || '').toLowerCase() === 'failed' ? <AlertCircle className="h-3.5 w-3.5" /> : null}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end gap-1">
+                        {(c.pdfStatus || '').toLowerCase() === 'failed' ? (
+                          <button
+                            type="button"
+                            title="Retry PDF"
+                            disabled={busy === c.id}
+                            onClick={() => void retryPdf(c.id)}
+                            className="rounded p-1.5 text-amber-700 hover:bg-amber-50"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          title="Edit"
+                          disabled={busy === c.id}
+                          onClick={() => void openEdit(c.id)}
+                          className="rounded p-1.5 text-gray-600 hover:bg-gray-100"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Upload PDF"
+                          disabled={busy === c.id}
+                          onClick={() => {
+                            setUploadTargetId(c.id)
+                            pdfRef.current?.click()
+                          }}
+                          className="rounded p-1.5 text-gray-600 hover:bg-gray-100"
+                        >
+                          <Upload className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete"
+                          disabled={busy === c.id}
+                          onClick={() => void deleteCert(c.id, c.certNo)}
+                          className="rounded p-1.5 text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
 
+      <BulkCertificateWizard
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onDone={() => {
+          reload()
+        }}
+      />
+
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
             <h4 className="text-lg font-semibold text-brand-navy">{editingId ? 'Edit Certificate' : 'Add Certificate'}</h4>
+            {editMeta.bulkUploadedAt ? (
+              <p className="mt-1 text-xs text-slate-gray">Bulk-uploaded on {editMeta.bulkUploadedAt}</p>
+            ) : null}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {!editingId && (
                 <label className="sm:col-span-2 flex items-center gap-2 text-sm">

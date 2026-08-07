@@ -33,6 +33,20 @@ from app.certificate_verification import (
     normalize_cert_no,
     parse_certificate_admin_fields,
 )
+from app.certificate_bulk import (
+    active_bulk_progress,
+    build_csv_template,
+    build_errors_xlsx,
+    build_xlsx_template,
+    create_bulk_certificate_job,
+    get_bulk_job,
+    list_bulk_jobs,
+    parse_upload_file,
+    process_bulk_cert_job,
+    retry_certificate_pdf,
+    validate_bulk_rows,
+    _serialize_job,
+)
 from app.services.curriculum import normalize_curriculum
 from app.services.enrollment_excel import (
     assignment_submissions_submitted_count,
@@ -2399,6 +2413,15 @@ def certificates_list():
             "status": c.get("status", "valid"),
             "source": c.get("source", "") or "",
             "hasUploadedPdf": bool((c.get("certificatePdfKey") or "").strip()),
+            "pdfStatus": c.get("pdfStatus")
+            or ("uploaded" if (c.get("certificatePdfKey") or "").strip() else "generated"),
+            "pdfError": c.get("pdfError") or "",
+            "bulkUploadedAt": (
+                c["bulkUploadedAt"].strftime("%Y-%m-%d")
+                if hasattr(c.get("bulkUploadedAt"), "strftime")
+                else str(c.get("bulkUploadedAt") or "")[:10]
+            ),
+            "bulkJobId": str(c.get("bulkJobId") or ""),
         })
     return jsonify({"items": items})
 
@@ -2415,6 +2438,242 @@ def certificates_trainings():
     cursor = get_courses_collection().find({"active": True}).sort("title", 1)
     items = [{"id": str(c["_id"]), "title": c.get("title", "")} for c in cursor]
     return jsonify({"items": items})
+
+
+@admin_bp.route("/certificates/bulk/template.xlsx", methods=["GET"])
+@jwt_required()
+def certificates_bulk_template_xlsx():
+    err = _admin_required()
+    if err:
+        return err
+    data = build_xlsx_template()
+    return send_file(
+        BytesIO(data),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="xpertintern_bulk_certificates_template.xlsx",
+    )
+
+
+@admin_bp.route("/certificates/bulk/template.csv", methods=["GET"])
+@jwt_required()
+def certificates_bulk_template_csv():
+    err = _admin_required()
+    if err:
+        return err
+    data = build_csv_template()
+    return send_file(
+        BytesIO(data),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="xpertintern_bulk_certificates_template.csv",
+    )
+
+
+@admin_bp.route("/certificates/bulk/preview", methods=["POST"])
+@jwt_required()
+def certificates_bulk_preview():
+    err = _admin_required()
+    if err:
+        return err
+    if get_db() is None:
+        return jsonify({"error": "Database not configured"}), 503
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Upload an Excel or CSV file."}), 400
+    raw = f.read()
+    rows, parse_err = parse_upload_file(raw, f.filename)
+    if parse_err:
+        return jsonify({"error": parse_err}), 400
+    result = validate_bulk_rows(rows or [])
+    # Drop heavy raw payloads for response size — keep raw only on error rows for errors export client-side
+    slim_rows = []
+    for r in result["rows"]:
+        slim_rows.append({
+            "row": r["row"],
+            "status": r["status"],
+            "errorReason": r.get("errorReason") or "",
+            "errors": r.get("errors") or [],
+            "studentName": r.get("studentName") or "",
+            "domain": r.get("domain") or "",
+            "certNo": r.get("certNo") or "",
+            "payload": r.get("payload"),
+            "raw": r.get("raw") if r.get("status") == "error" else None,
+        })
+    return jsonify({
+        "fileName": secure_filename(f.filename) or "upload.xlsx",
+        "total": result["total"],
+        "validCount": result["validCount"],
+        "errorCount": result["errorCount"],
+        "rows": slim_rows,
+        "trainingTitles": result.get("trainingTitles") or [],
+    })
+
+
+@admin_bp.route("/certificates/bulk/errors.xlsx", methods=["POST"])
+@jwt_required()
+def certificates_bulk_errors_xlsx():
+    err = _admin_required()
+    if err:
+        return err
+    data = request.get_json() or {}
+    rows = data.get("rows") or []
+    xlsx = build_errors_xlsx(rows)
+    return send_file(
+        BytesIO(xlsx),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="certificate_upload_errors.xlsx",
+    )
+
+
+@admin_bp.route("/certificates/bulk/generate", methods=["POST"])
+@jwt_required()
+def certificates_bulk_generate():
+    err = _admin_required()
+    if err:
+        return err
+    if get_db() is None:
+        return jsonify({"error": "Database not configured"}), 503
+    data = request.get_json() or {}
+    payloads = data.get("rows") or data.get("payloads") or []
+    if not isinstance(payloads, list) or not payloads:
+        return jsonify({"error": "No valid rows to generate."}), 400
+    if len(payloads) > 1000:
+        return jsonify({"error": "Maximum 1000 certificates per upload."}), 400
+
+    valid_payloads = []
+    for item in payloads:
+        if isinstance(item, dict) and item.get("payload"):
+            valid_payloads.append(item["payload"])
+        elif isinstance(item, dict) and item.get("studentName"):
+            valid_payloads.append(item)
+    if not valid_payloads:
+        return jsonify({"error": "No valid rows to generate."}), 400
+
+    actor = _admin_actor()
+    job = create_bulk_certificate_job(
+        app=current_app._get_current_object(),
+        admin_id=actor["actor_id"],
+        admin_email=actor["actor_email"],
+        admin_name=actor["actor_name"],
+        file_name=str(data.get("fileName") or "upload.xlsx"),
+        file_bytes=None,
+        valid_payloads=valid_payloads,
+        total_rows=int(data.get("totalRows") or len(valid_payloads)),
+        error_rows=int(data.get("errorRows") or 0),
+    )
+    _log_admin(
+        "bulk_certificate_upload",
+        "certificate_bulk",
+        str(job["_id"]),
+        meta={
+            "createdCount": job.get("createdCount"),
+            "validRows": job.get("validRows"),
+            "errorRows": job.get("errorRows"),
+            "fileName": job.get("fileName"),
+        },
+    )
+    return jsonify({
+        "job": _serialize_job(job),
+        "message": (
+            f"{job.get('createdCount') or 0} certificates queued. "
+            f"{job.get('errorRows') or 0} rows skipped due to errors. "
+            "You will receive an email when all PDFs are ready."
+        ),
+    }), 201
+
+
+@admin_bp.route("/certificates/bulk/jobs", methods=["GET"])
+@jwt_required()
+def certificates_bulk_jobs_list():
+    err = _admin_required()
+    if err:
+        return err
+    if get_db() is None:
+        return jsonify({"items": []}), 503
+    return jsonify({"items": list_bulk_jobs()})
+
+
+@admin_bp.route("/certificates/bulk/jobs/active", methods=["GET"])
+@jwt_required()
+def certificates_bulk_jobs_active():
+    err = _admin_required()
+    if err:
+        return err
+    if get_db() is None:
+        return jsonify({"job": None}), 503
+    return jsonify({"job": active_bulk_progress()})
+
+
+@admin_bp.route("/certificates/bulk/jobs/<job_id>", methods=["GET"])
+@jwt_required()
+def certificates_bulk_job_detail(job_id):
+    err = _admin_required()
+    if err:
+        return err
+    job = get_bulk_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    # Tick progress while viewing
+    process_bulk_cert_job(job_id, max_items=8)
+    job = get_bulk_job(job_id)
+    cert_ids = [str(x) for x in (job.get("certificateIds") or [])]
+    certs = []
+    if cert_ids:
+        oids = [ObjectId(i) for i in cert_ids if ObjectId.is_valid(i)]
+        for c in get_certificates_collection().find({"_id": {"$in": oids}}):
+            certs.append({
+                "id": str(c["_id"]),
+                "certNo": c.get("certNo") or "",
+                "studentName": c.get("studentName") or "",
+                "domain": c.get("domain") or c.get("programName") or "",
+                "pdfStatus": c.get("pdfStatus") or ("generated" if c.get("certificatePdfKey") else "pending"),
+                "pdfError": c.get("pdfError") or "",
+                "status": c.get("status") or "valid",
+            })
+    out = _serialize_job(job)
+    out["certificates"] = certs
+    return jsonify(out)
+
+
+@admin_bp.route("/certificates/bulk/jobs/<job_id>/file", methods=["GET"])
+@jwt_required()
+def certificates_bulk_job_file(job_id):
+    err = _admin_required()
+    if err:
+        return err
+    job = get_bulk_job(job_id, include_file=True)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    raw = job.get("originalFile")
+    if not raw:
+        return jsonify({"error": "Original file was not stored for this upload."}), 404
+    data = bytes(raw)
+    name = job.get("fileName") or "upload.xlsx"
+    return send_file(BytesIO(data), as_attachment=True, download_name=secure_filename(name) or "upload.xlsx")
+
+
+@admin_bp.route("/certificates/<cert_id>/retry-pdf", methods=["POST"])
+@jwt_required()
+def certificate_admin_retry_pdf(cert_id):
+    err = _admin_required()
+    if err:
+        return err
+    updated, err_msg = retry_certificate_pdf(cert_id, app=current_app._get_current_object())
+    if err_msg and not updated:
+        return jsonify({"error": err_msg}), 400
+    claims = get_jwt()
+    log_certificate_audit(
+        certificate_id=cert_id,
+        cert_no=str((updated or {}).get("certNo") or ""),
+        action="retry_pdf",
+        admin_user_id=str(get_jwt_identity()),
+        admin_email=str(claims.get("email") or ""),
+    )
+    users_coll = get_users_collection()
+    courses_coll = get_courses_collection()
+    return jsonify(_certificate_to_admin_detail(updated, users_coll, courses_coll))
 
 
 def _certificate_to_admin_detail(c: dict, users_coll, courses_coll) -> dict:

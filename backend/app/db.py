@@ -172,6 +172,11 @@ def get_bulk_invoice_jobs_collection() -> Collection:
     return get_db()["bulk_invoice_jobs"]
 
 
+def get_bulk_certificate_jobs_collection() -> Collection:
+    """Background bulk internship certificate upload jobs."""
+    return get_db()["bulk_certificate_jobs"]
+
+
 def _ix(collection: Collection, keys, **kwargs) -> None:
     """Create one index; log and continue if it fails (e.g. duplicate keys on unique)."""
     try:
@@ -245,6 +250,21 @@ def ensure_indexes(db: Database) -> None:
         db["certificates"],
         [("studentId", 1), ("issueDate", -1)],
         name="idx_certificates_student_issue",
+    )
+    _ix(
+        db["certificates"],
+        [("bulkJobId", 1), ("pdfStatus", 1)],
+        name="idx_certificates_bulk_pdf",
+    )
+    _ix(
+        db["bulk_certificate_jobs"],
+        [("createdAt", -1)],
+        name="idx_bulk_cert_jobs_created",
+    )
+    _ix(
+        db["bulk_certificate_jobs"],
+        [("status", 1), ("createdAt", -1)],
+        name="idx_bulk_cert_jobs_status_created",
     )
     _ix(
         db["certificate_audit_logs"],

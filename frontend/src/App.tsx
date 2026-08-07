@@ -44,6 +44,7 @@ import { ManageTraining } from './pages/admin/ManageTraining'
 import { StudentList } from './pages/admin/StudentList'
 import { StudentDetail } from './pages/admin/StudentDetail'
 import { CertificateUpload } from './pages/admin/CertificateUpload'
+import { BulkCertificateHistory } from './pages/admin/BulkCertificateHistory'
 import { LeadTracker } from './pages/admin/LeadTracker'
 import { LeadDetail } from './pages/admin/LeadDetail'
 import { PaymentList } from './pages/admin/PaymentList'
@@ -108,6 +109,7 @@ function App() {
         <Route path="students" element={<StudentList />} />
         <Route path="students/:id" element={<StudentDetail />} />
         <Route path="certificates" element={<CertificateUpload />} />
+        <Route path="certificates/bulk-history" element={<BulkCertificateHistory />} />
         <Route path="leads" element={<LeadTracker />} />
         <Route path="leads/:id" element={<LeadDetail />} />
         <Route path="payments" element={<PaymentList />} />
