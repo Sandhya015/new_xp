@@ -21,6 +21,8 @@ export const partnerService = {
       partnerTypes: string[]
       audienceSizes: string[]
       hearAbout: string[]
+      recaptchaSiteKey?: string
+      recaptchaEnabled?: boolean
     }>('/api/partners/meta')
     return data
   },
@@ -51,8 +53,17 @@ export const partnerService = {
     const { data } = await api.get('/api/partners/me')
     return data as {
       partner: Record<string, unknown>
-      stats: Record<string, number>
+      stats: Record<string, number | Array<{ date: string; value: number }>>
+      unreadNotifications?: number
     }
+  },
+  async notifications() {
+    const { data } = await api.get<{ items: Array<Record<string, unknown>> }>('/api/partners/me/notifications')
+    return data
+  },
+  async markNotificationsRead(all = true, ids?: string[]) {
+    const { data } = await api.post('/api/partners/me/notifications/read', { all, ids })
+    return data
   },
   async links() {
     const { data } = await api.get<{ items: Array<Record<string, unknown>> }>('/api/partners/me/links')
@@ -70,8 +81,22 @@ export const partnerService = {
     const { data } = await api.get('/api/partners/me/payouts')
     return data as { items: Array<Record<string, unknown>>; stats: Record<string, number> }
   },
+  payoutReceiptUrl(payoutId: string) {
+    return `${getApiBase()}/api/partners/me/payouts/${encodeURIComponent(payoutId)}/receipt`
+  },
   async updateProfile(body: Record<string, unknown>) {
     const { data } = await api.put('/api/partners/me/profile', body)
+    return data
+  },
+  async changePassword(currentPassword: string, newPassword: string) {
+    const { data } = await api.post('/api/partners/me/password', { currentPassword, newPassword })
+    return data
+  },
+  async supportTicket(subject: string, message: string) {
+    const { data } = await api.post<{ ok: boolean; ticketId?: string; message?: string }>(
+      '/api/partners/me/support',
+      { subject, message },
+    )
     return data
   },
   async marketingKit() {
@@ -92,6 +117,18 @@ export const adminPartnerService = {
       '/api/admin/partners/applications',
       { params },
     )
+    return data
+  },
+  applicationsExportUrl(params?: Record<string, string>) {
+    const q = new URLSearchParams(params || {}).toString()
+    return `${getApiBase()}/api/admin/partners/applications/export${q ? `?${q}` : ''}`
+  },
+  async bulkReject(ids: string[], reason: string) {
+    const { data } = await api.post('/api/admin/partners/applications/bulk-reject', { ids, reason })
+    return data
+  },
+  async addNote(id: string, note: string) {
+    const { data } = await api.post(`/api/admin/partners/applications/${id}/notes`, { note })
     return data
   },
   async getApplication(id: string) {
@@ -122,9 +159,11 @@ export const adminPartnerService = {
     const { data } = await api.get(`/api/admin/partners/${id}`)
     return data as {
       partner: Record<string, unknown>
-      stats: Record<string, number>
+      stats: Record<string, number | Array<{ date: string; value: number }>>
       links: Array<Record<string, unknown>>
       coupons: Array<Record<string, unknown>>
+      activity?: Array<Record<string, unknown>>
+      payouts?: Array<Record<string, unknown>>
     }
   },
   async updatePartner(id: string, body: Record<string, unknown>) {

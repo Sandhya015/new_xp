@@ -300,6 +300,9 @@ def register():
 
     assert normalized is not None
     user_payload = normalized_to_user_doc(normalized, _hash_password(normalized["password"]))
+    partner_ref = (data.get("partnerRef") or data.get("referralRef") or data.get("ref") or "").strip()
+    if partner_ref:
+        user_payload["partnerRefSlug"] = partner_ref[:80]
     otp = generate_otp_code()
     verification_id = generate_verification_id()
     secret = (cfg.get("SECRET_KEY") or "") or "dev-secret-change-in-production"
@@ -318,6 +321,7 @@ def register():
         "resendCount": 0,
         "lastOtpSentAt": utcnow(),
         "userPayload": user_payload,
+        "partnerRefSlug": partner_ref[:80] if partner_ref else "",
         "createdAt": datetime.utcnow(),
     })
 
@@ -609,6 +613,14 @@ def register_verify_otp():
     user = {**insert_doc, "_id": result.inserted_id}
     user.pop("password", None)
     display_name = user.get("name") or user.get("fullName") or "there"
+
+    try:
+        ref_slug = (payload.get("partnerRefSlug") or doc.get("partnerRefSlug") or "").strip()
+        if ref_slug:
+            from app.partner_program import attribution_signup_from_ref
+            attribution_signup_from_ref(user_id=str(result.inserted_id), ref_slug=ref_slug)
+    except Exception:
+        current_app.logger.exception("partner signup attribution failed")
 
     if os.environ.get("REGISTER_SKIP_WELCOME_EMAIL", "").strip().lower() not in ("1", "true", "yes"):
         schedule_welcome_email(current_app._get_current_object(), display_name, email)

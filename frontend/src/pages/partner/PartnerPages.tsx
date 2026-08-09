@@ -1,30 +1,57 @@
 import { useEffect, useState } from 'react'
 import { partnerService } from '@/services/partnerService'
+import { useAuthStore } from '@/store/authStore'
+
+function MiniSpark({ points, color = '#0d9488' }: { points: Array<{ date: string; value: number }>; color?: string }) {
+  if (!points.length) return <p className="text-xs text-slate-gray">No chart data yet</p>
+  const max = Math.max(...points.map((p) => p.value), 1)
+  const w = 320
+  const h = 80
+  const path = points
+    .map((p, i) => {
+      const x = (i / Math.max(points.length - 1, 1)) * w
+      const y = h - (p.value / max) * (h - 8) - 4
+      return `${i === 0 ? 'M' : 'L'}${x},${y}`
+    })
+    .join(' ')
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-20">
+      <path d={path} fill="none" stroke={color} strokeWidth="2" />
+    </svg>
+  )
+}
 
 export function PartnerOverview() {
-  const [data, setData] = useState<{ partner: Record<string, unknown>; stats: Record<string, number> } | null>(null)
+  const [data, setData] = useState<{
+    partner: Record<string, unknown>
+    stats: Record<string, number | Array<{ date: string; value: number }>>
+  } | null>(null)
 
   useEffect(() => {
     partnerService.me().then(setData).catch(() => setData(null))
   }, [])
 
   const s = data?.stats || {}
+  const num = (k: string) => Number(s[k] ?? 0)
   const name = String(data?.partner?.fullName || 'Partner')
+  const earnSeries = (Array.isArray(s.chartEarnings) ? s.chartEarnings : []) as Array<{ date: string; value: number }>
+  const clickSeries = (Array.isArray(s.chartClicks) ? s.chartClicks : []) as Array<{ date: string; value: number }>
 
   const cards = [
-    { label: 'Total Clicks', value: s.totalClicks ?? 0 },
-    { label: 'Successful Referrals', value: s.successfulReferrals ?? 0, cap: `this month: ${s.thisMonthSuccessful ?? 0}` },
-    { label: 'Total Earnings', value: `₹${(s.totalEarnings ?? 0).toLocaleString()}`, cap: `this month: ₹${(s.thisMonthEarnings ?? 0).toLocaleString()}` },
-    { label: 'Pending Payout', value: `₹${(s.pendingPayout ?? 0).toLocaleString()}` },
-    { label: 'Paid Out', value: `₹${(s.paidOut ?? 0).toLocaleString()}` },
+    { label: 'Total Clicks', value: num('totalClicks') },
+    { label: 'Successful Referrals', value: num('successfulReferrals'), cap: `this month: ${num('thisMonthSuccessful')}` },
+    { label: 'Total Earnings', value: `₹${num('totalEarnings').toLocaleString()}`, cap: `this month: ₹${num('thisMonthEarnings').toLocaleString()}` },
+    { label: 'Pending Payout', value: `₹${num('pendingPayout').toLocaleString()}` },
+    { label: 'Paid Out', value: `₹${num('paidOut').toLocaleString()}` },
+    { label: 'Conversion', value: `${num('conversionRate')}%` },
   ]
 
   return (
     <div className="space-y-6 pb-16 md:pb-0">
       <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-900">
-        Welcome back, {name}! You have earned ₹{(s.thisMonthEarnings ?? 0).toLocaleString()} this month.
+        Welcome back, {name}! You have earned ₹{num('thisMonthEarnings').toLocaleString()} this month.
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <div key={c.label} className="rounded-xl border bg-white p-4 shadow-sm">
             <p className="text-xs text-slate-gray">{c.label}</p>
@@ -33,9 +60,49 @@ export function PartnerOverview() {
           </div>
         ))}
       </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border bg-white p-4">
+          <p className="text-sm font-medium text-brand-navy mb-2">Earnings (30 days)</p>
+          <MiniSpark points={earnSeries} />
+        </div>
+        <div className="rounded-xl border bg-white p-4">
+          <p className="text-sm font-medium text-brand-navy mb-2">Clicks (30 days)</p>
+          <MiniSpark points={clickSeries} color="#2563eb" />
+        </div>
+      </div>
       <p className="text-xs text-slate-gray">
-        Commissions are held {s.holdDays ?? 15} days before becoming eligible. Minimum payout ₹{s.minPayout ?? 500}.
+        Commissions are held {num('holdDays') || 15} days before becoming eligible. Minimum payout ₹{num('minPayout') || 500}.
       </p>
+    </div>
+  )
+}
+
+function ShareMenu({ url, label }: { url: string; label: string }) {
+  const share = (channel: string) => {
+    const text = encodeURIComponent(`Check out XpertIntern trainings: ${url}`)
+    const u = encodeURIComponent(url)
+    const map: Record<string, string> = {
+      whatsapp: `https://wa.me/?text=${text}`,
+      telegram: `https://t.me/share/url?url=${u}&text=${text}`,
+      email: `mailto:?subject=${encodeURIComponent(label)}&body=${text}`,
+      twitter: `https://twitter.com/intent/tweet?text=${text}`,
+    }
+    if (map[channel]) window.open(map[channel], '_blank', 'noopener,noreferrer')
+  }
+  const qr = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`
+  return (
+    <div className="flex flex-wrap items-center gap-2 mt-2">
+      <button type="button" className="rounded border px-2 py-1 text-[11px]" onClick={() => void navigator.clipboard.writeText(url)}>
+        Copy
+      </button>
+      {(['whatsapp', 'telegram', 'email', 'twitter'] as const).map((c) => (
+        <button key={c} type="button" className="rounded border px-2 py-1 text-[11px] capitalize" onClick={() => share(c)}>
+          {c}
+        </button>
+      ))}
+      <a href={qr} target="_blank" rel="noreferrer" className="rounded border px-2 py-1 text-[11px]">
+        QR code
+      </a>
     </div>
   )
 }
@@ -58,20 +125,21 @@ export function PartnerLinks() {
       {items.map((l) => (
         <div key={String(l.id)} className="rounded-xl border bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-semibold text-brand-navy">{String(l.label)}</p>
-              <p className="text-xs text-slate-gray capitalize">{String(l.linkType).replace('_', ' ')} {l.trainingTitle ? `· ${String(l.trainingTitle)}` : ''}</p>
+              <p className="text-xs text-slate-gray capitalize">
+                {String(l.linkType).replace('_', ' ')} {l.trainingTitle ? `· ${String(l.trainingTitle)}` : ''}
+              </p>
               <p className="mt-1 break-all text-xs font-mono text-gray-700">{String(l.url)}</p>
+              <ShareMenu url={String(l.url || '')} label={String(l.label || 'XpertIntern')} />
             </div>
-            <button
-              type="button"
-              className="rounded-lg border px-3 py-1.5 text-xs font-medium"
-              onClick={() => {
-                void navigator.clipboard.writeText(String(l.url || ''))
-              }}
-            >
-              Copy Link
-            </button>
+            {l.url ? (
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=${encodeURIComponent(String(l.url))}`}
+                alt="QR"
+                className="h-24 w-24 border rounded"
+              />
+            ) : null}
           </div>
           <p className="mt-3 text-xs text-slate-gray">
             Clicks: {String(l.clicks)} · Unique: {String(l.uniqueVisitors)} · Sign-ups: {String(l.signups)} · Successful: {String(l.paymentsSuccess)} · Earnings: ₹
@@ -156,12 +224,32 @@ export function PartnerReferrals() {
 export function PartnerPayouts() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
   const [stats, setStats] = useState<Record<string, number>>({})
+  const token = useAuthStore((s) => s.token)
+
   useEffect(() => {
     partnerService.payouts().then((r) => {
       setItems(r.items || [])
       setStats(r.stats || {})
     }).catch(() => undefined)
   }, [])
+
+  const downloadReceipt = async (payoutId: string) => {
+    try {
+      const res = await fetch(partnerService.payoutReceiptUrl(payoutId), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error('download failed')
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${payoutId}.pdf`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch {
+      window.alert('Could not download receipt')
+    }
+  }
+
   return (
     <div className="space-y-4 pb-16">
       <h1 className="text-lg font-semibold text-brand-navy">Payouts</h1>
@@ -180,6 +268,7 @@ export function PartnerPayouts() {
               <th className="px-3 py-2">Method</th>
               <th className="px-3 py-2">UTR</th>
               <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2" />
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -191,6 +280,11 @@ export function PartnerPayouts() {
                 <td className="px-3 py-2">{String(p.method)}</td>
                 <td className="px-3 py-2">{String(p.transactionRef)}</td>
                 <td className="px-3 py-2 capitalize">{String(p.status)}</td>
+                <td className="px-3 py-2 text-right">
+                  <button type="button" className="text-brand-accent text-[11px]" onClick={() => void downloadReceipt(String(p.payoutId))}>
+                    PDF
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -214,6 +308,7 @@ function Card({ label, value, note }: { label: string; value: string; note?: str
 export function PartnerProfile() {
   const [partner, setPartner] = useState<Record<string, unknown> | null>(null)
   const [form, setForm] = useState({ fullName: '', city: '', state: '', organisationName: '', phone: '', pan: '', upiId: '', accountHolder: '', accountNumber: '', ifsc: '', bankName: '' })
+  const [pw, setPw] = useState({ current: '', next: '' })
   const [msg, setMsg] = useState('')
   useEffect(() => {
     partnerService.me().then((r) => {
@@ -258,6 +353,26 @@ export function PartnerProfile() {
       <button type="button" onClick={() => void save()} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">
         Save
       </button>
+      <div className="border-t pt-4 space-y-2">
+        <p className="text-sm font-medium">Change password</p>
+        <input type="password" className="w-full rounded border px-3 py-2 text-sm" placeholder="Current password" value={pw.current} onChange={(e) => setPw((p) => ({ ...p, current: e.target.value }))} />
+        <input type="password" className="w-full rounded border px-3 py-2 text-sm" placeholder="New password (min 8)" value={pw.next} onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))} />
+        <button
+          type="button"
+          className="rounded border px-3 py-1.5 text-sm"
+          onClick={async () => {
+            try {
+              await partnerService.changePassword(pw.current, pw.next)
+              setMsg('Password updated')
+              setPw({ current: '', next: '' })
+            } catch {
+              setMsg('Could not update password')
+            }
+          }}
+        >
+          Update password
+        </button>
+      </div>
     </div>
   )
 }
@@ -274,11 +389,21 @@ export function PartnerMarketing() {
   return (
     <div className="space-y-4 pb-16">
       <h1 className="text-lg font-semibold text-brand-navy">Marketing Kit</h1>
-      {url ? <p className="text-xs">Your main link: <span className="font-mono">{url}</span></p> : null}
+      {url ? (
+        <div className="rounded-xl border bg-white p-4">
+          <p className="text-xs">Your main link: <span className="font-mono">{url}</span></p>
+          <ShareMenu url={url} label="XpertIntern" />
+        </div>
+      ) : null}
       {items.map((it) => (
         <div key={String(it.id)} className="rounded-xl border bg-white p-4">
           <p className="font-medium">{String(it.title)}</p>
           <p className="mt-2 text-sm text-slate-gray whitespace-pre-wrap">{String(it.body)}</p>
+          {it.url ? (
+            <a href={String(it.url)} className="text-xs text-brand-accent mt-2 inline-block" target="_blank" rel="noreferrer">
+              Open asset
+            </a>
+          ) : null}
           {it.type === 'caption' ? (
             <button type="button" className="mt-2 text-xs border rounded px-2 py-1" onClick={() => void navigator.clipboard.writeText(String(it.body || ''))}>
               Copy caption
@@ -291,14 +416,29 @@ export function PartnerMarketing() {
 }
 
 export function PartnerSupport() {
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
+  const [done, setDone] = useState('')
   return (
     <div className="space-y-3 pb-16 max-w-lg">
       <h1 className="text-lg font-semibold text-brand-navy">Support</h1>
-      <p className="text-sm text-slate-gray">Raise tickets from the main site support flow, or email:</p>
-      <a href="mailto:partners@xpertintern.com" className="text-brand-accent font-medium">
-        partners@xpertintern.com
-      </a>
-      <p className="text-sm">Common requests: bank details, new link, coupon, payout issue.</p>
+      <p className="text-sm text-slate-gray">Submit a ticket to the XpertIntern partner team, or email partners@xpertintern.com</p>
+      <input className="w-full rounded border px-3 py-2 text-sm" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <textarea className="w-full rounded border px-3 py-2 text-sm" rows={5} placeholder="Describe your request…" value={message} onChange={(e) => setMessage(e.target.value)} />
+      <button
+        type="button"
+        className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white"
+        onClick={async () => {
+          const r = await partnerService.supportTicket(subject, message)
+          setDone(r.message || 'Submitted')
+          setSubject('')
+          setMessage('')
+        }}
+      >
+        Submit ticket
+      </button>
+      {done ? <p className="text-sm text-emerald-700">{done}</p> : null}
+      <p className="text-xs text-slate-gray">Common requests: bank details, new link, coupon, payout issue.</p>
     </div>
   )
 }

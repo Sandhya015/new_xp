@@ -1942,6 +1942,11 @@ def refund_payment(payment_id):
             "refundedBy": _admin_actor()["actor_email"],
         }},
     )
+    try:
+        from app.partner_program import cancel_commission_for_order
+        cancel_commission_for_order(payment_id)
+    except Exception:
+        current_app.logger.exception("partner commission reverse on refund failed")
     _log_admin(
         "payment.refund",
         "payment",

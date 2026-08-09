@@ -932,6 +932,21 @@ def on_payment_success_attribution(order: dict) -> None:
             {"code": attr["couponCode"]},
             {"$inc": {"successCount": 1, "earnings": commission, "appliedCount": 1}},
         )
+    push_partner_notification(
+        partner_id,
+        "New successful referral",
+        f"You earned ₹{commission:.2f} (15-day hold applies).",
+        link="/partner/referrals",
+    )
+    log_partner_activity(partner_id, "commission_earned", {
+        "orderId": str(order.get("_id")),
+        "amount": commission,
+    })
+    try:
+        from flask import current_app
+        notify_first_referral(partner_id, commission, current_app.config)
+    except Exception:
+        logger.exception("first referral notify failed")
 
 
 def release_eligible_commissions() -> int:
@@ -942,13 +957,6 @@ def release_eligible_commissions() -> int:
         {"$set": {"status": "eligible", "updatedAt": now}},
     )
     return int(res.modified_count or 0)
-
-
-def cancel_commission_for_order(order_id: str) -> None:
-    commissions_coll().update_many(
-        {"orderId": str(order_id), "status": {"$in": ["earned", "eligible"]}},
-        {"$set": {"status": "cancelled", "cancelledAt": datetime.utcnow()}},
-    )
 
 
 def partner_stats(partner_id: str) -> dict:
@@ -1059,11 +1067,52 @@ def process_payouts(
                 f"<p>Hi {partner.get('fullName')},</p>"
                 f"<p>Your payout of <strong>₹{amount:.2f}</strong> has been processed.</p>"
                 f"<p>Payout ID: {po_id}<br/>Transaction ref: {uti_ref}<br/>Method: {method}</p>"
+                f"<p>View details in your <a href=\"{(config.get('PUBLIC_APP_URL') or '').rstrip('/')}/partner/payouts\">partner portal</a>.</p>"
             ),
             text_body=f"Payout {po_id} of INR {amount:.2f} processed. Ref: {uti_ref}",
         )
+        push_partner_notification(
+            pid,
+            "Payout processed",
+            f"₹{amount:.2f} paid · ref {uti_ref}",
+            link="/partner/payouts",
+        )
         results.append(payout)
     return results
+
+
+def generate_payout_receipt_pdf(payout: dict, partner: dict) -> bytes:
+    """Simple PDF receipt for partner payout (fpdf2 — same stack as tax invoices)."""
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+        from io import BytesIO
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, "XpertIntern - Partner Payout Receipt", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", size=11)
+        lines = [
+            f"Payout ID: {payout.get('payoutId') or ''}",
+            f"Partner: {partner.get('fullName') or ''} ({partner.get('partnerCode') or ''})",
+            f"Amount: INR {float(payout.get('amount') or 0):.2f}",
+            f"Method: {payout.get('method') or ''}",
+            f"Transaction ref: {payout.get('transactionRef') or ''}",
+            f"Period: {payout.get('period') or ''}",
+            f"Status: {payout.get('status') or 'paid'}",
+        ]
+        for line in lines:
+            pdf.cell(0, 8, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 6, "Computer-generated receipt — XpertIntern Partner Program.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        out = BytesIO()
+        pdf.output(out)
+        return out.getvalue()
+    except Exception:
+        logger.exception("payout pdf failed")
+        return b""
 
 
 def sign_reply_token(application_id: str, secret: str) -> str:
@@ -1086,3 +1135,300 @@ def verify_reply_token(token: str, secret: str) -> str | None:
         return app_id
     except Exception:
         return None
+
+
+# ── Extended helpers (full PDF parity work) ──────────────────────────────────
+
+def partner_notifications_coll():
+    return coll("partner_notifications")
+
+
+def partner_activity_coll():
+    return coll("partner_activity")
+
+
+def partner_kit_coll():
+    return coll("partner_marketing_kit")
+
+
+def status_check_coll():
+    return coll("partner_status_checks")
+
+
+def push_partner_notification(partner_id: str, title: str, message: str, *, link: str = "") -> None:
+    try:
+        partner_notifications_coll().insert_one({
+            "partnerId": str(partner_id),
+            "title": title[:200],
+            "message": message[:500],
+            "link": link[:300],
+            "read": False,
+            "createdAt": datetime.utcnow(),
+        })
+    except Exception:
+        logger.exception("partner notification failed")
+
+
+def log_partner_activity(partner_id: str, action: str, meta: dict | None = None) -> None:
+    try:
+        partner_activity_coll().insert_one({
+            "partnerId": str(partner_id),
+            "action": action,
+            "meta": meta or {},
+            "createdAt": datetime.utcnow(),
+        })
+    except Exception:
+        logger.exception("partner activity log failed")
+
+
+def list_partner_notifications(partner_id: str, *, limit: int = 20) -> list[dict]:
+    out = []
+    for n in partner_notifications_coll().find({"partnerId": str(partner_id)}).sort("createdAt", -1).limit(limit):
+        created = n.get("createdAt")
+        out.append({
+            "id": str(n["_id"]),
+            "title": n.get("title") or "",
+            "message": n.get("message") or "",
+            "link": n.get("link") or "",
+            "read": bool(n.get("read")),
+            "createdAt": created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else "",
+        })
+    return out
+
+
+def mark_notifications_read(partner_id: str, *, all_ids: bool = True, ids: list[str] | None = None) -> None:
+    q: dict[str, Any] = {"partnerId": str(partner_id)}
+    if not all_ids and ids:
+        oids = [ObjectId(i) for i in ids if ObjectId.is_valid(i)]
+        q["_id"] = {"$in": oids}
+    partner_notifications_coll().update_many(q, {"$set": {"read": True}})
+
+
+def check_status_rate_limit(email: str) -> str | None:
+    """Max 5 status lookups per email per hour."""
+    email = (email or "").strip().lower()
+    if not email:
+        return "Email required"
+    since = datetime.utcnow() - timedelta(hours=1)
+    n = status_check_coll().count_documents({"email": email, "at": {"$gte": since}})
+    if n >= 5:
+        return "Too many status checks. Try again in an hour."
+    status_check_coll().insert_one({"email": email, "at": datetime.utcnow()})
+    return None
+
+
+def auto_reject_stale_info_requests() -> int:
+    """Applications in needs_more_info with no reply for 14+ days → rejected."""
+    cutoff = datetime.utcnow() - timedelta(days=14)
+    count = 0
+    for doc in applications_coll().find({
+        "status": "needs_more_info",
+        "infoRequestedAt": {"$lte": cutoff},
+    }):
+        applications_coll().update_one(
+            {"_id": doc["_id"]},
+            {
+                "$set": {
+                    "status": "rejected",
+                    "rejectReason": "No response",
+                    "rejectReasonShared": "No response",
+                    "rejectedAt": datetime.utcnow(),
+                    "updatedAt": datetime.utcnow(),
+                }
+            },
+        )
+        append_app_history(doc["_id"], "auto_rejected", "system", "No response within 14 days")
+        count += 1
+        try:
+            from app.email_smtp import send_email
+            from flask import current_app
+            send_email(
+                current_app.config,
+                doc.get("email") or "",
+                "Update on your XpertIntern Partner application",
+                f"<p>Hi {doc.get('fullName')},</p><p>Your application was closed as we did not receive a response within 14 days. You may re-apply after 90 days.</p>",
+                text_body="Application closed — no response within 14 days.",
+            )
+        except Exception:
+            pass
+    return count
+
+
+def attribution_signup_from_ref(*, user_id: str, ref_slug: str) -> None:
+    """Record student signup under a partner referral link."""
+    link = resolve_active_link(ref_slug)
+    if not link:
+        return
+    links_coll().update_one({"_id": link["_id"]}, {"$inc": {"signups": 1}})
+    if ObjectId.is_valid(str(link.get("partnerId"))):
+        partners_coll().update_one(
+            {"_id": ObjectId(str(link["partnerId"]))},
+            {"$inc": {"totalSignups": 1}},
+        )
+        log_partner_activity(str(link["partnerId"]), "signup", {"userId": user_id, "slug": link.get("slug")})
+    try:
+        from app.db import get_users_collection
+        get_users_collection().update_one(
+            {"_id": ObjectId(user_id)} if ObjectId.is_valid(user_id) else {"_id": None},
+            {"$set": {"partnerRefSlug": link.get("slug"), "partnerId": link.get("partnerId")}},
+        )
+    except Exception:
+        logger.exception("user partner ref save failed")
+
+
+def partner_coupon_to_pricing(code: str, *, course_id: str = "") -> tuple[dict[str, Any] | None, str | None]:
+    """Map partner_coupons to checkout pricing dict."""
+    c = get_partner_coupon_by_code(code)
+    if not c:
+        return None, "Invalid or expired coupon code."
+    scope = (c.get("trainingScope") or "all").lower()
+    tids = [str(x) for x in (c.get("trainingIds") or [])]
+    if scope in ("selected", "one", "this") and course_id and tids and course_id not in tids:
+        return None, "This coupon is not valid for this training."
+    dtype = (c.get("discountType") or "percent").lower()
+    val = float(c.get("discountValue") or 0)
+    pricing: dict[str, Any] = {}
+    if dtype == "flat":
+        pricing["rupeesOff"] = val
+    else:
+        pricing["percentOff"] = val
+        if c.get("maxDiscountCap"):
+            pricing["maxDiscountInr"] = float(c["maxDiscountCap"])
+    if c.get("minOrderValue"):
+        pricing["minOrderValue"] = float(c["minOrderValue"])
+    try:
+        coll("partner_coupon_attempts").insert_one({
+            "couponId": str(c["_id"]),
+            "partnerId": c.get("partnerId"),
+            "code": c.get("code"),
+            "courseId": course_id,
+            "createdAt": datetime.utcnow(),
+        })
+    except Exception:
+        pass
+    return pricing, None
+
+
+def cancel_commission_for_order(order_id: str) -> None:
+    """Cancel commissions and mark order attribution refunded; reverse partner earnings counters."""
+    affected = list(commissions_coll().find({
+        "orderId": str(order_id),
+        "status": {"$in": ["earned", "eligible", "processing"]},
+    }))
+    for c in affected:
+        amt = float(c.get("commissionAmount") or 0)
+        pid = c.get("partnerId")
+        commissions_coll().update_one(
+            {"_id": c["_id"]},
+            {"$set": {"status": "cancelled", "cancelledAt": datetime.utcnow()}},
+        )
+        if pid and ObjectId.is_valid(str(pid)):
+            partners_coll().update_one(
+                {"_id": ObjectId(str(pid))},
+                {"$inc": {"totalEarnings": -amt, "totalSuccessful": -1}},
+            )
+            push_partner_notification(
+                str(pid),
+                "Commission cancelled",
+                f"A referral refund reversed commission of ₹{amt:.2f}.",
+            )
+        if c.get("linkSlug"):
+            links_coll().update_one({"slug": c["linkSlug"]}, {"$inc": {"earnings": -amt, "paymentsSuccess": -1}})
+        if c.get("couponCode"):
+            coupons_coll().update_one({"code": c["couponCode"]}, {"$inc": {"earnings": -amt, "successCount": -1}})
+    try:
+        from app.db import get_orders_collection
+        get_orders_collection().update_one(
+            {"_id": ObjectId(order_id)} if ObjectId.is_valid(order_id) else {"orderId": order_id},
+            {"$set": {"partnerAttribution.status": "refunded"}},
+        )
+    except Exception:
+        pass
+
+
+def notify_first_referral(partner_id: str, amount: float, config) -> None:
+    p = partners_coll().find_one({"_id": ObjectId(partner_id)}) if ObjectId.is_valid(partner_id) else None
+    if not p:
+        return
+    n = commissions_coll().count_documents({
+        "partnerId": partner_id,
+        "status": {"$in": ["earned", "eligible", "processing", "paid"]},
+    })
+    if n != 1:
+        return
+    from app.email_smtp import send_email
+    send_email(
+        config,
+        p.get("email") or "",
+        "Congratulations — your first successful referral!",
+        f"<p>Hi {p.get('fullName')},</p><p>You earned <strong>₹{amount:.2f}</strong> from your first successful referral. Keep sharing!</p>",
+        text_body=f"First successful referral — earned INR {amount:.2f}",
+    )
+    push_partner_notification(partner_id, "First successful referral", f"You earned ₹{amount:.2f}")
+
+
+def enhanced_partner_stats(partner_id: str) -> dict:
+    base = partner_stats(partner_id)
+    # last 30 days daily series for charts
+    now = datetime.utcnow()
+    start = now - timedelta(days=30)
+    daily_clicks: dict[str, int] = {}
+    daily_earn: dict[str, float] = {}
+    for i in range(30):
+        d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+        daily_clicks[d] = 0
+        daily_earn[d] = 0.0
+    for cl in clicks_coll().find({"partnerId": partner_id, "createdAt": {"$gte": start}}):
+        d = cl.get("createdAt")
+        if hasattr(d, "strftime"):
+            key = d.strftime("%Y-%m-%d")
+            if key in daily_clicks:
+                daily_clicks[key] += 1
+    for c in commissions_coll().find({
+        "partnerId": partner_id,
+        "status": {"$in": ["earned", "eligible", "processing", "paid"]},
+        "earnedAt": {"$gte": start},
+    }):
+        d = c.get("earnedAt")
+        if hasattr(d, "strftime"):
+            key = d.strftime("%Y-%m-%d")
+            if key in daily_earn:
+                daily_earn[key] += float(c.get("commissionAmount") or 0)
+    # payments created / failed estimates from commissions + links
+    payments_created = sum(int(l.get("paymentsCreated") or 0) for l in links_coll().find({"partnerId": partner_id}))
+    successful = int(base.get("successfulReferrals") or 0)
+    conversion = round((successful / payments_created) * 100, 1) if payments_created else 0.0
+    base.update({
+        "paymentsCreated": payments_created,
+        "conversionRate": conversion,
+        "chartEarnings": [{"date": k, "value": round(v, 2)} for k, v in sorted(daily_earn.items())],
+        "chartClicks": [{"date": k, "value": v} for k, v in sorted(daily_clicks.items())],
+        "totalSales": round(sum(float(c.get("netAmount") or 0) for c in commissions_coll().find({
+            "partnerId": partner_id,
+            "status": {"$in": ["earned", "eligible", "processing", "paid"]},
+        })), 2),
+        "uniqueVisitors": sum(int(l.get("uniqueVisitors") or 0) for l in links_coll().find({"partnerId": partner_id})),
+        "signups": sum(int(l.get("signups") or 0) for l in links_coll().find({"partnerId": partner_id})),
+    })
+    return base
+
+
+def verify_recaptcha(token: str, config) -> bool:
+    """If RECAPTCHA_SECRET is set, verify; otherwise allow (dev)."""
+    secret = (config.get("RECAPTCHA_SECRET") or "").strip()
+    if not secret:
+        return True
+    if not token:
+        return False
+    try:
+        import urllib.request
+        import urllib.parse
+        import json
+        data = urllib.parse.urlencode({"secret": secret, "response": token}).encode()
+        req = urllib.request.Request("https://www.google.com/recaptcha/api/siteverify", data=data)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode())
+        return bool(body.get("success")) and float(body.get("score") or 0) >= 0.3
+    except Exception:
+        logger.exception("recaptcha verify failed")
+        return False

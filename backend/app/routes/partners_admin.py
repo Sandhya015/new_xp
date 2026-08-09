@@ -17,16 +17,20 @@ from app.partner_program import (
     REJECT_REASONS,
     append_app_history,
     applications_coll,
+    auto_reject_stale_info_requests,
     commissions_coll,
     coupons_coll,
     create_partner_coupon,
     create_partner_from_fields,
     create_referral_link,
+    enhanced_partner_stats,
     links_coll,
     partners_coll,
+    partner_activity_coll,
     partner_stats,
     payouts_coll,
     process_payouts,
+    push_partner_notification,
     release_eligible_commissions,
     serialize_application,
     serialize_coupon,
@@ -67,12 +71,17 @@ def admin_list_applications():
         return err
     status = (request.args.get("status") or "").strip().lower()
     ptype = (request.args.get("partnerType") or "").strip()
+    state = (request.args.get("state") or "").strip()
     search = (request.args.get("search") or "").strip()
+    date_from = (request.args.get("from") or "").strip()
+    date_to = (request.args.get("to") or "").strip()
     q: dict = {}
     if status:
         q["status"] = status
     if ptype:
         q["partnerType"] = ptype
+    if state:
+        q["state"] = {"$regex": state, "$options": "i"}
     if search:
         q["$or"] = [
             {"applicationId": {"$regex": search, "$options": "i"}},
@@ -80,9 +89,78 @@ def admin_list_applications():
             {"email": {"$regex": search, "$options": "i"}},
             {"phone": {"$regex": search, "$options": "i"}},
         ]
-    items = [serialize_application(d) for d in applications_coll().find(q).sort("createdAt", -1).limit(300)]
+    # date filters (YYYY-MM-DD)
+    if date_from or date_to:
+        created: dict = {}
+        try:
+            if date_from:
+                created["$gte"] = datetime.strptime(date_from[:10], "%Y-%m-%d")
+            if date_to:
+                created["$lte"] = datetime.strptime(date_to[:10], "%Y-%m-%d") + __import__("datetime").timedelta(days=1)
+            if created:
+                q["createdAt"] = created
+        except ValueError:
+            pass
+    items = [serialize_application(d) for d in applications_coll().find(q).sort("createdAt", -1).limit(500)]
     pending = applications_coll().count_documents({"status": {"$in": ["submitted", "under_review", "needs_more_info"]}})
     return jsonify({"items": items, "pendingCount": pending})
+
+
+@partners_admin_bp.route("/partners/applications/export", methods=["GET"])
+@jwt_required()
+def admin_export_applications():
+    err = _admin_err()
+    if err:
+        return err
+    import csv
+    from io import StringIO
+    status = (request.args.get("status") or "").strip().lower()
+    q = {"status": status} if status else {}
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["applicationId", "fullName", "email", "phone", "partnerType", "city", "state", "status", "createdAt"])
+    for d in applications_coll().find(q).sort("createdAt", -1).limit(2000):
+        created = d.get("createdAt")
+        w.writerow([
+            d.get("applicationId") or "",
+            d.get("fullName") or "",
+            d.get("email") or "",
+            d.get("phone") or "",
+            d.get("partnerType") or "",
+            d.get("city") or "",
+            d.get("state") or "",
+            d.get("status") or "",
+            created.isoformat() if hasattr(created, "isoformat") else "",
+        ])
+    from flask import Response
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=partner-applications.csv"},
+    )
+
+
+@partners_admin_bp.route("/partners/applications/bulk-reject", methods=["POST"])
+@jwt_required()
+def admin_bulk_reject_applications():
+    err = _admin_err()
+    if err:
+        return err
+    data = request.get_json() or {}
+    ids = data.get("ids") or []
+    reason = (data.get("reason") or "Other").strip()
+    n = 0
+    for aid in ids:
+        doc = applications_coll().find_one({"_id": ObjectId(aid)}) if ObjectId.is_valid(str(aid)) else None
+        if not doc or doc.get("status") in ("approved", "rejected"):
+            continue
+        applications_coll().update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"status": "rejected", "rejectReason": reason, "rejectedAt": datetime.utcnow(), "updatedAt": datetime.utcnow()}},
+        )
+        append_app_history(doc["_id"], "rejected", "admin", f"Bulk: {reason}")
+        n += 1
+    return jsonify({"ok": True, "rejected": n})
 
 
 @partners_admin_bp.route("/partners/applications/<app_id>", methods=["GET"])
@@ -339,11 +417,35 @@ def admin_get_partner(partner_id):
         return jsonify({"error": "Not found"}), 404
     links = [serialize_link(x) for x in links_coll().find({"partnerId": partner_id}).sort("createdAt", -1)]
     coupons = [serialize_coupon(x) for x in coupons_coll().find({"partnerId": partner_id}).sort("createdAt", -1)]
+    activity = []
+    try:
+        for a in partner_activity_coll().find({"partnerId": partner_id}).sort("createdAt", -1).limit(100):
+            created = a.get("createdAt")
+            activity.append({
+                "action": a.get("action") or "",
+                "meta": a.get("meta") or {},
+                "createdAt": created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else "",
+            })
+    except Exception:
+        pass
+    payouts = []
+    for po in payouts_coll().find({"partnerId": partner_id}).sort("createdAt", -1).limit(50):
+        created = po.get("createdAt")
+        payouts.append({
+            "payoutId": po.get("payoutId") or "",
+            "amount": float(po.get("amount") or 0),
+            "method": po.get("method") or "",
+            "transactionRef": po.get("transactionRef") or "",
+            "status": po.get("status") or "",
+            "date": created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else "",
+        })
     return jsonify({
         "partner": serialize_partner(p),
-        "stats": partner_stats(partner_id),
+        "stats": enhanced_partner_stats(partner_id),
         "links": links,
         "coupons": coupons,
+        "activity": activity,
+        "payouts": payouts,
     })
 
 
@@ -362,6 +464,8 @@ def admin_update_partner(partner_id):
             patch[k] = data.get(k)
     if "commissionPercent" in data:
         patch["commissionPercent"] = float(data.get("commissionPercent") or 0)
+    if "notes" in data:
+        patch["notes"] = str(data.get("notes") or "")[:2000]
     if data.get("approveBank") and isinstance(data.get("bankPendingApproval") or partners_coll().find_one({"_id": ObjectId(partner_id)}, {"bankPendingApproval": 1}), dict):
         p = partners_coll().find_one({"_id": ObjectId(partner_id)})
         pending = p.get("bankPendingApproval") if p else None
@@ -370,10 +474,21 @@ def admin_update_partner(partner_id):
             patch["pan"] = pending.get("pan") or p.get("pan")
             patch["upiId"] = pending.get("upiId") or p.get("upiId")
             patch["bankPendingApproval"] = None
+    prev = partners_coll().find_one({"_id": ObjectId(partner_id)})
     if patch:
         patch["updatedAt"] = datetime.utcnow()
         partners_coll().update_one({"_id": ObjectId(partner_id)}, {"$set": patch})
     p = partners_coll().find_one({"_id": ObjectId(partner_id)})
+    # Suspension notification
+    if patch.get("status") == "suspended" and (prev or {}).get("status") != "suspended" and p:
+        send_email(
+            current_app.config,
+            p.get("email") or "",
+            "Your XpertIntern Partner account has been suspended",
+            f"<p>Hi {p.get('fullName')},</p><p>Your partner account has been suspended. Contact partners@xpertintern.com if you believe this is an error.</p>",
+            text_body="Your partner account has been suspended.",
+        )
+        push_partner_notification(partner_id, "Account suspended", "Contact support for assistance.")
     return jsonify({"partner": serialize_partner(p)})
 
 
@@ -503,6 +618,38 @@ def admin_partners_meta():
     err = _admin_err()
     if err:
         return err
+    # Opportunistic maintenance: auto-reject stale info requests
+    try:
+        auto_reject_stale_info_requests()
+    except Exception:
+        current_app.logger.exception("auto_reject_stale failed")
     trainings = [{"id": str(c["_id"]), "title": c.get("title") or ""} for c in get_courses_collection().find({"active": True}).sort("title", 1)]
     pending = applications_coll().count_documents({"status": {"$in": ["submitted", "under_review", "needs_more_info"]}})
     return jsonify({"trainings": trainings, "rejectReasons": REJECT_REASONS, "pendingApplications": pending})
+
+
+@partners_admin_bp.route("/partners/jobs/auto-reject", methods=["POST"])
+@jwt_required()
+def admin_run_auto_reject():
+    err = _admin_err()
+    if err:
+        return err
+    n = auto_reject_stale_info_requests()
+    return jsonify({"rejected": n})
+
+
+@partners_admin_bp.route("/partners/applications/<app_id>/notes", methods=["POST"])
+@jwt_required()
+def admin_app_notes(app_id):
+    err = _admin_err()
+    if err:
+        return err
+    doc = applications_coll().find_one({"_id": ObjectId(app_id)}) if ObjectId.is_valid(app_id) else applications_coll().find_one({"applicationId": app_id.upper()})
+    if not doc:
+        return jsonify({"error": "Not found"}), 404
+    note = ((request.get_json() or {}).get("note") or "").strip()
+    if not note:
+        return jsonify({"error": "Note required"}), 400
+    append_app_history(doc["_id"], "admin_note", "admin", note)
+    applications_coll().update_one({"_id": doc["_id"]}, {"$set": {"internalNotes": note, "updatedAt": datetime.utcnow()}})
+    return jsonify({"ok": True})

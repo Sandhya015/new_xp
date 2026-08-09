@@ -86,6 +86,10 @@ class Config:
     # Lambda: set to managed bucket (see serverless.yml). Empty = local instance_path/course_uploads.
     COURSE_MEDIA_S3_BUCKET = os.environ.get("COURSE_MEDIA_S3_BUCKET", "").strip()
     COURSE_MEDIA_S3_PREFIX = (os.environ.get("COURSE_MEDIA_S3_PREFIX") or "course-media").strip().strip("/") or "course-media"
+    # reCAPTCHA v3 for partner apply (optional — empty secret skips verification in dev)
+    RECAPTCHA_SECRET = os.environ.get("RECAPTCHA_SECRET", "").strip()
+    RECAPTCHA_SITE_KEY = os.environ.get("RECAPTCHA_SITE_KEY", "").strip()
+    SUPPORT_EMAIL = (os.environ.get("SUPPORT_EMAIL") or os.environ.get("MAIL_REPLY_TO") or "partners@xpertintern.com").strip()
 
 
 class DevelopmentConfig(Config):

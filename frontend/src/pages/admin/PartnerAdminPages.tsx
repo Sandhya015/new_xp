@@ -1,31 +1,59 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { adminPartnerService } from '@/services/partnerService'
+import { useAuthStore } from '@/store/authStore'
 
 export function AdminPartnerApplications() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
   const [status, setStatus] = useState('')
+  const [ptype, setPtype] = useState('')
+  const [stateF, setStateF] = useState('')
   const [search, setSearch] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
   const navigate = useNavigate()
+  const token = useAuthStore((s) => s.token)
 
   const load = () => {
     const params: Record<string, string> = {}
     if (status) params.status = status
+    if (ptype) params.partnerType = ptype
+    if (stateF) params.state = stateF
     if (search.trim()) params.search = search.trim()
+    if (from) params.from = from
+    if (to) params.to = to
     adminPartnerService.listApplications(params).then((r) => setItems(r.items || [])).catch(() => setItems([]))
   }
 
   useEffect(() => {
     load()
-  }, [status])
+  }, [status, ptype])
+
+  const exportCsv = async () => {
+    const params: Record<string, string> = {}
+    if (status) params.status = status
+    const url = adminPartnerService.applicationsExportUrl(params)
+    const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'partner-applications.csv'
+    a.click()
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-brand-navy">Partner applications</h1>
-        <Link to="/admin/partners" className="text-sm text-brand-accent">
-          All partners →
-        </Link>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => void exportCsv()} className="text-sm text-brand-accent">
+            Export CSV
+          </button>
+          <Link to="/admin/partners" className="text-sm text-brand-accent">
+            All partners →
+          </Link>
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <select className="rounded border px-2 py-1.5 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -36,15 +64,40 @@ export function AdminPartnerApplications() {
             </option>
           ))}
         </select>
+        <select className="rounded border px-2 py-1.5 text-sm" value={ptype} onChange={(e) => setPtype(e.target.value)}>
+          <option value="">All types</option>
+          {['College', 'Coaching Institute', 'Influencer', 'YouTuber', 'Student Community', 'Individual', 'Other'].map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <input className="rounded border px-2 py-1.5 text-sm w-28" placeholder="State" value={stateF} onChange={(e) => setStateF(e.target.value)} />
+        <input type="date" className="rounded border px-2 py-1.5 text-sm" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input type="date" className="rounded border px-2 py-1.5 text-sm" value={to} onChange={(e) => setTo(e.target.value)} />
         <input className="rounded border px-2 py-1.5 text-sm" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <button type="button" onClick={load} className="rounded bg-brand-accent px-3 py-1.5 text-sm text-white">
           Search
         </button>
+        {selected.length ? (
+          <button
+            type="button"
+            className="rounded bg-red-600 px-3 py-1.5 text-sm text-white"
+            onClick={async () => {
+              await adminPartnerService.bulkReject(selected, 'Bulk reject')
+              setSelected([])
+              load()
+            }}
+          >
+            Reject selected ({selected.length})
+          </button>
+        ) : null}
       </div>
       <div className="overflow-x-auto rounded-xl border bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
+              <th className="px-3 py-2" />
               <th className="px-3 py-2">App ID</th>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Type</th>
@@ -57,6 +110,16 @@ export function AdminPartnerApplications() {
           <tbody className="divide-y">
             {items.map((a) => (
               <tr key={String(a.id)}>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(String(a.id))}
+                    onChange={(e) => {
+                      const id = String(a.id)
+                      setSelected((s) => (e.target.checked ? [...s, id] : s.filter((x) => x !== id)))
+                    }}
+                  />
+                </td>
                 <td className="px-3 py-2 font-mono text-xs">{String(a.applicationId)}</td>
                 <td className="px-3 py-2">{String(a.fullName)}</td>
                 <td className="px-3 py-2">{String(a.partnerType)}</td>
@@ -86,6 +149,7 @@ export function AdminPartnerApplicationDetail() {
   const [commission, setCommission] = useState('10')
   const [question, setQuestion] = useState('')
   const [rejectReason, setRejectReason] = useState('Other')
+  const [note, setNote] = useState('')
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
@@ -103,13 +167,23 @@ export function AdminPartnerApplicationDetail() {
       <h1 className="text-xl font-semibold text-brand-navy">{String(app.applicationId)}</h1>
       <p className="text-sm capitalize">Status: {String(app.status).replace(/_/g, ' ')}</p>
       <dl className="grid gap-2 sm:grid-cols-2 text-sm">
-        {['fullName', 'email', 'phone', 'city', 'state', 'partnerType', 'organisationName', 'audienceSize', 'promotePlan'].map((k) => (
+        {['fullName', 'email', 'phone', 'city', 'state', 'partnerType', 'organisationName', 'audienceSize', 'promotePlan', 'websiteUrl', 'instagram', 'youtube', 'linkedin'].map((k) => (
           <div key={k} className={k === 'promotePlan' ? 'sm:col-span-2' : ''}>
             <dt className="text-xs text-slate-gray">{k}</dt>
             <dd>{String(app[k] || '—')}</dd>
           </div>
         ))}
       </dl>
+      {Array.isArray(app.history) ? (
+        <div className="rounded-xl border bg-white p-3 text-xs space-y-1">
+          <p className="font-medium text-sm">Activity</p>
+          {(app.history as Array<Record<string, unknown>>).map((h, i) => (
+            <p key={i}>
+              {String(h.action)} · {String(h.by)} · {String(h.note || h.message || '')}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
       <div className="flex flex-wrap gap-2 border-t pt-4">
         <div className="flex items-center gap-2">
@@ -154,6 +228,20 @@ export function AdminPartnerApplicationDetail() {
           }}
         >
           Request more info
+        </button>
+      </div>
+      <div className="border-t pt-4 space-y-2">
+        <textarea className="w-full rounded border px-3 py-2 text-sm" rows={2} placeholder="Internal note…" value={note} onChange={(e) => setNote(e.target.value)} />
+        <button
+          type="button"
+          className="rounded border px-3 py-1.5 text-sm"
+          onClick={async () => {
+            await adminPartnerService.addNote(String(app.id), note)
+            setNotice('Note saved')
+            setNote('')
+          }}
+        >
+          Save note
         </button>
       </div>
     </div>
@@ -262,15 +350,21 @@ export function AdminPartnersList() {
 
 export function AdminPartnerDetail() {
   const { id } = useParams()
-  const [tab, setTab] = useState<'profile' | 'links' | 'coupons' | 'performance'>('profile')
+  const [tab, setTab] = useState<'profile' | 'links' | 'coupons' | 'performance' | 'payouts' | 'activity'>('profile')
   const [data, setData] = useState<Awaited<ReturnType<typeof adminPartnerService.getPartner>> | null>(null)
   const [linkForm, setLinkForm] = useState({ label: '', linkType: 'site_wide', trainingId: '', customSlug: '' })
   const [couponForm, setCouponForm] = useState({ code: '', discountType: 'percent', discountValue: '10' })
   const [trainings, setTrainings] = useState<Array<{ id: string; title: string }>>([])
+  const [status, setStatus] = useState('')
+  const [notes, setNotes] = useState('')
 
   const reload = () => {
     if (!id) return
-    adminPartnerService.getPartner(id).then(setData).catch(() => setData(null))
+    adminPartnerService.getPartner(id).then((r) => {
+      setData(r)
+      setStatus(String(r.partner.status || ''))
+      setNotes(String(r.partner.notes || ''))
+    }).catch(() => setData(null))
   }
   useEffect(() => {
     reload()
@@ -286,34 +380,71 @@ export function AdminPartnerDetail() {
         {String(p.fullName)} · {String(p.partnerCode)}
       </h1>
       <div className="flex flex-wrap gap-2 text-sm">
-        {(['profile', 'links', 'coupons', 'performance'] as const).map((t) => (
+        {(['profile', 'links', 'coupons', 'performance', 'payouts', 'activity'] as const).map((t) => (
           <button key={t} type="button" onClick={() => setTab(t)} className={`rounded-full px-3 py-1 capitalize ${tab === t ? 'bg-brand-navy text-white' : 'bg-gray-100'}`}>
             {t}
           </button>
         ))}
       </div>
       {tab === 'profile' ? (
-        <div className="rounded-xl border bg-white p-4 text-sm space-y-1">
+        <div className="rounded-xl border bg-white p-4 text-sm space-y-3">
           <p>Email: {String(p.email)}</p>
           <p>Phone: {String(p.phone)}</p>
           <p>Type: {String(p.partnerType)}</p>
           <p>Commission: {String(p.commissionPercent)}%</p>
-          <p>Status: {String(p.status)}</p>
           <p>City/State: {String(p.city)} / {String(p.state)}</p>
+          <label className="block text-xs">Status</label>
+          <select className="rounded border px-2 py-1 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+            {['active', 'suspended', 'inactive'].map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          <label className="block text-xs">Internal notes</label>
+          <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <button
+            type="button"
+            className="rounded bg-brand-accent px-3 py-1.5 text-sm text-white"
+            onClick={async () => {
+              await adminPartnerService.updatePartner(String(id), { status, notes })
+              reload()
+            }}
+          >
+            Save profile
+          </button>
         </div>
       ) : null}
       {tab === 'performance' ? (
         <div className="grid gap-3 sm:grid-cols-4">
-          {Object.entries(data.stats || {}).map(([k, v]) => (
+          {Object.entries(data.stats || {}).filter(([, v]) => typeof v !== 'object').map(([k, v]) => (
             <div key={k} className="rounded-xl border bg-white p-3">
               <p className="text-xs text-slate-gray">{k}</p>
               <p className="font-bold">
-                {typeof v === 'number' && (k.toLowerCase().includes('earn') || k.toLowerCase().includes('payout') || k.toLowerCase().includes('paid'))
+                {typeof v === 'number' && (k.toLowerCase().includes('earn') || k.toLowerCase().includes('payout') || k.toLowerCase().includes('paid') || k.toLowerCase().includes('sales'))
                   ? `₹${v}`
                   : String(v)}
               </p>
             </div>
           ))}
+        </div>
+      ) : null}
+      {tab === 'payouts' ? (
+        <div className="space-y-2">
+          {(data.payouts || []).map((po) => (
+            <div key={String(po.payoutId)} className="rounded border bg-white p-3 text-xs">
+              {String(po.payoutId)} · ₹{Number(po.amount || 0)} · {String(po.date)} · {String(po.transactionRef)}
+            </div>
+          ))}
+          {!data.payouts?.length ? <p className="text-sm text-slate-gray">No payouts yet.</p> : null}
+        </div>
+      ) : null}
+      {tab === 'activity' ? (
+        <div className="space-y-1 text-xs">
+          {(data.activity || []).map((a, i) => (
+            <div key={i} className="rounded border bg-white px-3 py-2">
+              {String(a.createdAt)} · {String(a.action)}
+            </div>
+          ))}
+          {!data.activity?.length ? <p className="text-sm text-slate-gray">No activity logged yet.</p> : null}
         </div>
       ) : null}
       {tab === 'links' ? (

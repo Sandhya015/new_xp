@@ -7,20 +7,25 @@ from __future__ import annotations
 from datetime import datetime
 
 from bson import ObjectId
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from app.partner_program import (
     append_app_history,
     applications_coll,
-    attach_attribution_to_order_doc,
     can_apply,
+    check_status_rate_limit,
     commissions_coll,
     coupons_coll,
     create_application,
+    enhanced_partner_stats,
+    generate_payout_receipt_pdf,
     get_partner_by_user_id,
     links_coll,
+    list_partner_notifications,
+    mark_notifications_read,
     partner_stats,
+    partner_kit_coll,
     payouts_coll,
     partners_coll,
     record_click,
@@ -29,8 +34,8 @@ from app.partner_program import (
     serialize_coupon,
     serialize_link,
     serialize_partner,
-    sign_reply_token,
     verify_partner_otp,
+    verify_recaptcha,
     verify_reply_token,
     otp_is_verified,
     PARTNER_TYPES,
@@ -42,6 +47,7 @@ from app.partner_program import (
 from app.activity_log import client_ip, client_user_agent
 from app.email_smtp import send_email
 from app.db import get_db, get_users_collection, get_orders_collection, get_courses_collection
+from io import BytesIO
 
 partners_bp = Blueprint("partners", __name__)
 
@@ -65,11 +71,14 @@ def _partner_required():
 
 @partners_bp.route("/meta", methods=["GET"])
 def partners_meta():
+    site_key = (current_app.config.get("RECAPTCHA_SITE_KEY") or "").strip()
     return jsonify({
         "partnerTypes": PARTNER_TYPES,
         "audienceSizes": AUDIENCE_SIZES,
         "hearAbout": HEAR_ABOUT,
         "termsPath": "/terms",
+        "recaptchaSiteKey": site_key,
+        "recaptchaEnabled": bool(site_key),
     })
 
 
@@ -104,6 +113,8 @@ def partners_apply():
     if get_db() is None:
         return jsonify({"error": "Database not configured"}), 503
     data = request.get_json() or {}
+    if not verify_recaptcha(data.get("recaptchaToken") or "", current_app.config):
+        return jsonify({"error": "Security check failed. Please refresh and try again."}), 400
     # Required fields
     name = (data.get("fullName") or "").strip()
     email = (data.get("email") or "").strip().lower()
@@ -119,13 +130,14 @@ def partners_apply():
     if not data.get("agreedTerms"):
         return jsonify({"error": "You must agree to the Partner Terms & Conditions."}), 400
 
-    # OTP verify
+    # OTP verify — email required; phone OTP optional until SMS OTP is live
     email_vid = data.get("emailVerificationId") or ""
     phone_vid = data.get("phoneVerificationId") or ""
     if not otp_is_verified(email_vid, email, "email"):
         return jsonify({"error": "Please verify your email with OTP."}), 400
-    if not otp_is_verified(phone_vid, phone, "phone"):
-        return jsonify({"error": "Please verify your phone with OTP."}), 400
+    # Phone is still collected; only enforce phone OTP when a verification id is sent
+    if phone_vid and not otp_is_verified(phone_vid, phone, "phone"):
+        return jsonify({"error": "Phone OTP verification failed. Leave it blank or verify correctly."}), 400
 
     ip = client_ip(request)
     block = can_apply(email=email, phone=phone, ip=ip)
@@ -175,6 +187,9 @@ def partners_status():
     email = (data.get("email") or "").strip().lower()
     if not ref or not email:
         return jsonify({"error": "Reference number and email are required."}), 400
+    lim = check_status_rate_limit(email)
+    if lim:
+        return jsonify({"error": lim}), 429
     doc = applications_coll().find_one({"applicationId": ref, "email": email})
     if not doc:
         return jsonify({"error": "We couldn't find an application with these details."}), 404
@@ -227,8 +242,39 @@ def partner_me():
     res = _partner_required()
     if not isinstance(res, dict):
         return res
-    stats = partner_stats(str(res["_id"]))
-    return jsonify({"partner": serialize_partner(res), "stats": stats})
+    stats = enhanced_partner_stats(str(res["_id"]))
+    unread = 0
+    try:
+        from app.partner_program import partner_notifications_coll
+        unread = partner_notifications_coll().count_documents({"partnerId": str(res["_id"]), "read": False})
+    except Exception:
+        pass
+    return jsonify({
+        "partner": serialize_partner(res),
+        "stats": stats,
+        "unreadNotifications": unread,
+    })
+
+
+@partners_bp.route("/me/notifications", methods=["GET"])
+@jwt_required()
+def partner_notifications():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    items = list_partner_notifications(str(res["_id"]))
+    return jsonify({"items": items})
+
+
+@partners_bp.route("/me/notifications/read", methods=["POST"])
+@jwt_required()
+def partner_notifications_read():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    data = request.get_json() or {}
+    mark_notifications_read(str(res["_id"]), all_ids=bool(data.get("all", True)), ids=data.get("ids") or [])
+    return jsonify({"ok": True})
 
 
 @partners_bp.route("/me/links", methods=["GET"])
@@ -290,7 +336,7 @@ def partner_my_referrals():
             "commissionStatus": c.get("status") or "",
             "status": "successful",
         })
-    return jsonify({"items": items, "stats": partner_stats(pid)})
+    return jsonify({"items": items, "stats": enhanced_partner_stats(pid)})
 
 
 @partners_bp.route("/me/payouts", methods=["GET"])
@@ -313,6 +359,26 @@ def partner_my_payouts():
             "date": created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else "",
         })
     return jsonify({"items": items, "stats": partner_stats(pid)})
+
+
+@partners_bp.route("/me/payouts/<payout_id>/receipt", methods=["GET"])
+@jwt_required()
+def partner_payout_receipt(payout_id):
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    p = payouts_coll().find_one({"payoutId": payout_id, "partnerId": str(res["_id"])})
+    if not p:
+        return jsonify({"error": "Payout not found"}), 404
+    pdf = generate_payout_receipt_pdf(p, res)
+    if not pdf:
+        return jsonify({"error": "Could not generate receipt"}), 500
+    return send_file(
+        BytesIO(pdf),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"{payout_id}.pdf",
+    )
 
 
 @partners_bp.route("/me/profile", methods=["PUT", "PATCH"])
@@ -351,33 +417,118 @@ def partner_update_profile():
     return jsonify({"partner": serialize_partner(updated)})
 
 
+@partners_bp.route("/me/password", methods=["POST"])
+@jwt_required()
+def partner_change_password():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    data = request.get_json() or {}
+    current = data.get("currentPassword") or ""
+    new_pw = data.get("newPassword") or ""
+    if len(new_pw) < 8:
+        return jsonify({"error": "Password must be at least 8 characters."}), 400
+    from werkzeug.security import check_password_hash, generate_password_hash
+    uid = res.get("userId")
+    if not uid or not ObjectId.is_valid(str(uid)):
+        return jsonify({"error": "Account not found"}), 404
+    users = get_users_collection()
+    u = users.find_one({"_id": ObjectId(str(uid))})
+    if not u or not check_password_hash(u.get("password") or "", current):
+        return jsonify({"error": "Current password is incorrect."}), 400
+    users.update_one({"_id": u["_id"]}, {"$set": {"password": generate_password_hash(new_pw), "forcePasswordChange": False}})
+    return jsonify({"ok": True, "message": "Password updated."})
+
+
+@partners_bp.route("/me/support", methods=["POST"])
+@jwt_required()
+def partner_support_ticket():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    data = request.get_json() or {}
+    subject = (data.get("subject") or "").strip()[:200]
+    message = (data.get("message") or "").strip()[:4000]
+    if not subject or not message:
+        return jsonify({"error": "Subject and message are required."}), 400
+    try:
+        from app.db import get_db as _gdb
+        db = _gdb()
+        ticket = {
+            "source": "partner_portal",
+            "partnerId": str(res["_id"]),
+            "partnerCode": res.get("partnerCode"),
+            "email": res.get("email"),
+            "name": res.get("fullName"),
+            "subject": subject,
+            "message": message,
+            "status": "open",
+            "createdAt": datetime.utcnow(),
+        }
+        if db is not None:
+            ins = db["tickets"].insert_one(ticket)
+            ticket_id = str(ins.inserted_id)
+        else:
+            ticket_id = ""
+    except Exception:
+        ticket_id = ""
+        current_app.logger.exception("partner support ticket insert failed")
+    support = (current_app.config.get("SUPPORT_EMAIL") or current_app.config.get("MAIL_DEFAULT_SENDER") or "partners@xpertintern.com").strip()
+    send_email(
+        current_app.config,
+        support,
+        f"[Partner] {subject} — {res.get('partnerCode')}",
+        f"<p>From {res.get('fullName')} ({res.get('email')})</p><p>{message}</p>",
+        text_body=message,
+    )
+    return jsonify({"ok": True, "ticketId": ticket_id, "message": "Support request submitted."})
+
+
 @partners_bp.route("/me/marketing-kit", methods=["GET"])
 @jwt_required()
 def partner_marketing_kit():
     res = _partner_required()
     if not isinstance(res, dict):
         return res
-    # Static starter kit entries; admin can expand later via DB
     main_link = links_coll().find_one({"partnerId": str(res["_id"]), "active": True}, sort=[("createdAt", 1)])
     link_url = (main_link or {}).get("url") or ""
+    db_items = []
+    try:
+        for k in partner_kit_coll().find({"active": True}).sort("sortOrder", 1).limit(50):
+            db_items.append({
+                "id": str(k["_id"]),
+                "type": k.get("type") or "asset",
+                "title": k.get("title") or "",
+                "body": k.get("body") or "",
+                "url": k.get("url") or "",
+            })
+    except Exception:
+        pass
+    default_items = [
+        {
+            "id": "caption-1",
+            "type": "caption",
+            "title": "WhatsApp / Instagram caption",
+            "body": (
+                f"Looking to upskill with industry-ready training? "
+                f"Join XpertIntern — practical programs with certificates. "
+                f"Apply here: {link_url or 'https://www.xpertintern.com'}"
+            ),
+        },
+        {
+            "id": "howto",
+            "type": "guide",
+            "title": "How to promote XpertIntern",
+            "body": "Share your unique link or coupon. Commission is tracked automatically when students enroll successfully.",
+        },
+        {
+            "id": "email-blurb",
+            "type": "caption",
+            "title": "Email intro",
+            "body": f"Hi! I wanted to share XpertIntern's skill programs — great for career readiness. {link_url}",
+        },
+    ]
     return jsonify({
-        "items": [
-            {
-                "id": "caption-1",
-                "type": "caption",
-                "title": "WhatsApp / Instagram caption",
-                "body": (
-                    f"Looking to upskill with industry-ready training? "
-                    f"Join XpertIntern — practical programs with certificates. "
-                    f"Apply here: {link_url or 'https://www.xpertintern.com'}"
-                ),
-            },
-            {
-                "id": "howto",
-                "type": "guide",
-                "title": "How to promote XpertIntern",
-                "body": "Share your unique link or coupon. Commission is tracked automatically when students enroll successfully.",
-            },
-        ],
+        "items": db_items or default_items,
         "mainReferralUrl": link_url,
     })

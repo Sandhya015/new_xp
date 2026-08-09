@@ -88,12 +88,18 @@ export function About() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-10">
+              <div className="mt-10 flex flex-wrap gap-3">
                 <Link
                   to="/training"
                   className="inline-flex items-center rounded-lg bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600 transition"
                 >
                   View our programs →
+                </Link>
+                <Link
+                  to="/apply-partner"
+                  className="inline-flex items-center rounded-lg border border-brand-accent px-5 py-2.5 text-sm font-semibold text-brand-accent hover:bg-brand-light-bg transition"
+                >
+                  Become an Affiliate Partner
                 </Link>
               </div>
             </div>

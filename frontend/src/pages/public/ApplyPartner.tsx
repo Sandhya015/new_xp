@@ -6,7 +6,13 @@ import { INDIAN_STATES_UTS } from '@/constants/indianRegions'
 
 export function ApplyPartner() {
   const navigate = useNavigate()
-  const [meta, setMeta] = useState<{ partnerTypes: string[]; audienceSizes: string[]; hearAbout: string[] } | null>(null)
+  const [meta, setMeta] = useState<{
+    partnerTypes: string[]
+    audienceSizes: string[]
+    hearAbout: string[]
+    recaptchaSiteKey?: string
+    recaptchaEnabled?: boolean
+  } | null>(null)
   const [form, setForm] = useState({
     fullName: '',
     email: '',
@@ -29,47 +35,104 @@ export function ApplyPartner() {
     agreedTerms: false,
   })
   const [emailVid, setEmailVid] = useState('')
-  const [phoneVid, setPhoneVid] = useState('')
   const [emailVerified, setEmailVerified] = useState(false)
-  const [phoneVerified, setPhoneVerified] = useState(false)
   const [emailOtp, setEmailOtp] = useState('')
-  const [phoneOtp, setPhoneOtp] = useState('')
+  const [emailOtpSent, setEmailOtpSent] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null)
   const [faqOpen, setFaqOpen] = useState<number | null>(0)
 
   useEffect(() => {
-    partnerService.meta().then(setMeta).catch(() => setMeta({ partnerTypes: [], audienceSizes: [], hearAbout: [] }))
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(null), 4000)
+    return () => window.clearTimeout(t)
+  }, [toast])
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = window.setTimeout(() => setResendCooldown((s) => s - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [resendCooldown])
+
+  useEffect(() => {
+    document.title = 'Become an Affiliate Partner | XpertIntern'
+    const ensureMeta = (name: string, content: string, attr: 'name' | 'property' = 'name') => {
+      let el = document.querySelector(`meta[${attr}="${name}"]`) as HTMLMetaElement | null
+      if (!el) {
+        el = document.createElement('meta')
+        el.setAttribute(attr, name)
+        document.head.appendChild(el)
+      }
+      el.content = content
+    }
+    ensureMeta('description', 'Join the XpertIntern Affiliate Partner program. Promote university-aligned trainings and earn commission on successful enrollments.')
+    ensureMeta('og:title', 'XpertIntern Affiliate Partner Program', 'property')
+    ensureMeta('og:description', 'Apply to become an XpertIntern affiliate partner and earn on successful student enrollments.', 'property')
+    partnerService.meta().then((m) => {
+      setMeta(m)
+      if (m.recaptchaEnabled && m.recaptchaSiteKey) {
+        const id = 'recaptcha-v3'
+        if (!document.getElementById(id)) {
+          const s = document.createElement('script')
+          s.id = id
+          s.src = `https://www.google.com/recaptcha/api.js?render=${m.recaptchaSiteKey}`
+          s.async = true
+          document.head.appendChild(s)
+        }
+      }
+    }).catch(() => setMeta({ partnerTypes: [], audienceSizes: [], hearAbout: [] }))
   }, [])
 
   const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }))
 
-  const sendOtp = async (channel: 'email' | 'phone') => {
+  const runRecaptcha = async (): Promise<string> => {
+    const key = meta?.recaptchaSiteKey
+    if (!key || !meta?.recaptchaEnabled) return ''
+    const g = (window as unknown as { grecaptcha?: { execute: (k: string, o: { action: string }) => Promise<string> } }).grecaptcha
+    if (!g?.execute) return ''
+    try {
+      return await g.execute(key, { action: 'partner_apply' })
+    } catch {
+      return ''
+    }
+  }
+
+  const sendEmailOtp = async () => {
     setError(null)
+    if (!form.email.trim()) {
+      setError('Enter your email first.')
+      return
+    }
+    if (resendCooldown > 0) return
     setBusy(true)
     try {
-      const target = channel === 'email' ? form.email : form.phone
-      const r = await partnerService.sendOtp(channel, target)
-      if (channel === 'email') setEmailVid(r.verificationId)
-      else setPhoneVid(r.verificationId)
+      const r = await partnerService.sendOtp('email', form.email)
+      setEmailVid(r.verificationId)
+      setEmailOtpSent(true)
+      setResendCooldown(30)
+      setToast({ message: `OTP sent to ${form.email.trim()}. Check your inbox.`, tone: 'success' })
     } catch (e: unknown) {
-      setError(apiErr(e, 'Could not send OTP'))
+      const msg = apiErr(e, 'Could not send OTP')
+      setError(msg)
+      setToast({ message: msg, tone: 'error' })
     } finally {
       setBusy(false)
     }
   }
 
-  const verifyOtp = async (channel: 'email' | 'phone') => {
+  const verifyEmailOtp = async () => {
     setBusy(true)
     setError(null)
     try {
-      const vid = channel === 'email' ? emailVid : phoneVid
-      const otp = channel === 'email' ? emailOtp : phoneOtp
-      await partnerService.verifyOtp(vid, otp)
-      if (channel === 'email') setEmailVerified(true)
-      else setPhoneVerified(true)
+      await partnerService.verifyOtp(emailVid, emailOtp)
+      setEmailVerified(true)
+      setToast({ message: 'Email verified successfully.', tone: 'success' })
     } catch (e: unknown) {
-      setError(apiErr(e, 'OTP verification failed'))
+      const msg = apiErr(e, 'OTP verification failed')
+      setError(msg)
+      setToast({ message: msg, tone: 'error' })
     } finally {
       setBusy(false)
     }
@@ -77,8 +140,12 @@ export function ApplyPartner() {
 
   const submit = async () => {
     setError(null)
-    if (!emailVerified || !phoneVerified) {
-      setError('Please verify email and phone with OTP before submitting.')
+    if (!form.phone.trim()) {
+      setError('Phone number is required.')
+      return
+    }
+    if (!emailVerified) {
+      setError('Please verify your email with OTP before submitting.')
       return
     }
     if (!form.agreedTerms) {
@@ -91,10 +158,11 @@ export function ApplyPartner() {
     }
     setBusy(true)
     try {
+      const recaptchaToken = await runRecaptcha()
       const res = await partnerService.apply({
         ...form,
         emailVerificationId: emailVid,
-        phoneVerificationId: phoneVid,
+        recaptchaToken: recaptchaToken || undefined,
       })
       navigate('/apply-partner/thanks', { state: { applicationId: res.applicationId, name: form.fullName } })
     } catch (e: unknown) {
@@ -114,6 +182,16 @@ export function ApplyPartner() {
 
   return (
     <div className="bg-white">
+      {toast ? (
+        <div
+          className={`fixed top-4 right-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
+            toast.tone === 'success' ? 'bg-emerald-700 text-white' : 'bg-red-600 text-white'
+          }`}
+          role="status"
+        >
+          {toast.message}
+        </div>
+      ) : null}
       <section className="bg-gradient-to-br from-brand-navy via-slate-800 to-brand-navy px-4 py-16 text-white">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-3xl font-bold sm:text-4xl">Earn with XpertIntern. Become an Affiliate Partner.</h1>
@@ -154,14 +232,35 @@ export function ApplyPartner() {
               <div>
                 <Field label="Email *" value={form.email} onChange={(v) => set('email', v)} disabled={emailVerified} />
                 {!emailVerified ? (
-                  <div className="mt-1 flex gap-2">
-                    <button type="button" disabled={busy || !form.email} onClick={() => void sendOtp('email')} className="text-xs text-brand-accent">
-                      Send OTP
-                    </button>
-                    <input className="flex-1 rounded border px-2 py-1 text-xs" placeholder="OTP" value={emailOtp} onChange={(e) => setEmailOtp(e.target.value)} />
-                    <button type="button" disabled={busy} onClick={() => void verifyOtp('email')} className="text-xs font-semibold text-emerald-700">
-                      Verify
-                    </button>
+                  <div className="mt-1 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={busy || !form.email || resendCooldown > 0}
+                        onClick={() => void sendEmailOtp()}
+                        className="text-xs font-medium text-brand-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {resendCooldown > 0 ? `Resend OTP (${resendCooldown}s)` : emailOtpSent ? 'Resend OTP' : 'Send OTP'}
+                      </button>
+                      {emailOtpSent ? (
+                        <>
+                          <input
+                            className="flex-1 min-w-[6rem] rounded border px-2 py-1 text-xs"
+                            placeholder="Enter OTP"
+                            value={emailOtp}
+                            onChange={(e) => setEmailOtp(e.target.value)}
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                          />
+                          <button type="button" disabled={busy || !emailOtp.trim()} onClick={() => void verifyEmailOtp()} className="text-xs font-semibold text-emerald-700 disabled:opacity-50">
+                            Verify
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                    {emailOtpSent ? (
+                      <p className="text-[11px] text-emerald-700">OTP sent — check your email (and spam folder).</p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
@@ -170,22 +269,8 @@ export function ApplyPartner() {
                 )}
               </div>
               <div>
-                <Field label="Phone *" value={form.phone} onChange={(v) => set('phone', v)} disabled={phoneVerified} />
-                {!phoneVerified ? (
-                  <div className="mt-1 flex gap-2">
-                    <button type="button" disabled={busy || !form.phone} onClick={() => void sendOtp('phone')} className="text-xs text-brand-accent">
-                      Send OTP
-                    </button>
-                    <input className="flex-1 rounded border px-2 py-1 text-xs" placeholder="OTP" value={phoneOtp} onChange={(e) => setPhoneOtp(e.target.value)} />
-                    <button type="button" disabled={busy} onClick={() => void verifyOtp('phone')} className="text-xs font-semibold text-emerald-700">
-                      Verify
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> Verified
-                  </p>
-                )}
+                <Field label="Phone *" value={form.phone} onChange={(v) => set('phone', v)} />
+                <p className="mt-1 text-[11px] text-slate-gray">Mobile OTP verification is not required yet.</p>
               </div>
               <Field label="City *" value={form.city} onChange={(v) => set('city', v)} />
               <div>

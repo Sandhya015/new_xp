@@ -5,6 +5,7 @@ import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
 import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 import type { User as AuthUser } from '@/store/authStore'
+import { getPartnerRef } from '@/lib/partnerRef'
 
 import { REGISTRATION_UNIVERSITIES_LIST } from '@/constants/registrationUniversities'
 import {
@@ -359,6 +360,7 @@ export function Register() {
         courseOther: studentForm.course === OTHER_OPTION_VALUE ? studentForm.courseOther.trim() : undefined,
         acceptTerms: true,
         role: 'student',
+        partnerRef: getPartnerRef() || undefined,
       })
       if (res.verificationId) {
         setVerificationId(res.verificationId)

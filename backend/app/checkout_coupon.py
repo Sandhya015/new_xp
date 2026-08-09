@@ -103,8 +103,20 @@ def resolve_checkout_coupon(
     row = _find_row_in_list([x for x in course_rows if isinstance(x, dict)], cu)
     if row is None:
         row = _find_row_in_list([x for x in global_rows if isinstance(x, dict)], cu)
+
+    # Partner affiliate coupons (after course/global catalog coupons)
     if row is None:
-        return None, "Invalid or expired coupon code."
+        try:
+            from app.partner_program import partner_coupon_to_pricing
+            cid0 = str(course.get("_id") or "")
+            pricing_p, err_p = partner_coupon_to_pricing(cu, course_id=cid0)
+            if pricing_p:
+                return pricing_p, None
+            if err_p and "not valid for this training" in (err_p or "").lower():
+                return None, err_p
+            return None, err_p or "Invalid or expired coupon code."
+        except Exception:
+            return None, "Invalid or expired coupon code."
 
     if not _row_active_and_dates_ok(row):
         return None, "Invalid or expired coupon code."
@@ -245,7 +257,14 @@ def lookup_coupon_pricing_only(code: str, *, course: dict, settings_doc: dict) -
     row = _find_row_in_list([x for x in course_rows if isinstance(x, dict)], cu)
     if row is None:
         row = _find_row_in_list([x for x in global_rows if isinstance(x, dict)], cu)
-    if row is None or not _row_active_and_dates_ok(row):
+    if row is None:
+        try:
+            from app.partner_program import partner_coupon_to_pricing
+            pricing_p, _ = partner_coupon_to_pricing(cu, course_id=str(course.get("_id") or ""))
+            return pricing_p
+        except Exception:
+            return None
+    if not _row_active_and_dates_ok(row):
         return None
     pricing = _coupon_row_to_pricing_dict(row)
     if not pricing.get("percentOff") and not pricing.get("rupeesOff"):

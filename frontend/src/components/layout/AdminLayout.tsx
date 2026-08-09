@@ -26,6 +26,7 @@ import {
   Package,
   UsersRound,
 } from 'lucide-react'
+import { adminPartnerService } from '@/services/partnerService'
 
 const SIDEBAR_LINKS = [
   { to: '/admin', label: 'Dashboard', icon: Home },
@@ -35,7 +36,7 @@ const SIDEBAR_LINKS = [
   { to: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
   { to: '/admin/students', label: 'Students', icon: GraduationCap },
-  { to: '/admin/partners', label: 'Partners', icon: UsersRound },
+  { to: '/admin/partners', label: 'Partners', icon: UsersRound, expandable: true as const },
   { to: '/admin/companies', label: 'Companies', icon: Building2, badge: 3 },
   { to: '/admin/internships', label: 'Internships', icon: Briefcase, badge: 2 },
   { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
@@ -44,6 +45,12 @@ const SIDEBAR_LINKS = [
   { to: '/admin/help-faq', label: 'Help & FAQ', icon: HelpCircle },
   { to: '/admin/admins', label: 'Admins', icon: Shield },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
+]
+
+const PARTNER_SUBLINKS = [
+  { to: '/admin/partners', label: 'All partners', end: true },
+  { to: '/admin/partners/applications', label: 'Applications' },
+  { to: '/admin/partners/payouts', label: 'Payouts' },
 ]
 
 function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
@@ -89,15 +96,27 @@ export function AdminLayout() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
+  const [pendingApps, setPendingApps] = useState(0)
+  const [partnersOpen, setPartnersOpen] = useState(false)
   const path = location.pathname
   const breadcrumbs = getBreadcrumbs(path)
   const unreadNotifCount = 2
+  const onPartners = path.startsWith('/admin/partners')
 
   useEffect(() => {
     if (!token || !user || !isSuperAdminPanelUser(user)) {
       navigate('/admin/login', { replace: true })
     }
   }, [token, user, navigate])
+
+  useEffect(() => {
+    if (onPartners) setPartnersOpen(true)
+  }, [onPartners])
+
+  useEffect(() => {
+    if (!token || !user || !isSuperAdminPanelUser(user)) return
+    adminPartnerService.pendingMeta().then((m) => setPendingApps(m.pendingApplications || 0)).catch(() => setPendingApps(0))
+  }, [token, user, path])
 
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
@@ -175,28 +194,75 @@ export function AdminLayout() {
         </div>
         <nav className="flex-1 overflow-y-auto py-4">
           <ul className="space-y-0.5 px-2">
-            {SIDEBAR_LINKS.map(({ to, label, icon: Icon, badge }) => (
-              <li key={to}>
-                <NavLink
-                  to={to}
-                  end={to === '/admin'}
-                  onClick={closeSidebar}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
-                      isActive ? 'bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
-                    }`
-                  }
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  <span className="flex-1 min-w-0 truncate">{label}</span>
-                  {badge != null && badge > 0 && (
-                    <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">
-                      {badge}
-                    </span>
-                  )}
-                </NavLink>
-              </li>
-            ))}
+            {SIDEBAR_LINKS.map((item) => {
+              const { to, label, icon: Icon, badge } = item as typeof item & { badge?: number; expandable?: boolean }
+              const expandable = 'expandable' in item && item.expandable
+              if (expandable) {
+                return (
+                  <li key={to}>
+                    <button
+                      type="button"
+                      onClick={() => setPartnersOpen((o) => !o)}
+                      className={`flex w-full items-center gap-3 px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
+                        onPartners ? 'bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
+                      }`}
+                    >
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span className="flex-1 min-w-0 truncate text-left">{label}</span>
+                      {pendingApps > 0 ? (
+                        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">
+                          {pendingApps}
+                        </span>
+                      ) : null}
+                      <ChevronDown className={`h-4 w-4 shrink-0 transition ${partnersOpen || onPartners ? 'rotate-180' : ''}`} />
+                    </button>
+                    {(partnersOpen || onPartners) && (
+                      <ul className="mt-0.5 ml-4 space-y-0.5 border-l border-white/10 pl-2">
+                        {PARTNER_SUBLINKS.map((sub) => (
+                          <li key={sub.to + sub.label}>
+                            <NavLink
+                              to={sub.to}
+                              end={!!sub.end}
+                              onClick={closeSidebar}
+                              className={({ isActive }) =>
+                                `block rounded-lg px-3 py-1.5 text-sm ${isActive ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`
+                              }
+                            >
+                              {sub.label}
+                              {sub.to.includes('applications') && pendingApps > 0 ? (
+                                <span className="ml-2 text-amber-400">({pendingApps})</span>
+                              ) : null}
+                            </NavLink>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                )
+              }
+              return (
+                <li key={to}>
+                  <NavLink
+                    to={to}
+                    end={to === '/admin'}
+                    onClick={closeSidebar}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
+                        isActive ? 'bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
+                      }`
+                    }
+                  >
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="flex-1 min-w-0 truncate">{label}</span>
+                    {badge != null && badge > 0 && (
+                      <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">
+                        {badge}
+                      </span>
+                    )}
+                  </NavLink>
+                </li>
+              )
+            })}
           </ul>
         </nav>
         <div className="border-t border-white/10 p-4 space-y-0.5">
