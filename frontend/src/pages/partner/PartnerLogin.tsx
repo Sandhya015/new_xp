@@ -26,7 +26,7 @@ export function PartnerLogin() {
       }
       setSession(res.user, res.token, typeof res.expiresIn === 'number' ? res.expiresIn : undefined)
       if (res.user?.forcePasswordChange || res.forcePasswordChange) {
-        navigate('/change-password?forced=1', { replace: true })
+        navigate('/change-password?forced=1&next=/partner&from=partner', { replace: true })
         return
       }
       navigate('/partner', { replace: true })

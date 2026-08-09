@@ -23,11 +23,32 @@ export function ForcedChangePassword() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const loginPath =
+    user?.role === 'partner' ? '/partner/login' : user?.role === 'company' ? '/login' : '/login'
+
+  const homePathForRole = (role?: string) => {
+    if (role === 'partner') return '/partner'
+    if (role === 'company') return '/company'
+    if (role === 'admin') return '/admin'
+    return '/dashboard'
+  }
+
   if (!token) {
+    const loginFromQuery = searchParams.get('from')
+    const fallbackLogin =
+      loginFromQuery === 'partner'
+        ? '/partner/login'
+        : loginFromQuery === 'company'
+          ? '/login'
+          : '/login'
     return (
       <div className="min-h-[50vh] flex items-center justify-center p-6">
         <p className="text-sm text-slate-gray">
-          Please <Link to="/login" className="text-brand-accent font-semibold">sign in</Link> first.
+          Please{' '}
+          <Link to={fallbackLogin} className="text-brand-accent font-semibold">
+            sign in
+          </Link>{' '}
+          first.
         </p>
       </div>
     )
@@ -54,19 +75,20 @@ export function ForcedChangePassword() {
     }
     setBusy(true)
     try {
+      const roleBefore = user?.role
       const res = await authService.changePassword(current, next, confirm)
+      const updatedUser = (res.user || user) as typeof user
       if (res.token && res.user) {
         setSession(res.user as typeof user, res.token, res.expiresIn)
       } else if (user) {
         setSession({ ...user, forcePasswordChange: false }, token, undefined)
       }
+      const role = (updatedUser?.role || roleBefore || '') as string
       const nextPath = searchParams.get('next')
       if (nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')) {
         navigate(nextPath, { replace: true })
-      } else if (user?.role === 'company') {
-        navigate('/company', { replace: true })
       } else {
-        navigate('/dashboard', { replace: true })
+        navigate(homePathForRole(role), { replace: true })
       }
     } catch (err: unknown) {
       const msg =
@@ -84,8 +106,10 @@ export function ForcedChangePassword() {
       <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
         <h1 className="text-xl font-bold text-brand-navy">Change your password</h1>
         <p className="mt-2 text-sm text-slate-gray">
-          Your password was reset by support. For security you must choose a new password before continuing
-          {user?.email ? ` as ${user.email}` : ''}.
+          {user?.role === 'partner'
+            ? 'For security, set a new password before entering the Partner Portal'
+            : 'Your password was reset by support. For security you must choose a new password before continuing'}
+          {user?.email ? ` (${user.email})` : ''}.
         </p>
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <label className="block text-sm">
@@ -145,7 +169,7 @@ export function ForcedChangePassword() {
           className="mt-4 w-full text-center text-sm text-slate-gray hover:underline"
           onClick={() => {
             logout()
-            navigate('/login', { replace: true })
+            navigate(loginPath, { replace: true })
           }}
         >
           Sign out
