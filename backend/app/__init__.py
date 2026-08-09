@@ -161,6 +161,8 @@ def create_app(config_class=None):
     from app.routes.reviews import reviews_bp
     from app.routes.settings_public import settings_public_bp
     from app.routes.masters import masters_bp
+    from app.routes.partners import partners_bp
+    from app.routes.partners_admin import partners_admin_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -172,6 +174,8 @@ def create_app(config_class=None):
     app.register_blueprint(verify_public_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(admin_students_bp, url_prefix="/api/admin")
+    app.register_blueprint(partners_admin_bp, url_prefix="/api/admin")
+    app.register_blueprint(partners_bp, url_prefix="/api/partners")
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
     app.register_blueprint(visitor_bp, url_prefix="/api")
     app.register_blueprint(internship_bp, url_prefix="/api/internship")

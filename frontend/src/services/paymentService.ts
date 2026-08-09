@@ -2,6 +2,7 @@ import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
 import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
+import { getPartnerRef } from '@/lib/partnerRef'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
 api.interceptors.request.use(async (config) => {
@@ -79,6 +80,7 @@ export const paymentService = {
       billingSnapshot?: Record<string, string | undefined>
       shippingSameAsProfile?: boolean
       shippingAddress?: Record<string, string | undefined>
+      partnerRef?: string
     },
   ): Promise<PaymentCreateOrderResponse> {
     const { data } = await api.post<PaymentCreateOrderResponse>('/api/payments/create-order', {
@@ -90,6 +92,7 @@ export const paymentService = {
       billingSnapshot: opts?.billingSnapshot,
       shippingSameAsProfile: opts?.shippingSameAsProfile,
       shippingAddress: opts?.shippingAddress,
+      partnerRef: opts?.partnerRef || getPartnerRef() || undefined,
     })
     return data
   },

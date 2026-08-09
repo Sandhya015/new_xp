@@ -45,6 +45,29 @@ import { StudentList } from './pages/admin/StudentList'
 import { StudentDetail } from './pages/admin/StudentDetail'
 import { CertificateUpload } from './pages/admin/CertificateUpload'
 import { BulkCertificateHistory } from './pages/admin/BulkCertificateHistory'
+import { PartnerLayout } from './components/layout/PartnerLayout'
+import { PartnerLogin } from './pages/partner/PartnerLogin'
+import {
+  PartnerOverview,
+  PartnerLinks,
+  PartnerCoupons,
+  PartnerReferrals,
+  PartnerPayouts,
+  PartnerProfile,
+  PartnerMarketing,
+  PartnerSupport,
+} from './pages/partner/PartnerPages'
+import {
+  AdminPartnerApplications,
+  AdminPartnerApplicationDetail,
+  AdminPartnersList,
+  AdminPartnerDetail,
+  AdminPartnerPayouts,
+} from './pages/admin/PartnerAdminPages'
+import { ApplyPartner } from './pages/public/ApplyPartner'
+import { ApplyPartnerThanks } from './pages/public/ApplyPartnerThanks'
+import { ApplyPartnerStatus } from './pages/public/ApplyPartnerStatus'
+import { ApplyPartnerReply } from './pages/public/ApplyPartnerReply'
 import { LeadTracker } from './pages/admin/LeadTracker'
 import { LeadDetail } from './pages/admin/LeadDetail'
 import { PaymentList } from './pages/admin/PaymentList'
@@ -99,6 +122,17 @@ function App() {
         <Route path="notifications" element={<CompanyNotifications />} />
         <Route path="support" element={<CompanySupport />} />
       </Route>
+      <Route path="/partner/login" element={<PartnerLogin />} />
+      <Route path="/partner" element={<PartnerLayout />}>
+        <Route index element={<PartnerOverview />} />
+        <Route path="links" element={<PartnerLinks />} />
+        <Route path="coupons" element={<PartnerCoupons />} />
+        <Route path="referrals" element={<PartnerReferrals />} />
+        <Route path="payouts" element={<PartnerPayouts />} />
+        <Route path="profile" element={<PartnerProfile />} />
+        <Route path="marketing" element={<PartnerMarketing />} />
+        <Route path="support" element={<PartnerSupport />} />
+      </Route>
       {/* Admin panel: no navbar/footer */}
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<AdminDashboard />} />
@@ -110,6 +144,11 @@ function App() {
         <Route path="students/:id" element={<StudentDetail />} />
         <Route path="certificates" element={<CertificateUpload />} />
         <Route path="certificates/bulk-history" element={<BulkCertificateHistory />} />
+        <Route path="partners" element={<AdminPartnersList />} />
+        <Route path="partners/applications" element={<AdminPartnerApplications />} />
+        <Route path="partners/applications/:id" element={<AdminPartnerApplicationDetail />} />
+        <Route path="partners/payouts" element={<AdminPartnerPayouts />} />
+        <Route path="partners/:id" element={<AdminPartnerDetail />} />
         <Route path="leads" element={<LeadTracker />} />
         <Route path="leads/:id" element={<LeadDetail />} />
         <Route path="payments" element={<PaymentList />} />
@@ -156,6 +195,11 @@ function App() {
             <Route path="/partners/companies" element={<LegalPlaceholder title="Our Partner Companies" />} />
             <Route path="/careers" element={<LegalPlaceholder title="Careers" />} />
             <Route path="/success-stories" element={<LegalPlaceholder title="Success Stories" />} />
+            <Route path="/apply-partner" element={<ApplyPartner />} />
+            <Route path="/apply-partner/thanks" element={<ApplyPartnerThanks />} />
+            <Route path="/apply-partner/status" element={<ApplyPartnerStatus />} />
+            <Route path="/apply-partner/reply" element={<ApplyPartnerReply />} />
+            <Route path="/become-a-partner" element={<ApplyPartner />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Layout>

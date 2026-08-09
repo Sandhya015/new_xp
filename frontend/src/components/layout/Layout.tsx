@@ -2,10 +2,12 @@ import { useEffect, ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Navbar } from './Navbar'
 import { Footer } from './Footer'
+import { capturePartnerRefFromUrl } from '@/lib/partnerRef'
 //this helps to scroll
 function ScrollToTop() {
-  const { pathname, hash } = useLocation()
+  const { pathname, hash, search } = useLocation()
   useEffect(() => {
+    capturePartnerRefFromUrl()
     if (hash) {
       const id = decodeURIComponent(hash.slice(1))
       requestAnimationFrame(() => {
@@ -15,7 +17,7 @@ function ScrollToTop() {
       return
     }
     window.scrollTo(0, 0)
-  }, [pathname, hash])
+  }, [pathname, hash, search])
   return null
 }
 

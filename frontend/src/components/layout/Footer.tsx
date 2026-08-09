@@ -55,6 +55,7 @@ const companyLinks = [
   { to: '/partners/companies' as const, label: 'Our Partner Companies' },
   { to: '/careers' as const, label: 'Careers' },
   { to: '/success-stories' as const, label: 'Success Stories' },
+  { to: '/apply-partner' as const, label: 'Apply for Affiliate Partner', badge: 'NEW' as const },
 ]
 
 const legalLinks = [
@@ -178,15 +179,22 @@ export function Footer() {
               <Building2 className="h-4 w-4 text-primary-400" /> Company
             </h3>
             <ul className="mt-3 space-y-2">
-              {companyLinks.map(({ to, label, hashLink }) => (
+              {companyLinks.map((item) => {
+                const { to, label, hashLink } = item
+                const badge = 'badge' in item ? item.badge : undefined
+                return (
                 <li key={`${to}-${label}`}>
                   {hashLink ? (
                     <Link to={{ pathname: to, hash: 'partner-universities' }} className="text-sm text-gray-400 hover:text-white transition">{label}</Link>
                   ) : (
-                    <Link to={to} className="text-sm text-gray-400 hover:text-white transition">{label}</Link>
+                    <Link to={to} className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition">
+                      {label}
+                      {badge ? <span className="rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{badge}</span> : null}
+                    </Link>
                   )}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           </div>
           <div>

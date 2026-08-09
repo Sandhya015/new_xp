@@ -19,6 +19,7 @@ const navLinks = [
   { to: '/verify', label: 'Certificate Verification' },
   { to: '/blog', label: 'Blog' },
   { to: '/about', label: 'About Us' },
+  { to: '/apply-partner', label: 'Become a Partner' },
   { to: '/contact', label: 'Contact Us' },
 ]
 

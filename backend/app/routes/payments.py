@@ -281,6 +281,12 @@ def _finalize_successful_charge(
     except Exception:
         current_app.logger.exception("kit_order create failed for order %s", oid)
 
+    try:
+        from app.partner_program import on_payment_success_attribution
+        on_payment_success_attribution(order)
+    except Exception:
+        current_app.logger.exception("partner attribution failed for order %s", oid)
+
     _build_and_store_invoice_if_needed(
         current_app._get_current_object(),
         coll,
@@ -790,6 +796,17 @@ def create_order():
             "shippingSameAsProfile": shipping_same,
             "shippingAddress": shipping_address if include_kit else None,
         }
+        # Partner attribution: coupon overrides referral link (last-click cookie / client ref)
+        try:
+            from app.partner_program import attach_attribution_to_order_doc
+            data = request.get_json() or {}
+            attach_attribution_to_order_doc(
+                doc,
+                ref_slug=(data.get("partnerRef") or data.get("referralRef") or data.get("ref") or "").strip(),
+                coupon_code=pricing.get("couponCode") or coupon_code or "",
+            )
+        except Exception:
+            current_app.logger.exception("partner attribution attach failed (cashfree create)")
         result = coll.insert_one(doc)
         return jsonify({
             "gateway": "cashfree",
@@ -847,6 +864,16 @@ def create_order():
         "shippingSameAsProfile": shipping_same,
         "shippingAddress": shipping_address if include_kit else None,
     }
+    try:
+        from app.partner_program import attach_attribution_to_order_doc
+        data_rz = request.get_json() or {}
+        attach_attribution_to_order_doc(
+            doc,
+            ref_slug=(data_rz.get("partnerRef") or data_rz.get("referralRef") or data_rz.get("ref") or "").strip(),
+            coupon_code=pricing.get("couponCode") or coupon_code or "",
+        )
+    except Exception:
+        current_app.logger.exception("partner attribution attach failed (razorpay create)")
     result = coll.insert_one(doc)
 
     key_id = cfg.config.get("RAZORPAY_KEY_ID", "")

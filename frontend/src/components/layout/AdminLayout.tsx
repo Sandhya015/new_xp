@@ -24,6 +24,7 @@ import {
   Ticket,
   HelpCircle,
   Package,
+  UsersRound,
 } from 'lucide-react'
 
 const SIDEBAR_LINKS = [
@@ -34,6 +35,7 @@ const SIDEBAR_LINKS = [
   { to: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
   { to: '/admin/students', label: 'Students', icon: GraduationCap },
+  { to: '/admin/partners', label: 'Partners', icon: UsersRound },
   { to: '/admin/companies', label: 'Companies', icon: Building2, badge: 3 },
   { to: '/admin/internships', label: 'Internships', icon: Briefcase, badge: 2 },
   { to: '/admin/reports', label: 'Reports', icon: BarChart3 },
@@ -53,6 +55,9 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     new: 'Add Training',
     manage: 'Manage',
     certificates: 'Documents',
+    partners: 'Partners',
+    applications: 'Applications',
+    payouts: 'Payouts',
     payments: 'Payments',
     'kit-orders': 'Kit Orders',
     leads: 'Leads',
