@@ -446,7 +446,77 @@ def admin_get_partner(partner_id):
         "coupons": coupons,
         "activity": activity,
         "payouts": payouts,
+        "referrals": _admin_partner_referrals(partner_id),
     })
+
+
+def _admin_partner_referrals(partner_id: str) -> list:
+    """Full student attribution rows for admin partner detail (unmasked)."""
+    items = []
+    users = get_users_collection()
+    courses = get_courses_collection()
+    links = {str(l.get("slug") or "").upper(): l for l in links_coll().find({"partnerId": partner_id})}
+    coupons = {str(c.get("code") or "").upper(): c for c in coupons_coll().find({"partnerId": partner_id})}
+    for c in commissions_coll().find({"partnerId": partner_id}).sort("earnedAt", -1).limit(500):
+        student_name = "Student"
+        student_email = ""
+        student_phone = ""
+        college = ""
+        university = ""
+        uid = c.get("userId") or ""
+        if uid and ObjectId.is_valid(str(uid)):
+            u = users.find_one({"_id": ObjectId(str(uid))}, {
+                "name": 1, "fullName": 1, "email": 1, "phone": 1,
+                "collegeName": 1, "university": 1,
+            })
+            if u:
+                student_name = (u.get("name") or u.get("fullName") or "Student").strip()
+                student_email = u.get("email") or ""
+                student_phone = u.get("phone") or ""
+                college = u.get("collegeName") or ""
+                university = u.get("university") or ""
+        title = ""
+        cid = c.get("courseId") or ""
+        if cid and ObjectId.is_valid(str(cid)):
+            cr = courses.find_one({"_id": ObjectId(str(cid))}, {"title": 1})
+            title = (cr or {}).get("title") or ""
+        earned = c.get("earnedAt")
+        source = (c.get("source") or "").strip().lower()
+        coupon_code = (c.get("couponCode") or "").strip().upper()
+        link_slug = (c.get("linkSlug") or "").strip().upper()
+        source_label = "Referral link"
+        source_detail = ""
+        if source == "coupon" or coupon_code:
+            source_label = "Coupon"
+            cp = coupons.get(coupon_code) or {}
+            source_detail = coupon_code or str(c.get("couponCode") or "")
+        elif link_slug:
+            lk = links.get(link_slug) or {}
+            source_detail = lk.get("label") or link_slug
+        status_raw = (c.get("status") or "").lower()
+        if status_raw in ("earned", "eligible", "processing", "paid"):
+            pay_status = "Successful"
+        elif status_raw == "cancelled":
+            pay_status = "Cancelled"
+        else:
+            pay_status = "Payment created"
+        items.append({
+            "id": str(c.get("_id")),
+            "date": earned.strftime("%d %b %Y, %I:%M %p") if hasattr(earned, "strftime") else "",
+            "studentName": student_name,
+            "studentEmail": student_email,
+            "studentPhone": student_phone,
+            "college": college,
+            "university": university,
+            "training": title,
+            "source": source_label,
+            "sourceDetail": source_detail,
+            "amount": float(c.get("netAmount") or 0),
+            "commission": float(c.get("commissionAmount") or 0),
+            "commissionStatus": c.get("status") or "",
+            "status": pay_status,
+        })
+    return items
 
 
 @partners_admin_bp.route("/partners/<partner_id>", methods=["PUT", "PATCH"])

@@ -164,6 +164,7 @@ export const adminPartnerService = {
       coupons: Array<Record<string, unknown>>
       activity?: Array<Record<string, unknown>>
       payouts?: Array<Record<string, unknown>>
+      referrals?: Array<Record<string, unknown>>
     }
   },
   async updatePartner(id: string, body: Record<string, unknown>) {
