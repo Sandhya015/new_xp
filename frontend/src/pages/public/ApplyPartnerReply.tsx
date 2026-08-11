@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { partnerService } from '@/services/partnerService'
+import { AffiliatePageWrap } from '@/components/partner/AffiliateLandingShell'
 
 export function ApplyPartnerReply() {
   const [params] = useSearchParams()
@@ -28,20 +29,28 @@ export function ApplyPartnerReply() {
   }
 
   if (!token) {
-    return <p className="p-8 text-center text-sm text-red-600">Invalid reply link.</p>
+    return (
+      <AffiliatePageWrap>
+        <p className="text-center text-sm text-red-600">Invalid reply link.</p>
+      </AffiliatePageWrap>
+    )
   }
   if (done) {
-    return <p className="p-8 text-center text-sm text-emerald-700">Reply submitted. Thank you — our team will continue the review.</p>
+    return (
+      <AffiliatePageWrap>
+        <p className="text-center text-sm text-emerald-700">Reply submitted. Thank you — our team will continue the review.</p>
+      </AffiliatePageWrap>
+    )
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-12">
-      <h1 className="text-xl font-bold text-brand-navy">Reply to application review</h1>
-      <textarea className="mt-4 w-full rounded-lg border px-3 py-2 text-sm" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your reply…" />
+    <AffiliatePageWrap>
+      <h1 className="text-xl font-bold text-[#0f172a]">Reply to application review</h1>
+      <textarea className="mt-4 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your reply…" />
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-      <button type="button" disabled={busy || !message.trim()} onClick={() => void submit()} className="mt-4 rounded-lg bg-brand-accent px-5 py-2 text-sm font-semibold text-white">
+      <button type="button" disabled={busy || !message.trim()} onClick={() => void submit()} className="mt-4 rounded-xl bg-brand-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-600">
         {busy ? 'Sending…' : 'Submit reply'}
       </button>
-    </div>
+    </AffiliatePageWrap>
   )
 }

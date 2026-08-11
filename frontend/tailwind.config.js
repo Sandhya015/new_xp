@@ -23,6 +23,10 @@ export default {
           accent: '#2563EB',
           'light-bg': '#EFF6FF',
         },
+        console: {
+          sidebar: '#202636',
+          'sidebar-active': '#2A303D',
+        },
         slate: { gray: '#6B7280' },
         success: { green: '#16A34A' },
         warning: { orange: '#EA580C' },

@@ -497,7 +497,7 @@ def create_partner_from_fields(
         },
         "upiId": fields.get("upiId") or "",
         "bankPendingApproval": None,
-        "status": "active",
+        "status": (fields.get("status") or "active").strip().lower() or "active",
         "notes": fields.get("notes") or "",
         "applicationId": application_id,
         "source": source,

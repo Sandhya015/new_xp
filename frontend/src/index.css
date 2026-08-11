@@ -23,6 +23,16 @@
   }
 }
 
+@layer components {
+  .console-sidebar-shell {
+    background-color: #202636;
+    color: #fff;
+  }
+  .console-sidebar-nav-active {
+    background-color: #2a303d;
+  }
+}
+
 /* Strapi (richtext / Markdown-rendered) article body on public blog */
 .strapi-rich-text {
   font-size: 1.0625rem;

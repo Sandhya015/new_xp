@@ -27,6 +27,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { adminPartnerService } from '@/services/partnerService'
+import { ConsoleBrandMark } from '@/components/brand/ConsoleBrandMark'
 
 const SIDEBAR_LINKS = [
   { to: '/admin', label: 'Dashboard', icon: Home },
@@ -170,17 +171,17 @@ export function AdminLayout() {
 
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-56 shrink-0 bg-[#202636] flex flex-col
+          console-sidebar-shell
+          fixed inset-y-0 left-0 z-50 w-56 shrink-0 bg-[#202636] text-white flex flex-col
           md:static md:z-auto
           transform transition-transform duration-200 ease-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >
-        <div className="h-14 shrink-0 flex items-center border-b border-white/10 px-4">
-          <div className="flex items-center justify-between gap-2 w-full min-w-0">
-            <Link to="/admin" onClick={closeSidebar} className="flex items-center gap-2 min-w-0">
-              <img src="/logo.png" alt="XpertIntern" className="h-8 w-auto object-contain shrink-0" />
-              <span className="text-base font-semibold text-white truncate">Admin Panel</span>
+        <div className="shrink-0 px-4 pt-4 pb-3 border-b border-white/10">
+          <div className="flex items-center justify-between gap-2">
+            <Link to="/admin" onClick={closeSidebar} className="min-w-0">
+              <ConsoleBrandMark subtitle="Admin Console" size="sm" />
             </Link>
             <button
               type="button"
@@ -204,7 +205,7 @@ export function AdminLayout() {
                       type="button"
                       onClick={() => setPartnersOpen((o) => !o)}
                       className={`flex w-full items-center gap-3 px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
-                        onPartners ? 'bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
+                        onPartners ? 'console-sidebar-nav-active bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
                       }`}
                     >
                       <Icon className="h-5 w-5 shrink-0" />
@@ -248,7 +249,7 @@ export function AdminLayout() {
                     onClick={closeSidebar}
                     className={({ isActive }) =>
                       `flex items-center gap-3 px-4 py-2.5 rounded-lg text-base font-medium transition-colors ${
-                        isActive ? 'bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
+                        isActive ? 'console-sidebar-nav-active bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
                       }`
                     }
                   >

@@ -142,7 +142,7 @@ export function CompanyLayout() {
 
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-56 shrink-0 bg-[#1A2B4D] flex flex-col
+          console-sidebar-shell fixed inset-y-0 left-0 z-50 w-56 shrink-0 bg-[#202636] text-white flex flex-col
           md:static md:z-auto
           transform transition-transform duration-200 ease-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}

@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { StudentLayout } from './components/layout/StudentLayout'
 import { CompanyLayout } from './components/layout/CompanyLayout'
@@ -64,6 +64,7 @@ import {
   AdminPartnerDetail,
   AdminPartnerPayouts,
 } from './pages/admin/PartnerAdminPages'
+import { ApplyPartnerLayout } from './components/partner/AffiliateLandingShell'
 import { ApplyPartner } from './pages/public/ApplyPartner'
 import { ApplyPartnerThanks } from './pages/public/ApplyPartnerThanks'
 import { ApplyPartnerStatus } from './pages/public/ApplyPartnerStatus'
@@ -122,6 +123,13 @@ function App() {
         <Route path="notifications" element={<CompanyNotifications />} />
         <Route path="support" element={<CompanySupport />} />
       </Route>
+      <Route path="/apply-partner" element={<ApplyPartnerLayout />}>
+        <Route index element={<ApplyPartner />} />
+        <Route path="thanks" element={<ApplyPartnerThanks />} />
+        <Route path="status" element={<ApplyPartnerStatus />} />
+        <Route path="reply" element={<ApplyPartnerReply />} />
+      </Route>
+      <Route path="/become-a-partner" element={<Navigate to="/apply-partner" replace />} />
       <Route path="/partner/login" element={<PartnerLogin />} />
       <Route path="/partner" element={<PartnerLayout />}>
         <Route index element={<PartnerOverview />} />
@@ -195,11 +203,6 @@ function App() {
             <Route path="/partners/companies" element={<LegalPlaceholder title="Our Partner Companies" />} />
             <Route path="/careers" element={<LegalPlaceholder title="Careers" />} />
             <Route path="/success-stories" element={<LegalPlaceholder title="Success Stories" />} />
-            <Route path="/apply-partner" element={<ApplyPartner />} />
-            <Route path="/apply-partner/thanks" element={<ApplyPartnerThanks />} />
-            <Route path="/apply-partner/status" element={<ApplyPartnerStatus />} />
-            <Route path="/apply-partner/reply" element={<ApplyPartnerReply />} />
-            <Route path="/become-a-partner" element={<ApplyPartner />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Layout>

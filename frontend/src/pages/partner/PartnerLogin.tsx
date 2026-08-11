@@ -49,8 +49,8 @@ export function PartnerLogin() {
         message="Loading"
       />
       <div className="bg-brand-navy text-white p-6 sm:p-8 md:p-12 md:w-2/5 flex flex-col justify-center min-w-0">
-        <div className="flex items-center gap-3 mb-6 sm:mb-8">
-          <img src="/logo.png" alt="XpertIntern" className="h-14 sm:h-16 md:h-20 w-auto object-contain" />
+        <div className="mb-6 sm:mb-8 inline-flex w-fit bg-white px-4 py-3">
+          <img src="/logo.png" alt="XpertIntern" className="h-12 sm:h-14 md:h-16 w-auto object-contain" />
         </div>
         <p className="text-xs sm:text-sm font-medium text-primary-200 uppercase tracking-wider">Partner Portal</p>
         <h1 className="mt-2 text-xl sm:text-2xl font-bold">Partner Login</h1>
