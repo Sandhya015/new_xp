@@ -193,7 +193,7 @@ export function AdminLayout() {
             </button>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto py-4">
+        <nav className="console-sidebar-nav flex-1 overflow-y-auto py-4">
           <ul className="space-y-0.5 px-2">
             {SIDEBAR_LINKS.map((item) => {
               const { to, label, icon: Icon, badge } = item as typeof item & { badge?: number; expandable?: boolean }

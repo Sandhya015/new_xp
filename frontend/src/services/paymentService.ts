@@ -69,6 +69,16 @@ export const paymentService = {
     const { data } = await api.get<{ items: OrderItem[] }>('/api/payments/my')
     return data
   },
+  async validateCoupon(
+    courseId: string,
+    couponCode: string,
+  ): Promise<{ valid: boolean; error?: string; discountInr?: number; payableInr?: number; code?: string }> {
+    const { data } = await api.post<{ valid: boolean; error?: string; discountInr?: number; payableInr?: number; code?: string }>(
+      '/api/payments/validate-coupon',
+      { courseId, couponCode: couponCode.trim() },
+    )
+    return data
+  },
   /** Amount is determined on the server from the course price — only pass courseId. */
   async createOrder(
     courseId: string,

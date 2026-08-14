@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Plus,
   Download,
   Search,
   RefreshCw,
-  Eye,
   ExternalLink,
   ChevronRight,
   Banknote,
@@ -22,11 +21,14 @@ import {
   AdminInfoBanner,
   PartnerAvatar,
   fmtInr,
+  fmtPartnerJoined,
   PARTNER_STAT_ICONS,
   payoutMethodLabel,
 } from '@/components/admin/AdminPartnerUI'
+import { PartnerListRowActions } from '@/components/admin/PartnerListRowActions'
 
 export { AdminPartnerDetail } from '@/components/admin/AdminPartnerDetailView'
+export { AdminPartnerApplicationDetail } from '@/components/admin/AdminPartnerApplicationDetailView'
 
 export function AdminPartnerApplications() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
@@ -223,112 +225,6 @@ export function AdminPartnerApplications() {
   )
 }
 
-export function AdminPartnerApplicationDetail() {
-  const { id } = useParams()
-  const navigate = useNavigate()
-  const [app, setApp] = useState<Record<string, unknown> | null>(null)
-  const [commission, setCommission] = useState('10')
-  const [question, setQuestion] = useState('')
-  const [rejectReason, setRejectReason] = useState('Other')
-  const [note, setNote] = useState('')
-  const [notice, setNotice] = useState('')
-
-  useEffect(() => {
-    if (!id) return
-    adminPartnerService.getApplication(id).then((r) => setApp(r.application)).catch(() => setApp(null))
-  }, [id])
-
-  if (!app) return <p className="text-sm text-slate-gray">Loading…</p>
-
-  return (
-    <div className="space-y-4 max-w-3xl">
-      <button type="button" onClick={() => navigate(-1)} className="text-sm text-brand-accent">
-        ← Back
-      </button>
-      <h1 className="text-xl font-semibold text-brand-navy">{String(app.applicationId)}</h1>
-      <p className="text-sm capitalize">Status: {String(app.status).replace(/_/g, ' ')}</p>
-      <dl className="grid gap-2 sm:grid-cols-2 text-sm">
-        {['fullName', 'email', 'phone', 'city', 'state', 'partnerType', 'organisationName', 'audienceSize', 'promotePlan', 'websiteUrl', 'instagram', 'youtube', 'linkedin'].map((k) => (
-          <div key={k} className={k === 'promotePlan' ? 'sm:col-span-2' : ''}>
-            <dt className="text-xs text-slate-gray">{k}</dt>
-            <dd>{String(app[k] || '—')}</dd>
-          </div>
-        ))}
-      </dl>
-      {Array.isArray(app.history) ? (
-        <div className="rounded-xl border bg-white p-3 text-xs space-y-1">
-          <p className="font-medium text-sm">Activity</p>
-          {(app.history as Array<Record<string, unknown>>).map((h, i) => (
-            <p key={i}>
-              {String(h.action)} · {String(h.by)} · {String(h.note || h.message || '')}
-            </p>
-          ))}
-        </div>
-      ) : null}
-      {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
-      <div className="flex flex-wrap gap-2 border-t pt-4">
-        <div className="flex items-center gap-2">
-          <input className="w-20 rounded border px-2 py-1 text-sm" value={commission} onChange={(e) => setCommission(e.target.value)} />
-          <button
-            type="button"
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
-            onClick={async () => {
-              const r = await adminPartnerService.approve(String(app.id), { commissionPercent: Number(commission) })
-              const pid = (r as { partner?: { id?: string } }).partner?.id
-              setNotice('Approved')
-              if (pid) navigate(`/admin/partners/${pid}`)
-            }}
-          >
-            Approve
-          </button>
-        </div>
-        <button
-          type="button"
-          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white"
-          onClick={async () => {
-            await adminPartnerService.reject(String(app.id), { reason: rejectReason, shareReason: true })
-            setNotice('Rejected')
-          }}
-        >
-          Reject
-        </button>
-        <select className="rounded border text-sm" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}>
-          {['Incomplete information', 'Not aligned with our audience', 'Duplicate', 'Suspicious', 'Other'].map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
-      </div>
-      <div className="border-t pt-4 space-y-2">
-        <textarea className="w-full rounded border px-3 py-2 text-sm" rows={3} placeholder="Request more info…" value={question} onChange={(e) => setQuestion(e.target.value)} />
-        <button
-          type="button"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
-          onClick={async () => {
-            await adminPartnerService.requestInfo(String(app.id), question)
-            setNotice('Info requested')
-          }}
-        >
-          Request more info
-        </button>
-      </div>
-      <div className="border-t pt-4 space-y-2">
-        <textarea className="w-full rounded border px-3 py-2 text-sm" rows={2} placeholder="Internal note…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <button
-          type="button"
-          className="rounded border px-3 py-1.5 text-sm"
-          onClick={async () => {
-            await adminPartnerService.addNote(String(app.id), note)
-            setNotice('Note saved')
-            setNote('')
-          }}
-        >
-          Save note
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export function AdminPartnersList() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
   const [eligible, setEligible] = useState<Array<Record<string, unknown>>>([])
@@ -430,12 +326,16 @@ export function AdminPartnersList() {
         <button type="button" onClick={load} className="rounded-xl border border-gray-200 p-2 hover:bg-gray-50" aria-label="Refresh">
           <RefreshCw className="h-4 w-4 text-slate-gray" />
         </button>
-        <button type="button" onClick={load} className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50">
+        <button
+          type="button"
+          onClick={() => void adminPartnerService.exportPartners(statusF ? { status: statusF } : undefined)}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium hover:bg-gray-50"
+        >
           <Download className="h-4 w-4" /> Export
         </button>
       </AdminFilterBar>
 
-      <AdminTableShell footer={filtered.length ? `Showing ${(page - 1) * perPage + 1}–${Math.min(page * perPage, filtered.length)} of ${filtered.length} partners` : undefined}>
+      <AdminTableShell>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -447,13 +347,13 @@ export function AdminPartnersList() {
                 <th className="px-4 py-3">Earnings</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Joined</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {pageItems.map((p) => (
-                <tr key={String(p.id)} className="hover:bg-gray-50/50">
-                  <td className="px-4 py-3">
+                <tr key={String(p.id)} className="hover:bg-gray-50/50 align-middle">
+                  <td className="px-4 py-4">
                     <div className="flex items-center gap-3">
                       <PartnerAvatar name={String(p.fullName)} />
                       <div>
@@ -462,28 +362,27 @@ export function AdminPartnersList() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium">{String(p.partnerType || '—')}</span>
+                  <td className="px-4 py-4">
+                    <span className="text-sm font-medium text-[#0f172a]">{String(p.partnerType || '—')}</span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-gray">
-                    <p>{String(p.email)}</p>
-                    <p>{String(p.phone || '—')}</p>
+                  <td className="px-4 py-4 text-sm text-slate-gray">
+                    <p className="text-[#0f172a]">{String(p.email)}</p>
+                    <p className="text-xs mt-0.5">{String(p.phone || '—')}</p>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="font-semibold text-[#0f172a]">{Number(p.totalSuccessful || 0)}</span>
-                    <span className="text-xs text-slate-gray"> successful</span>
+                  <td className="px-4 py-4">
+                    <p className="font-semibold text-[#0f172a]">{Number(p.totalSuccessful || 0)}</p>
+                    <p className="text-xs text-slate-gray">successful</p>
                   </td>
-                  <td className="px-4 py-3 font-semibold">{fmtInr(Number(p.totalEarnings || 0))}</td>
-                  <td className="px-4 py-3"><AdminStatusBadge status={String(p.status || 'active')} /></td>
-                  <td className="px-4 py-3 text-xs text-slate-gray whitespace-nowrap">{String(p.createdAt || '').slice(0, 11)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold hover:bg-gray-50"
-                      onClick={() => navigate(`/admin/partners/${p.id}`)}
-                    >
-                      <Eye className="h-3.5 w-3.5" /> View
-                    </button>
+                  <td className="px-4 py-4 font-semibold text-[#0f172a] whitespace-nowrap">{fmtInr(Number(p.totalEarnings || 0))}</td>
+                  <td className="px-4 py-4"><AdminStatusBadge status={String(p.status || 'active')} /></td>
+                  <td className="px-4 py-4 text-sm text-slate-gray whitespace-nowrap">{fmtPartnerJoined(String(p.createdAt || ''))}</td>
+                  <td className="px-4 py-4">
+                    <PartnerListRowActions
+                      partnerId={String(p.id)}
+                      partnerName={String(p.fullName)}
+                      status={String(p.status || 'active')}
+                      onChanged={load}
+                    />
                   </td>
                 </tr>
               ))}
@@ -491,13 +390,18 @@ export function AdminPartnersList() {
           </table>
           {!pageItems.length ? <p className="p-8 text-center text-sm text-slate-gray">No partners found.</p> : null}
         </div>
-        {totalPages > 1 ? (
-          <div className="flex justify-end gap-1 border-t border-gray-100 px-4 py-3">
-            <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border px-2 py-1 text-xs disabled:opacity-40">Previous</button>
-            {Array.from({ length: Math.min(totalPages, 3) }, (_, i) => i + 1).map((n) => (
-              <button key={n} type="button" onClick={() => setPage(n)} className={`rounded border px-2 py-1 text-xs ${page === n ? 'bg-brand-accent text-white' : ''}`}>{n}</button>
-            ))}
-            <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="rounded border px-2 py-1 text-xs disabled:opacity-40">Next</button>
+        {filtered.length ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3">
+            <p className="text-xs text-slate-gray">
+              Showing {(page - 1) * perPage + 1}–{Math.min(page * perPage, filtered.length)} of {filtered.length} partners
+            </p>
+            <div className="flex items-center gap-1">
+              <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium disabled:opacity-40 hover:bg-gray-50">Previous</button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map((n) => (
+                <button key={n} type="button" onClick={() => setPage(n)} className={`min-w-[2rem] rounded-lg border px-2 py-1.5 text-xs font-semibold ${page === n ? 'border-brand-accent bg-brand-accent text-white' : 'border-gray-200 hover:bg-gray-50'}`}>{n}</button>
+              ))}
+              <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium disabled:opacity-40 hover:bg-gray-50">Next</button>
+            </div>
           </div>
         ) : null}
       </AdminTableShell>
@@ -517,13 +421,17 @@ export function AdminPartnersList() {
 
 export function AdminPartnerPayouts() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
+  const [summary, setSummary] = useState<Record<string, number>>({})
   const [selected, setSelected] = useState<string[]>([])
   const [utr, setUtr] = useState('')
   const [search, setSearch] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const load = () => adminPartnerService.eligiblePayouts().then((r) => setItems(r.items || [])).catch(() => setItems([]))
+  const load = () => adminPartnerService.eligiblePayouts().then((r) => {
+    setItems(r.items || [])
+    setSummary(r.summary || {})
+  }).catch(() => setItems([]))
   useEffect(() => {
     load()
   }, [])
@@ -552,7 +460,11 @@ export function AdminPartnerPayouts() {
         subtitle="Review eligible commissions and process single or bulk partner payouts."
         action={
           <>
-            <button type="button" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={() => void adminPartnerService.exportPayouts()}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50"
+            >
               <Download className="h-4 w-4" /> Export report
             </button>
             <button
@@ -580,8 +492,8 @@ export function AdminPartnerPayouts() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <AdminStatCard label="Pending payout" value={fmtInr(stats.pending)} sub={`${stats.count} eligible partners`} icon={PARTNER_STAT_ICONS.pending.icon} iconBg={PARTNER_STAT_ICONS.pending.bg} iconColor={PARTNER_STAT_ICONS.pending.color} />
-        <AdminStatCard label="Paid this month" value="—" sub="From payout history" icon={PARTNER_STAT_ICONS.paid.icon} iconBg={PARTNER_STAT_ICONS.paid.bg} iconColor={PARTNER_STAT_ICONS.paid.color} />
-        <AdminStatCard label="In hold period" value="—" sub="Releases after 15 days" icon={PARTNER_STAT_ICONS.hold.icon} iconBg={PARTNER_STAT_ICONS.hold.bg} iconColor={PARTNER_STAT_ICONS.hold.color} />
+        <AdminStatCard label="Paid this month" value={fmtInr(summary.paidThisMonth || 0)} sub="From payout history" icon={PARTNER_STAT_ICONS.paid.icon} iconBg={PARTNER_STAT_ICONS.paid.bg} iconColor={PARTNER_STAT_ICONS.paid.color} />
+        <AdminStatCard label="In hold period" value={fmtInr(summary.holdAmountTotal || 0)} sub="Releases after 15 days" icon={PARTNER_STAT_ICONS.hold.icon} iconBg={PARTNER_STAT_ICONS.hold.bg} iconColor={PARTNER_STAT_ICONS.hold.color} />
       </div>
 
       <AdminInfoBanner>

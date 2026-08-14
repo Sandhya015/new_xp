@@ -45,6 +45,7 @@ import {
   SectionCard,
   fmtInr,
   partnerInitials,
+  SplitBarChart,
   shareWhatsApp,
   qrUrl,
 } from '@/components/partner/PartnerUI'
@@ -63,12 +64,19 @@ function chartPoints(stats: Record<string, unknown>, k: string) {
 export function PartnerOverview() {
   const { partner, stats, loading } = usePartner()
   const [mainUrl, setMainUrl] = useState('')
+  const [links, setLinks] = useState<Array<Record<string, unknown>>>([])
+  const [coupons, setCoupons] = useState<Array<Record<string, unknown>>>([])
+  const [recentRefs, setRecentRefs] = useState<Array<Record<string, unknown>>>([])
 
   useEffect(() => {
     partnerService.links().then((r) => {
-      const first = (r.items || [])[0]
+      const items = r.items || []
+      setLinks(items)
+      const first = items[0]
       if (first?.url) setMainUrl(String(first.url))
     }).catch(() => undefined)
+    partnerService.coupons().then((r) => setCoupons(r.items || [])).catch(() => undefined)
+    partnerService.referrals().then((r) => setRecentRefs((r.items || []).slice(0, 5))).catch(() => undefined)
   }, [])
 
   if (loading) {
@@ -82,12 +90,17 @@ export function PartnerOverview() {
   const totalSales = num(s, 'totalSales')
   const goal = Math.max(monthEarn * 1.4, 7000)
   const goalPct = Math.min(100, Math.round((monthEarn / goal) * 100))
-  const earnSeries = chartPoints(s, 'chartEarnings')
+  const monthNet = num(s, 'monthNetPaid') || totalSales
+  const earnReferral = chartPoints(s, 'chartReferralEarnings')
+  const earnCoupon = chartPoints(s, 'chartCouponEarnings')
   const clicks = num(s, 'totalClicks')
   const paymentsCreated = num(s, 'paymentsCreated')
   const successful = num(s, 'successfulReferrals')
   const convRate = num(s, 'conversionRate')
   const funnelTop = clicks + num(s, 'signups')
+  const topLinks = [...links].sort((a, b) => Number(b.earnings || 0) - Number(a.earnings || 0)).slice(0, 3)
+  const topCoupons = [...coupons].sort((a, b) => Number(b.earnings || 0) - Number(a.earnings || 0)).slice(0, 3)
+  const emailShare = mainUrl ? `mailto:?subject=${encodeURIComponent('XpertIntern internship trainings')}&body=${encodeURIComponent(`Hi,\n\nExplore XpertIntern trainings using my link:\n${mainUrl}\n\nThanks!`)}` : ''
 
   return (
     <div className="space-y-6 pb-8">
@@ -99,7 +112,7 @@ export function PartnerOverview() {
             <p className="text-[11px] font-semibold uppercase tracking-widest text-blue-200">Welcome back, {name.toUpperCase()}</p>
             <h2 className="mt-2 text-2xl font-bold sm:text-3xl">Turn your reach into real earnings.</h2>
             <p className="mt-2 text-sm text-blue-100">
-              Your links and coupons generated {fmtInr(totalSales || monthEarn * 10)} in student payments this month.
+              Your links and coupons generated {fmtInr(monthNet)} in student payments this month.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               {mainUrl ? (
@@ -119,6 +132,11 @@ export function PartnerOverview() {
                 >
                   Share on WhatsApp
                 </button>
+              ) : null}
+              {emailShare ? (
+                <a href={emailShare} className="rounded-xl border border-white/40 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">
+                  Send by email
+                </a>
               ) : null}
               <Link to="/partner/payouts" className="rounded-xl border border-white/40 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10">
                 Monthly report
@@ -157,7 +175,7 @@ export function PartnerOverview() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Total clicks" value={clicks.toLocaleString()} sub={`+${num(s, 'thisMonthSuccessful')} referrals this month`} icon={Zap} iconBg="bg-blue-50" iconColor="text-blue-600" />
           <StatCard label="Successful referrals" value={successful} sub={`${monthSuccess} this month`} icon={Users} iconBg="bg-emerald-50" iconColor="text-emerald-600" />
-          <StatCard label="Coupon purchases" value={monthSuccess || '—'} sub="From coupon codes" icon={Gift} iconBg="bg-orange-50" iconColor="text-orange-600" />
+          <StatCard label="Conversion rate" value={`${convRate}%`} sub="Successful ÷ payments created" icon={BarChart3} iconBg="bg-orange-50" iconColor="text-orange-600" />
           <StatCard label="Total earnings" value={fmtInr(num(s, 'totalEarnings'))} sub={`${fmtInr(monthEarn)} this month`} icon={IndianRupee} iconBg="bg-violet-50" iconColor="text-violet-600" />
           <StatCard label="Pending payout" value={fmtInr(num(s, 'pendingPayout'))} sub={`${fmtInr(num(s, 'holdAmount'))} in hold`} icon={Wallet} iconBg="bg-slate-100" iconColor="text-slate-700" />
         </div>
@@ -165,8 +183,8 @@ export function PartnerOverview() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <SectionCard>
-          <p className="text-sm font-semibold text-[#0f172a] mb-4">Earnings trend</p>
-          <BarChart points={earnSeries} />
+          <p className="text-sm font-semibold text-[#0f172a] mb-4">Earnings trend — referral links vs coupons</p>
+          <SplitBarChart referral={earnReferral} coupon={earnCoupon} />
         </SectionCard>
         <SectionCard>
           <p className="text-sm font-semibold text-[#0f172a] mb-4">Conversion funnel</p>
@@ -178,6 +196,73 @@ export function PartnerOverview() {
           </div>
         </SectionCard>
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SectionCard>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-[#0f172a]">Top referral links</p>
+            <Link to="/partner/links" className="text-xs font-semibold text-brand-accent hover:underline">View all</Link>
+          </div>
+          {topLinks.length ? (
+            <div className="space-y-3">
+              {topLinks.map((l) => (
+                <div key={String(l.id)} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[#0f172a] truncate">{String(l.label)}</p>
+                    <p className="text-xs text-slate-gray">{Number(l.clicks || 0)} clicks · {Number(l.paymentsSuccess || 0)} paid</p>
+                  </div>
+                  <p className="shrink-0 font-bold text-emerald-600">{fmtInr(Number(l.earnings || 0))}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-gray">No links yet — request one from Support.</p>
+          )}
+        </SectionCard>
+        <SectionCard>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-[#0f172a]">Top coupon codes</p>
+            <Link to="/partner/coupons" className="text-xs font-semibold text-brand-accent hover:underline">View all</Link>
+          </div>
+          {topCoupons.length ? (
+            <div className="space-y-3">
+              {topCoupons.map((c) => (
+                <div key={String(c.id)} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[#0f172a]">{String(c.code)}</p>
+                    <p className="text-xs text-slate-gray">{Number(c.appliedCount || 0)} applied · {Number(c.successCount || 0)} paid</p>
+                  </div>
+                  <p className="shrink-0 font-bold text-emerald-600">{fmtInr(Number(c.earnings || 0))}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-gray">No coupons yet — request one from Support.</p>
+          )}
+        </SectionCard>
+      </div>
+
+      <SectionCard className="p-0 overflow-hidden">
+        <p className="px-5 pt-5 text-sm font-semibold text-[#0f172a]">Recent partner activity</p>
+        <div className="mt-3 divide-y divide-gray-100">
+          {recentRefs.length ? recentRefs.map((r) => (
+            <div key={String(r.id)} className="flex items-center gap-3 px-5 py-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+                {r.couponCode ? <Gift className="h-4 w-4 text-orange-500" /> : <Link2 className="h-4 w-4 text-brand-accent" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[#0f172a]">
+                  {r.couponCode ? `Coupon ${String(r.couponCode)} used` : 'New referral'} — {String(r.training || 'Training')}
+                </p>
+                <p className="text-xs text-slate-gray">{String(r.studentName)} · {String(r.date)}</p>
+              </div>
+              <p className="shrink-0 text-sm font-semibold text-emerald-600">{fmtInr(Number(r.commission || 0))}</p>
+            </div>
+          )) : (
+            <p className="p-8 text-center text-sm text-slate-gray">Share your link or coupon to start earning commissions.</p>
+          )}
+        </div>
+      </SectionCard>
     </div>
   )
 }
@@ -199,7 +284,7 @@ export function PartnerLinks() {
     const created = items.reduce((a, l) => a + Number(l.paymentsCreated || 0), 0)
     const paid = items.reduce((a, l) => a + Number(l.paymentsSuccess || 0), 0)
     const earnings = items.reduce((a, l) => a + Number(l.earnings || 0), 0)
-    const revenue = earnings * 10
+    const revenue = items.reduce((a, l) => a + Number(l.netRevenue || 0), 0)
     return { active, clicks, unique, created, paid, earnings, revenue, uniquePct: clicks ? Math.round((unique / clicks) * 1000) / 10 : 0 }
   }, [items])
 
@@ -241,7 +326,7 @@ export function PartnerLinks() {
         <div className="space-y-4">
           {items.map((l) => {
             const url = String(l.url || '')
-            const revenue = Number(l.earnings || 0) * 10
+            const revenue = Number(l.netRevenue || 0)
             return (
               <SectionCard key={String(l.id)} className="p-0 overflow-hidden">
                 <div className="p-5 border-b border-gray-100">
@@ -316,13 +401,20 @@ export function PartnerCoupons() {
     const success = items.reduce((a, c) => a + Number(c.successCount || 0), 0)
     const discount = items.reduce((a, c) => a + Number(c.totalDiscount || 0), 0)
     const earnings = items.reduce((a, c) => a + Number(c.earnings || 0), 0)
-    const revenue = earnings * 10
+    const revenue = items.reduce((a, c) => a + Number(c.netRevenue || 0), 0)
     return { applied, success, discount, earnings, revenue }
   }, [items])
 
   const couponDesc = (c: Record<string, unknown>) => {
     if (c.discountType === 'flat') return `₹${c.discountValue} OFF`
     return `${c.discountValue}% OFF`
+  }
+
+  const couponScope = (c: Record<string, unknown>) => {
+    const scope = String(c.trainingScope || 'all').toLowerCase()
+    if (scope === 'all') return 'All internship trainings'
+    if (c.trainingTitle) return String(c.trainingTitle)
+    return 'Selected trainings only'
   }
 
   if (loading) return <p className="text-sm text-slate-gray">Loading coupons…</p>
@@ -359,14 +451,15 @@ export function PartnerCoupons() {
             const applied = Number(c.appliedCount || 0)
             const pct = limit ? Math.min(100, (applied / limit) * 100) : 0
             const stripe = idx % 2 === 0 ? 'border-l-blue-500' : 'border-l-orange-500'
-            const netRevenue = Number(c.earnings || 0) * 10
+            const netRevenue = Number(c.netRevenue || 0)
             return (
               <SectionCard key={String(c.id)} className={`border-l-4 ${stripe} p-0 overflow-hidden`}>
                 <div className="p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-2xl font-bold tracking-wide text-[#0f172a]">{String(c.code)}</p>
-                      <p className="text-sm text-slate-gray">{couponDesc(c)} — All internship trainings</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-accent">Active coupon</p>
+                      <p className="mt-1 text-2xl font-bold tracking-wide text-[#0f172a]">{String(c.code)}</p>
+                      <p className="text-sm text-slate-gray">{couponDesc(c)} — {couponScope(c)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={c.active ? 'Active' : 'Inactive'} />
@@ -387,9 +480,9 @@ export function PartnerCoupons() {
                   <div className="mt-4 grid grid-cols-3 gap-3 text-center">
                     {(
                       [
-                        ['Applied', String(c.appliedCount)],
-                        ['Successful', String(c.successCount)],
-                        ['Earnings', fmtInr(Number(c.earnings || 0))],
+                        ['Students', String(c.appliedCount)],
+                        ['Payments started', String(c.paymentsCreated || c.appliedCount)],
+                        ['Payments completed', String(c.successCount)],
                       ] as [string, string][]
                     ).map(([label, val]) => (
                       <div key={label} className="rounded-xl bg-gray-50 py-3">
@@ -448,6 +541,8 @@ export function PartnerReferrals() {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([])
   const [stats, setStats] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
   const [page, setPage] = useState(1)
   const perPage = 10
 
@@ -460,11 +555,18 @@ export function PartnerReferrals() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return items
-    return items.filter((r) =>
-      [r.training, r.source, r.couponCode, r.studentName].some((v) => String(v || '').toLowerCase().includes(q)),
-    )
-  }, [items, search])
+    return items.filter((r) => {
+      if (q && ![r.training, r.source, r.couponCode, r.studentName].some((v) => String(v || '').toLowerCase().includes(q))) {
+        return false
+      }
+      if (statusFilter && String(r.commissionStatus || '').toLowerCase() !== statusFilter.toLowerCase()) {
+        return false
+      }
+      if (sourceFilter === 'coupon' && !r.couponCode) return false
+      if (sourceFilter === 'link' && r.couponCode) return false
+      return true
+    })
+  }, [items, search, statusFilter, sourceFilter])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
   const pageItems = filtered.slice((page - 1) * perPage, page * perPage)
@@ -479,7 +581,11 @@ export function PartnerReferrals() {
         title="Referral transactions"
         subtitle="Student privacy is protected. Names and emails remain masked in the partner portal."
         action={
-          <button type="button" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={() => void partnerService.exportReferrals()}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50"
+          >
             <Download className="h-4 w-4" /> Export report
           </button>
         }
@@ -488,7 +594,7 @@ export function PartnerReferrals() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Successful referrals" value={successful} sub={`${fmtInr(num(stats as Record<string, unknown>, 'totalSales'))} net paid`} icon={CheckCircle2} iconBg="bg-emerald-50" iconColor="text-emerald-600" />
         <StatCard label="Payments created" value={paymentsCreated} sub="All attributed sources" icon={CreditCard} />
-        <StatCard label="Refunded" value="—" sub="Commission cancelled" icon={TrendingUp} iconBg="bg-orange-50" iconColor="text-orange-600" />
+        <StatCard label="Refunded" value={num(stats as Record<string, unknown>, 'refundedCount')} sub="Commission cancelled" icon={TrendingUp} iconBg="bg-orange-50" iconColor="text-orange-600" />
         <StatCard label="Conversion rate" value={`${conv}%`} sub="Successful ÷ created" icon={BarChart3} iconBg="bg-violet-50" iconColor="text-violet-600" />
       </div>
 
@@ -506,9 +612,26 @@ export function PartnerReferrals() {
               }}
             />
           </div>
-          <span className="rounded-lg border px-3 py-2 text-xs text-slate-gray">Last 30 days</span>
-          <span className="rounded-lg border px-3 py-2 text-xs text-slate-gray">All sources</span>
-          <span className="rounded-lg border px-3 py-2 text-xs text-slate-gray">All statuses</span>
+          <select
+            className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-slate-gray"
+            value={sourceFilter}
+            onChange={(e) => { setSourceFilter(e.target.value); setPage(1) }}
+          >
+            <option value="">All sources</option>
+            <option value="link">Referral links</option>
+            <option value="coupon">Coupon codes</option>
+          </select>
+          <select
+            className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-slate-gray"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+          >
+            <option value="">All statuses</option>
+            <option value="earned">Waiting</option>
+            <option value="eligible">Earned</option>
+            <option value="paid">Paid</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -634,7 +757,11 @@ export function PartnerPayouts() {
         title="Payouts"
         subtitle="Track commission through the hold period, eligibility and completed payouts."
         action={
-          <button type="button" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={() => void partnerService.exportPayoutStatement()}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50"
+          >
             <Download className="h-4 w-4" /> Download statement
           </button>
         }
@@ -770,6 +897,20 @@ export function PartnerMarketing() {
   const tabs = ['all', 'Posters', 'Brochures', 'Videos', 'Brand assets']
   const captions = items.filter((i) => i.type === 'caption')
   const assets = items.filter((i) => i.type !== 'caption' && i.type !== 'guide')
+  const guide = items.find((i) => i.type === 'guide')
+
+  const tabTypeMap: Record<string, string> = {
+    Posters: 'poster',
+    Brochures: 'brochure',
+    Videos: 'video',
+    'Brand assets': 'brand',
+  }
+
+  const filteredAssets = useMemo(() => {
+    if (tab === 'all') return assets
+    const t = tabTypeMap[tab]
+    return assets.filter((i) => String(i.type || '').toLowerCase() === t)
+  }, [tab, assets])
 
   return (
     <div className="space-y-6 pb-8">
@@ -777,9 +918,15 @@ export function PartnerMarketing() {
         title="Marketing Kit"
         subtitle="Download ready-made assets and copy-paste captions for WhatsApp, Instagram and email."
         action={
-          <button type="button" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
-            <BookOpen className="h-4 w-4" /> Promotion guide
-          </button>
+          guide?.url ? (
+            <a href={String(guide.url)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
+              <BookOpen className="h-4 w-4" /> Promotion guide
+            </a>
+          ) : (
+            <button type="button" onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })} className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold shadow-sm hover:bg-gray-50">
+              <BookOpen className="h-4 w-4" /> Promotion guide
+            </button>
+          )
         }
       />
 
@@ -805,7 +952,7 @@ export function PartnerMarketing() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {(assets.length ? assets : items.filter((i) => i.type !== 'caption')).slice(0, 4).map((it, idx) => {
+        {(filteredAssets.length ? filteredAssets : assets).map((it, idx) => {
           const colors = ['bg-blue-500', 'bg-orange-500', 'bg-violet-500', 'bg-emerald-500']
           const Icon = ASSET_ICONS[String(it.type)] || FileText
           return (
@@ -873,6 +1020,9 @@ export function PartnerMarketing() {
 
 const FAQ = [
   { q: 'When does my commission become eligible?', a: 'Commission enters a 15-day hold after a successful payment. After the hold, it becomes eligible for the next monthly payout on the 5th.' },
+  { q: 'How is coupon commission calculated?', a: 'Your coupon commission is calculated on the net amount paid by the student after the coupon discount is applied. The commission percentage is set when your partner account is approved.' },
+  { q: 'When will I receive my payout?', a: 'Eligible commission above the ₹500 minimum is processed on the 5th of each month to your approved bank or UPI details.' },
+  { q: 'Can I create a link or coupon myself?', a: 'Partners request new links and coupons through Support. Our team creates and assigns them so tracking and commission rules stay accurate.' },
   { q: 'How do I request a new referral link?', a: 'Go to Support, choose Link Request, and describe the campaign. Our team will create and assign the link within 1–2 business days.' },
   { q: 'Can I change my bank details?', a: 'Yes — update payout details in Profile and submit for approval. Payouts use approved details only.' },
 ]
@@ -1007,9 +1157,20 @@ export function PartnerProfile() {
   const initials = partnerInitials(String(partner?.fullName || ''))
   const commission = Number(partner?.commissionPercent || 0)
 
+  const profileCompletion = useMemo(() => {
+    let score = 0
+    if (form.fullName.trim()) score += 15
+    if (form.phone.trim()) score += 15
+    if (form.city.trim() && form.state.trim()) score += 15
+    if (form.pan.trim()) score += 15
+    if (form.upiId.trim() || (form.accountNumber.trim() && form.ifsc.trim())) score += 25
+    if (!partner?.bankPendingApproval && (partner?.bankApproved || form.accountNumber)) score += 15
+    return Math.min(100, score)
+  }, [form, partner])
+
   return (
     <div className="space-y-6 pb-8">
-      <PageHeader title="Profile" subtitle="Manage your contact details, approved payout account, security and notifications." />
+      <PageHeader eyebrow="Account & support settings" title="Profile" subtitle="Manage your contact details, approved payout account, security and notifications." />
 
       <SectionCard>
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1018,15 +1179,27 @@ export function PartnerProfile() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-bold text-[#0f172a]">{String(partner?.fullName || '')}</h2>
-                <StatusBadge status="Active Partner" />
+                <StatusBadge status={String(partner?.status || 'active')} />
               </div>
-              <p className="text-sm text-slate-gray">Partner ID: {String(partner?.partnerCode || '')}</p>
+              <p className="text-sm text-slate-gray">{String(partner?.partnerType || 'Partner')} · Partner ID: {String(partner?.partnerCode || '')}</p>
               <p className="text-xs text-slate-gray">Joined {String(partner?.createdAt || '').slice(0, 10)}</p>
             </div>
           </div>
-          <div className="rounded-2xl border border-gray-100 bg-gray-50 px-6 py-4 text-center">
-            <p className="text-3xl font-bold text-brand-accent">{commission}%</p>
-            <p className="text-xs text-slate-gray">Admin managed</p>
+          <div className="flex items-center gap-4">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-6 py-4 text-center">
+              <p className="text-3xl font-bold text-brand-accent">{commission}%</p>
+              <p className="text-xs text-slate-gray">Commission rate</p>
+            </div>
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-center">
+              <div className="relative mx-auto h-16 w-16">
+                <svg className="h-16 w-16 -rotate-90" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e5e7eb" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#2563eb" strokeWidth="3" strokeDasharray={`${profileCompletion} 100`} strokeLinecap="round" />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-[#0f172a]">{profileCompletion}%</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-gray">Profile complete</p>
+            </div>
           </div>
         </div>
       </SectionCard>
@@ -1050,6 +1223,10 @@ export function PartnerProfile() {
                   <input className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" value={(form as Record<string, string>)[k]} onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
                 </div>
               ))}
+              <div className="sm:col-span-2">
+                <label className="text-xs text-slate-gray">Partner type</label>
+                <input className="mt-1 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={String(partner?.partnerType || '')} readOnly />
+              </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-slate-gray">Email address</label>
                 <input className="mt-1 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={String(partner?.email || '')} readOnly />

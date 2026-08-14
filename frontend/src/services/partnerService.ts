@@ -15,6 +15,18 @@ api.interceptors.request.use(async (config) => {
   return config
 })
 
+async function downloadAuthedCsv(url: string, filename: string) {
+  const token = useAuthStore.getState().token
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' })
+  if (!res.ok) throw new Error('Export failed')
+  const blob = await res.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 export const partnerService = {
   async meta() {
     const { data } = await api.get<{
@@ -103,11 +115,23 @@ export const partnerService = {
     const { data } = await api.get('/api/partners/me/marketing-kit')
     return data as { items: Array<Record<string, unknown>>; mainReferralUrl: string }
   },
+  referralsExportUrl() {
+    return `${getApiBase()}/api/partners/me/referrals/export`
+  },
+  async exportReferrals() {
+    await downloadAuthedCsv(this.referralsExportUrl(), 'partner-referrals.csv')
+  },
+  payoutStatementUrl() {
+    return `${getApiBase()}/api/partners/me/payouts/statement`
+  },
+  async exportPayoutStatement() {
+    await downloadAuthedCsv(this.payoutStatementUrl(), 'partner-payout-statement.csv')
+  },
 }
 
 export const adminPartnerService = {
   async pendingMeta() {
-    const { data } = await api.get<{ pendingApplications: number; trainings: Array<{ id: string; title: string }> }>(
+    const { data } = await api.get<{ pendingApplications: number; trainings: Array<{ id: string; title: string }>; rejectReasons?: string[] }>(
       '/api/admin/partners/meta',
     )
     return data
@@ -151,6 +175,25 @@ export const adminPartnerService = {
     const { data } = await api.get<{ items: Array<Record<string, unknown>> }>('/api/admin/partners', { params })
     return data
   },
+  partnersExportUrl(params?: Record<string, string>) {
+    const q = new URLSearchParams(params || {}).toString()
+    return `${getApiBase()}/api/admin/partners/export${q ? `?${q}` : ''}`
+  },
+  partnerReferralsExportUrl(partnerId: string) {
+    return `${getApiBase()}/api/admin/partners/${encodeURIComponent(partnerId)}/referrals/export`
+  },
+  payoutsExportUrl() {
+    return `${getApiBase()}/api/admin/partners/payouts/export`
+  },
+  async exportPartners(params?: Record<string, string>) {
+    await downloadAuthedCsv(this.partnersExportUrl(params), 'partners.csv')
+  },
+  async exportPartnerReferrals(partnerId: string) {
+    await downloadAuthedCsv(this.partnerReferralsExportUrl(partnerId), `partner-${partnerId}-referrals.csv`)
+  },
+  async exportPayouts() {
+    await downloadAuthedCsv(this.payoutsExportUrl(), 'eligible-payouts.csv')
+  },
   async createPartner(body: Record<string, unknown>) {
     const { data } = await api.post('/api/admin/partners', body)
     return data
@@ -180,7 +223,7 @@ export const adminPartnerService = {
     return data
   },
   async eligiblePayouts() {
-    const { data } = await api.get<{ items: Array<Record<string, unknown>> }>('/api/admin/partners/payouts/eligible')
+    const { data } = await api.get<{ items: Array<Record<string, unknown>>; summary?: Record<string, number> }>('/api/admin/partners/payouts/eligible')
     return data
   },
   async processPayouts(partnerIds: string[], transactionRef: string, method = 'upi') {

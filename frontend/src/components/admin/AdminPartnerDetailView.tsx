@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Mail,
@@ -38,35 +38,14 @@ import {
   partnerInitials,
   PARTNER_STAT_ICONS,
 } from '@/components/admin/AdminPartnerUI'
-import { BarChart, CopyField, FunnelRow, SectionCard } from '@/components/partner/PartnerUI'
+import { BarChart, CopyField, FunnelRow, qrUrl, SectionCard } from '@/components/partner/PartnerUI'
 import { showAppToast } from '@/components/AppToastHost'
+import { CreatePartnerCouponModal } from '@/components/admin/CreatePartnerCouponModal'
+import { CreatePartnerLinkModal } from '@/components/admin/CreatePartnerLinkModal'
 
 type Tab = 'profile' | 'links' | 'coupons' | 'performance' | 'payouts' | 'activity'
 
 type PartnerData = Awaited<ReturnType<typeof adminPartnerService.getPartner>>
-
-function apiErrorMessage(err: unknown, fallback: string) {
-  if (err && typeof err === 'object' && 'response' in err) {
-    const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
-    if (msg) return String(msg)
-  }
-  return fallback
-}
-
-function normalizeCouponCode(raw: string) {
-  return raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
-}
-
-function suggestCouponCode(partner: Record<string, unknown>, discountValue: string) {
-  const fromName = partnerInitials(String(partner.fullName || 'XP')).replace(/[^A-Z]/g, '')
-  const fromCode = String(partner.partnerCode || '')
-    .replace(/[^A-Za-z0-9]/g, '')
-    .slice(0, 6)
-    .toUpperCase()
-  const base = (fromName.length >= 2 ? fromName : fromCode || 'XP').slice(0, 8)
-  const suffix = String(discountValue || '10').replace(/\D/g, '').slice(0, 3) || '10'
-  return `${base}${suffix}`.slice(0, 16)
-}
 
 const REF_PER_PAGE = 10
 
@@ -89,10 +68,10 @@ function fmtDate(raw: string) {
 function activityLabel(action: string, meta: Record<string, unknown>) {
   const a = action.toLowerCase()
   if (a.includes('approve') || a === 'partner_created') return 'Partner approved and account created'
-  if (a.includes('link')) return `Referral link '${String(meta.label || meta.slug || 'link')}' created`
+  if (a.includes('link') || a.includes('referral_link')) return `Referral link '${String(meta.label || meta.slug || 'link')}' created`
   if (a.includes('coupon')) return `Coupon ${String(meta.code || meta.couponCode || '')} created`
-  if (a.includes('payout') || a.includes('bank')) return 'Payout details updated'
   if (a.includes('bank') && a.includes('approv')) return 'Bank details approved'
+  if (a.includes('bank') && a.includes('reject')) return 'Bank change rejected'
   if (a === 'commission_earned') return 'Successful student payment attributed'
   return action.replace(/_/g, ' ')
 }
@@ -133,6 +112,7 @@ function Panel({ title, action, children }: { title: string; action?: React.Reac
 
 export function AdminPartnerDetail() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('profile')
   const [data, setData] = useState<PartnerData | null>(null)
@@ -141,14 +121,8 @@ export function AdminPartnerDetail() {
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
-  const [showLinkForm, setShowLinkForm] = useState(false)
-  const [showCouponForm, setShowCouponForm] = useState(false)
-  const [linkForm, setLinkForm] = useState({ label: '', linkType: 'site_wide', trainingId: '', customSlug: '' })
-  const [couponForm, setCouponForm] = useState({ code: '', discountType: 'percent', discountValue: '10' })
-  const [couponError, setCouponError] = useState('')
-  const [linkError, setLinkError] = useState('')
-  const [creatingLink, setCreatingLink] = useState(false)
-  const [creatingCoupon, setCreatingCoupon] = useState(false)
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [showCouponModal, setShowCouponModal] = useState(false)
   const [trainings, setTrainings] = useState<Array<{ id: string; title: string }>>([])
   const [refPage, setRefPage] = useState(1)
 
@@ -170,6 +144,11 @@ export function AdminPartnerDetail() {
     reload()
     adminPartnerService.pendingMeta().then((m) => setTrainings(m.trainings || [])).catch(() => undefined)
   }, [id])
+
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t && TABS.some((x) => x.id === t)) setTab(t as Tab)
+  }, [searchParams])
 
   const stats = (data?.stats || {}) as Record<string, number | Array<{ date: string; value: number }>>
   const p = data?.partner || {}
@@ -198,101 +177,30 @@ export function AdminPartnerDetail() {
     let applied = 0
     let success = 0
     let commission = 0
+    let revenue = 0
     for (const c of coupons) {
       applied += Number(c.appliedCount || 0)
       success += Number(c.successCount || 0)
       commission += Number(c.earnings || 0)
+      revenue += Number(c.netRevenue || 0)
     }
     const created = Math.max(applied, success)
     return {
       applied,
-      uniqueStudents: Math.min(applied, success + Math.floor(applied * 0.65)),
+      uniqueStudents: success,
       paymentsCreated: created,
       successful: success,
-      revenue: commission > 0 ? commission * 10 : 0,
+      revenue,
       commission,
     }
   }, [coupons])
 
-  const openCouponForm = () => {
-    setCouponError('')
-    setShowCouponForm(true)
-    if (data?.partner) {
-      setCouponForm((f) => ({
-        ...f,
-        code: f.code.trim() ? f.code : suggestCouponCode(data.partner, f.discountValue),
-      }))
-    }
-  }
-
-  const handleCreateLink = async () => {
-    if (!id) return
-    if (!linkForm.label.trim()) {
-      setLinkError('Please enter a label for this link.')
-      return
-    }
-    if (linkForm.linkType === 'training' && !linkForm.trainingId) {
-      setLinkError('Please select a training for training-specific links.')
-      return
-    }
-    setLinkError('')
-    setCreatingLink(true)
-    try {
-      await adminPartnerService.createLink(id, linkForm)
-      setShowLinkForm(false)
-      setLinkForm({ label: '', linkType: 'site_wide', trainingId: '', customSlug: '' })
-      showAppToast('Referral link created')
-      reload()
-    } catch (err) {
-      const msg = apiErrorMessage(err, 'Could not create referral link')
-      setLinkError(msg)
-      showAppToast(msg, 'error')
-    } finally {
-      setCreatingLink(false)
-    }
-  }
-
-  const handleCreateCoupon = async () => {
-    if (!id) return
-    const code = normalizeCouponCode(couponForm.code)
-    const discountValue = Number(couponForm.discountValue)
-    if (code.length < 3) {
-      const msg = 'Coupon code must be at least 3 letters or numbers (A–Z, 0–9).'
-      setCouponError(msg)
-      showAppToast(msg, 'error')
-      return
-    }
-    if (!Number.isFinite(discountValue) || discountValue <= 0) {
-      const msg = 'Enter a discount value greater than 0.'
-      setCouponError(msg)
-      showAppToast(msg, 'error')
-      return
-    }
-    setCouponError('')
-    setCreatingCoupon(true)
-    try {
-      await adminPartnerService.createCoupon(id, {
-        code,
-        discountType: couponForm.discountType,
-        discountValue,
-        usageLimitTotal: 500,
-        usageLimitPerStudent: 1,
-        trainingScope: 'all',
-      })
-      setShowCouponForm(false)
-      setCouponForm({ code: '', discountType: 'percent', discountValue: '10' })
-      showAppToast(`Coupon ${code} created`)
-      reload()
-    } catch (err) {
-      const msg = apiErrorMessage(err, 'Could not create coupon')
-      setCouponError(msg)
-      showAppToast(msg, 'error')
-    } finally {
-      setCreatingCoupon(false)
-    }
-  }
   const refPages = Math.max(1, Math.ceil(referrals.length / REF_PER_PAGE))
   const refSlice = referrals.slice((refPage - 1) * REF_PER_PAGE, refPage * REF_PER_PAGE)
+  const referralNet = Number(stats.referralNetPaid || 0)
+  const couponNet = Number(stats.couponNetPaid || 0)
+  const referralCommissionAmt = Number(stats.referralCommission || linkStats.commission)
+  const couponCommissionAmt = Number(stats.couponCommission || couponStats.commission)
 
   const bank = (p.bank || {}) as Record<string, string>
   const bankLine = bank.accountNumber
@@ -496,6 +404,51 @@ export function AdminPartnerDetail() {
             </div>
             {p.pan ? <InfoRow icon={FileText} label="PAN number" value={String(p.pan)} /> : null}
             {p.upiId ? <InfoRow icon={Wallet} label="UPI ID" value={String(p.upiId)} /> : null}
+            {p.bankPendingApproval ? (
+              <div className="mt-4 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-900">Pending bank/UPI change — requires approval</p>
+                {(() => {
+                  const pending = (p.bankPendingApproval || {}) as Record<string, unknown>
+                  const pendingBank = (pending.bank || {}) as Record<string, string>
+                  return (
+                    <div className="text-xs text-amber-900 space-y-1">
+                      {pending.upiId ? <p>UPI: {String(pending.upiId)}</p> : null}
+                      {pendingBank.accountNumber ? (
+                        <p>
+                          Bank: {pendingBank.bankName || 'Bank'} · ****{pendingBank.accountNumber.slice(-4)} · {pendingBank.ifsc}
+                        </p>
+                      ) : null}
+                    </div>
+                  )
+                })()}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+                    onClick={async () => {
+                      if (!id) return
+                      await adminPartnerService.updatePartner(id, { approveBank: true })
+                      showAppToast('Bank details approved')
+                      reload()
+                    }}
+                  >
+                    Approve change
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900"
+                    onClick={async () => {
+                      if (!id) return
+                      await adminPartnerService.updatePartner(id, { rejectBank: true })
+                      showAppToast('Bank change rejected')
+                      reload()
+                    }}
+                  >
+                    Reject change
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </Panel>
 
           <Panel title="Internal notes">
@@ -529,40 +482,14 @@ export function AdminPartnerDetail() {
             </div>
             <button
               type="button"
-              onClick={() => setShowLinkForm((v) => !v)}
+              onClick={() => setShowLinkModal(true)}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
             >
               <Plus className="h-4 w-4" /> Create referral link
             </button>
           </div>
-          {showLinkForm ? (
-            <SectionCard className="space-y-3">
-              <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Label" value={linkForm.label} onChange={(e) => setLinkForm((f) => ({ ...f, label: e.target.value }))} />
-              <select className="w-full rounded-xl border px-3 py-2 text-sm" value={linkForm.linkType} onChange={(e) => setLinkForm((f) => ({ ...f, linkType: e.target.value }))}>
-                <option value="site_wide">Site-wide</option>
-                <option value="training">Training-specific</option>
-              </select>
-              {linkForm.linkType === 'training' ? (
-                <select className="w-full rounded-xl border px-3 py-2 text-sm" value={linkForm.trainingId} onChange={(e) => setLinkForm((f) => ({ ...f, trainingId: e.target.value }))}>
-                  <option value="">Select training</option>
-                  {trainings.map((t) => (
-                    <option key={t.id} value={t.id}>{t.title}</option>
-                  ))}
-                </select>
-              ) : null}
-              {linkError ? <p className="text-sm text-red-600">{linkError}</p> : null}
-              <button
-                type="button"
-                disabled={creatingLink}
-                className="rounded-xl bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() => void handleCreateLink()}
-              >
-                {creatingLink ? 'Creating…' : 'Create link'}
-              </button>
-            </SectionCard>
-          ) : null}
           {links.map((l) => {
-            const rev = Number(l.earnings || 0) > 0 && pct > 0 ? Math.round(Number(l.earnings) / (pct / 100)) : Number(l.earnings || 0) * 10
+            const rev = Number(l.netRevenue || 0)
             return (
               <SectionCard key={String(l.id)}>
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
@@ -582,7 +509,8 @@ export function AdminPartnerDetail() {
                   )}
                 </div>
                 <CopyField value={String(l.url)} />
-                <div className="mt-4 overflow-x-auto">
+                <div className="mt-4 flex flex-wrap items-start gap-4">
+                  <div className="min-w-0 flex-1 overflow-x-auto">
                   <table className="min-w-full text-xs">
                     <thead>
                       <tr className="text-left text-[10px] uppercase tracking-wider text-slate-gray">
@@ -603,7 +531,15 @@ export function AdminPartnerDetail() {
                       </tr>
                     </tbody>
                   </table>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-center gap-1 rounded-xl border bg-gray-50 p-2">
+                    <img src={qrUrl(String(l.url), 96)} alt="" className="rounded bg-white" width={96} height={96} />
+                    <span className="text-[10px] text-slate-gray">QR code</span>
+                  </div>
                 </div>
+                {l.commissionOverride != null && l.commissionOverride !== '' ? (
+                  <p className="mt-2 text-[11px] text-slate-gray">Commission override: {Number(l.commissionOverride)}%</p>
+                ) : null}
                 <p className="mt-3 text-[11px] text-slate-gray">
                   Created {String(l.createdAt || '—')}
                   {l.validTill ? ` · Valid until ${String(l.validTill)}` : ' · No expiry'}
@@ -624,51 +560,12 @@ export function AdminPartnerDetail() {
             </div>
             <button
               type="button"
-              onClick={() => (showCouponForm ? setShowCouponForm(false) : openCouponForm())}
+              onClick={() => setShowCouponModal(true)}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-600"
             >
               <Plus className="h-4 w-4" /> Create coupon
             </button>
           </div>
-          {showCouponForm ? (
-            <SectionCard className="space-y-3">
-              <div>
-                <label htmlFor="coupon-code" className="block text-xs font-medium text-slate-gray mb-1">Coupon code</label>
-                <input
-                  id="coupon-code"
-                  className="w-full rounded-xl border px-3 py-2 text-sm uppercase font-mono"
-                  placeholder="e.g. RISHU10"
-                  value={couponForm.code}
-                  onChange={(e) => {
-                    setCouponError('')
-                    setCouponForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))
-                  }}
-                />
-                <p className="mt-1 text-[11px] text-slate-gray">At least 3 characters, letters and numbers only. Must be unique across the platform.</p>
-              </div>
-              <select className="w-full rounded-xl border px-3 py-2 text-sm" value={couponForm.discountType} onChange={(e) => setCouponForm((f) => ({ ...f, discountType: e.target.value }))}>
-                <option value="percent">Percentage</option>
-                <option value="flat">Flat ₹</option>
-              </select>
-              <input
-                className="w-full rounded-xl border px-3 py-2 text-sm"
-                placeholder="Discount value"
-                type="number"
-                min={1}
-                value={couponForm.discountValue}
-                onChange={(e) => setCouponForm((f) => ({ ...f, discountValue: e.target.value }))}
-              />
-              {couponError ? <p className="text-sm text-red-600">{couponError}</p> : null}
-              <button
-                type="button"
-                disabled={creatingCoupon}
-                className="rounded-xl bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() => void handleCreateCoupon()}
-              >
-                {creatingCoupon ? 'Creating…' : 'Create coupon'}
-              </button>
-            </SectionCard>
-          ) : null}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <AdminStatCard label="Coupon applications" value={couponStats.applied} sub={`${couponStats.uniqueStudents} unique students`} icon={Gift} iconBg="bg-blue-50" iconColor="text-brand-accent" />
             <AdminStatCard label="Payments created" value={couponStats.paymentsCreated} sub={couponStats.applied ? `${Math.round((couponStats.paymentsCreated / couponStats.applied) * 1000) / 10}% of applications` : '—'} icon={CreditCard} iconBg="bg-violet-50" iconColor="text-violet-600" />
@@ -704,7 +601,7 @@ export function AdminPartnerDetail() {
                       ['Applied', used],
                       ['Payment created', Number(c.appliedCount || 0)],
                       ['Successful', Number(c.successCount || 0)],
-                      ['Revenue', fmtInr(Number(c.earnings || 0) * 10)],
+                      ['Revenue', fmtInr(Number(c.netRevenue || 0))],
                       ['Commission', fmtInr(Number(c.earnings || 0))],
                     ].map(([lbl, val]) => (
                       <div key={String(lbl)}>
@@ -714,8 +611,9 @@ export function AdminPartnerDetail() {
                     ))}
                   </div>
                   <p className="mt-3 text-[11px] text-slate-gray">
-                    Valid for {c.trainingScope === 'all' ? 'All trainings' : 'Selected trainings'}
+                    Valid for {c.trainingScope === 'all' ? 'All trainings' : c.trainingScope === 'one' ? 'One training' : 'Selected trainings'}
                     {c.validTill ? ` until ${String(c.validTill)}` : ''}
+                    {c.commissionOverride != null && c.commissionOverride !== '' ? ` · Commission ${Number(c.commissionOverride)}%` : ''}
                     {c.active !== false ? ' · Active' : ' · Inactive'}
                   </p>
                 </SectionCard>
@@ -737,7 +635,8 @@ export function AdminPartnerDetail() {
           <div className="grid gap-4 lg:grid-cols-2">
             <SectionCard>
               <h3 className="font-bold text-[#0f172a] mb-1">Referral link revenue</h3>
-              <p className="text-2xl font-bold text-brand-accent mb-4">{fmtInr(linkStats.commission > 0 && pct ? Math.round(linkStats.commission / (pct / 100)) : linkStats.revenue * 0.54)}</p>
+              <p className="text-2xl font-bold text-brand-accent mb-4">{fmtInr(referralNet)}</p>
+              <p className="text-xs text-slate-gray mb-3">{fmtInr(referralCommissionAmt)} commission from referral links</p>
               <div className="grid grid-cols-4 gap-2 text-center text-xs">
                 {[['Clicks', linkStats.clicks], ['Payments created', linkStats.created], ['Successful paid', linkStats.success], ['Commission', fmtInr(linkStats.commission)]].map(([lbl, val]) => (
                   <div key={String(lbl)}>
@@ -749,7 +648,8 @@ export function AdminPartnerDetail() {
             </SectionCard>
             <SectionCard>
               <h3 className="font-bold text-[#0f172a] mb-1">Coupon code revenue</h3>
-              <p className="text-2xl font-bold text-orange-600 mb-4">{fmtInr(couponStats.revenue || Number(stats.totalSales || 0) * 0.46)}</p>
+              <p className="text-2xl font-bold text-orange-600 mb-4">{fmtInr(couponNet || couponStats.revenue)}</p>
+              <p className="text-xs text-slate-gray mb-3">{fmtInr(couponCommissionAmt)} commission from coupons</p>
               <div className="grid grid-cols-4 gap-2 text-center text-xs">
                 {[['Coupons applied', couponStats.applied], ['Payments created', couponStats.paymentsCreated], ['Successful paid', couponStats.successful], ['Commission', fmtInr(couponStats.commission)]].map(([lbl, val]) => (
                   <div key={String(lbl)}>
@@ -786,7 +686,11 @@ export function AdminPartnerDetail() {
                 <h3 className="text-lg font-bold text-[#0f172a]">Attributed student payments</h3>
                 <p className="text-sm text-slate-gray">Students who paid through this partner&apos;s links or coupons.</p>
               </div>
-              <button type="button" className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={() => id && void adminPartnerService.exportPartnerReferrals(id)}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold hover:bg-gray-50"
+              >
                 <Download className="h-4 w-4" /> Export students
               </button>
             </div>
@@ -958,6 +862,33 @@ export function AdminPartnerDetail() {
             {!activity.length ? <p className="p-8 text-center text-sm text-slate-gray">No activity logged yet.</p> : null}
           </SectionCard>
         </div>
+      ) : null}
+
+      {id && data ? (
+        <>
+          <CreatePartnerLinkModal
+            open={showLinkModal}
+            partnerId={id}
+            partner={data.partner}
+            trainings={trainings}
+            onClose={() => setShowLinkModal(false)}
+            onCreated={() => {
+              showAppToast('Referral link created')
+              reload()
+            }}
+          />
+          <CreatePartnerCouponModal
+            open={showCouponModal}
+            partnerId={id}
+            partner={data.partner}
+            trainings={trainings}
+            onClose={() => setShowCouponModal(false)}
+            onCreated={() => {
+              showAppToast('Coupon created')
+              reload()
+            }}
+          />
+        </>
       ) : null}
     </div>
   )

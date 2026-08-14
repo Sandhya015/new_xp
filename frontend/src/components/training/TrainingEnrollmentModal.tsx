@@ -109,6 +109,8 @@ export function TrainingEnrollmentModal({
 
   const [couponCode, setCouponCode] = useState('')
   const [couponApplied, setCouponApplied] = useState('')
+  const [couponDiscount, setCouponDiscount] = useState(0)
+  const [couponValidating, setCouponValidating] = useState(false)
   const [couponError, setCouponError] = useState<string | null>(null)
   const [includeKit, setIncludeKit] = useState(false)
 
@@ -264,10 +266,13 @@ export function TrainingEnrollmentModal({
   const courseGross = course?.price ?? 0
   const kitGross = includeKit ? kitPrice : 0
   const subtotalIncl = Math.round((courseGross + kitGross) * 100) / 100
-  const couponCheck = applyCouponToCourseLine(courseGross, couponApplied, coupons)
-  const afterCourseGross = couponCheck.gross
+  const localCouponMatch = couponApplied && coupons.some((x) => x.code === couponApplied)
+  const couponCheck = localCouponMatch
+    ? applyCouponToCourseLine(courseGross, couponApplied, coupons)
+    : { ok: true as const, gross: Math.max(0, courseGross - couponDiscount), message: '' }
+  const afterCourseGross = couponApplied ? couponCheck.gross : courseGross
   const afterKitGross = kitGross
-  const rawDiscount = Math.round((courseGross - afterCourseGross) * 100) / 100
+  const rawDiscount = couponApplied ? Math.round((courseGross - afterCourseGross) * 100) / 100 : 0
   const totalGross = Math.round((afterCourseGross + afterKitGross) * 100) / 100
 
   const courseSplit = splitInrTaxInclusive(courseGross, gstRate)
@@ -418,16 +423,41 @@ export function TrainingEnrollmentModal({
     email: email.trim(),
   })
 
-  const onApplyCoupon = () => {
+  const onApplyCoupon = async () => {
     setCouponError(null)
-    const r = applyCouponToCourseLine(course?.price ?? 0, couponCode, coupons)
-    if (!r.ok) {
-      setCouponError(r.message || 'Invalid or expired coupon code.')
+    const code = couponCode.trim().toUpperCase()
+    if (!code) {
       setCouponApplied('')
+      setCouponDiscount(0)
       return
     }
-    setCouponApplied(couponCode.trim().toUpperCase())
-    setCouponError(null)
+    const local = applyCouponToCourseLine(course?.price ?? 0, code, coupons)
+    if (local.ok && coupons.some((x) => x.code === code)) {
+      setCouponApplied(code)
+      setCouponDiscount(Math.round(((course?.price ?? 0) - local.gross) * 100) / 100)
+      setCouponError(null)
+      return
+    }
+    if (!course?.id) return
+    setCouponValidating(true)
+    try {
+      const r = await paymentService.validateCoupon(course.id, code)
+      if (!r.valid) {
+        setCouponError(r.error || 'Invalid or expired coupon code.')
+        setCouponApplied('')
+        setCouponDiscount(0)
+        return
+      }
+      setCouponApplied(code)
+      setCouponDiscount(r.discountInr ?? 0)
+      setCouponError(null)
+    } catch {
+      setCouponError('Could not validate coupon. Please try again.')
+      setCouponApplied('')
+      setCouponDiscount(0)
+    } finally {
+      setCouponValidating(false)
+    }
   }
 
   const runPayment = async () => {
@@ -743,8 +773,13 @@ export function TrainingEnrollmentModal({
                     placeholder="Coupon code"
                     className="flex-1 min-w-[8rem] rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   />
-                  <button type="button" onClick={onApplyCoupon} className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-200">
-                    Apply
+                  <button
+                    type="button"
+                    onClick={() => void onApplyCoupon()}
+                    disabled={couponValidating}
+                    className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-200 disabled:opacity-50"
+                  >
+                    {couponValidating ? 'Checking…' : 'Apply'}
                   </button>
                 </div>
                 {couponError ? <p className="text-sm text-red-600">{couponError}</p> : null}

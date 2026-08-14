@@ -17,17 +17,22 @@ from app.partner_program import (
     REJECT_REASONS,
     append_app_history,
     applications_coll,
+    asset_net_revenue,
     auto_reject_stale_info_requests,
     commissions_coll,
     coupons_coll,
     create_partner_coupon,
     create_partner_from_fields,
     create_referral_link,
+    enrich_coupons_with_revenue,
+    enrich_links_with_revenue,
     enhanced_partner_stats,
     links_coll,
+    log_partner_activity,
     partners_coll,
     partner_activity_coll,
     partner_stats,
+    payout_summary_stats,
     payouts_coll,
     process_payouts,
     push_partner_notification,
@@ -417,6 +422,9 @@ def admin_get_partner(partner_id):
         return jsonify({"error": "Not found"}), 404
     links = [serialize_link(x) for x in links_coll().find({"partnerId": partner_id}).sort("createdAt", -1)]
     coupons = [serialize_coupon(x) for x in coupons_coll().find({"partnerId": partner_id}).sort("createdAt", -1)]
+    by_slug, by_code = asset_net_revenue(partner_id)
+    links = enrich_links_with_revenue(links, by_slug)
+    coupons = enrich_coupons_with_revenue(coupons, by_code)
     activity = []
     try:
         for a in partner_activity_coll().find({"partnerId": partner_id}).sort("createdAt", -1).limit(100):
@@ -536,7 +544,7 @@ def admin_update_partner(partner_id):
         patch["commissionPercent"] = float(data.get("commissionPercent") or 0)
     if "notes" in data:
         patch["notes"] = str(data.get("notes") or "")[:2000]
-    if data.get("approveBank") and isinstance(data.get("bankPendingApproval") or partners_coll().find_one({"_id": ObjectId(partner_id)}, {"bankPendingApproval": 1}), dict):
+    if data.get("approveBank"):
         p = partners_coll().find_one({"_id": ObjectId(partner_id)})
         pending = p.get("bankPendingApproval") if p else None
         if pending:
@@ -544,11 +552,28 @@ def admin_update_partner(partner_id):
             patch["pan"] = pending.get("pan") or p.get("pan")
             patch["upiId"] = pending.get("upiId") or p.get("upiId")
             patch["bankPendingApproval"] = None
+    elif data.get("rejectBank"):
+        p = partners_coll().find_one({"_id": ObjectId(partner_id)})
+        if p and p.get("bankPendingApproval"):
+            patch["bankPendingApproval"] = None
     prev = partners_coll().find_one({"_id": ObjectId(partner_id)})
     if patch:
         patch["updatedAt"] = datetime.utcnow()
         partners_coll().update_one({"_id": ObjectId(partner_id)}, {"$set": patch})
     p = partners_coll().find_one({"_id": ObjectId(partner_id)})
+    if data.get("approveBank") and prev and prev.get("bankPendingApproval") and p:
+        log_partner_activity(partner_id, "bank_details_approved", {})
+        push_partner_notification(partner_id, "Bank details approved", "Your updated payout details are now active.")
+        send_email(
+            current_app.config,
+            p.get("email") or "",
+            "Your payout details were approved",
+            f"<p>Hi {p.get('fullName')},</p><p>Your bank/UPI update has been approved and will be used for future payouts.</p>",
+            text_body="Your payout details were approved.",
+        )
+    if data.get("rejectBank") and prev and prev.get("bankPendingApproval") and p:
+        log_partner_activity(partner_id, "bank_change_rejected", {})
+        push_partner_notification(partner_id, "Bank update not approved", "Your previous approved payout details remain active.")
     # Suspension notification
     if patch.get("status") == "suspended" and (prev or {}).get("status") != "suspended" and p:
         send_email(
@@ -582,6 +607,21 @@ def admin_create_link(partner_id):
         link = create_referral_link(p, data, config=current_app.config)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    log_partner_activity(partner_id, "referral_link_created", {
+        "label": link.get("label"),
+        "slug": link.get("slug"),
+        "url": link.get("url"),
+    })
+    actor = _actor()
+    log_admin_action(
+        action="partner_link_created",
+        entity_type="partner",
+        entity_id=partner_id,
+        meta={"slug": link.get("slug"), "label": link.get("label")},
+        request=request,
+        actor_id=actor["id"],
+        actor_email=actor["email"],
+    )
     # notify partner
     send_email(
         current_app.config,
@@ -609,6 +649,21 @@ def admin_create_coupon(partner_id):
         coupon = create_partner_coupon(p, data)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    log_partner_activity(partner_id, "coupon_created", {
+        "code": coupon.get("code"),
+        "discountType": coupon.get("discountType"),
+        "discountValue": coupon.get("discountValue"),
+    })
+    actor = _actor()
+    log_admin_action(
+        action="partner_coupon_created",
+        entity_type="partner",
+        entity_id=partner_id,
+        meta={"code": coupon.get("code")},
+        request=request,
+        actor_id=actor["id"],
+        actor_email=actor["email"],
+    )
     send_email(
         current_app.config,
         p.get("email") or "",
@@ -647,8 +702,10 @@ def admin_payouts_eligible():
             "commissionCount": r["count"],
             "upiId": p.get("upiId") or "",
             "bank": p.get("bank") or {},
+            "lastPaidAt": _partner_last_payout_date(pid),
         })
-    return jsonify({"items": items})
+    summary = payout_summary_stats()
+    return jsonify({"items": items, "summary": summary})
 
 
 @partners_admin_bp.route("/partners/payouts/process", methods=["POST"])
@@ -723,3 +780,108 @@ def admin_app_notes(app_id):
     append_app_history(doc["_id"], "admin_note", "admin", note)
     applications_coll().update_one({"_id": doc["_id"]}, {"$set": {"internalNotes": note, "updatedAt": datetime.utcnow()}})
     return jsonify({"ok": True})
+
+
+def _partner_last_payout_date(partner_id: str) -> str:
+    po = payouts_coll().find_one({"partnerId": partner_id, "status": "paid"}, sort=[("createdAt", -1)])
+    if not po:
+        return ""
+    created = po.get("createdAt")
+    return created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else ""
+
+
+@partners_admin_bp.route("/partners/export", methods=["GET"])
+@jwt_required()
+def admin_export_partners():
+    err = _admin_err()
+    if err:
+        return err
+    import csv
+    from io import StringIO
+    from flask import Response
+    status = (request.args.get("status") or "").strip().lower()
+    q: dict = {"status": {"$ne": "deleted"}}
+    if status:
+        q["status"] = status
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["partnerCode", "fullName", "email", "phone", "partnerType", "status", "totalSuccessful", "totalEarnings", "totalPaid", "createdAt"])
+    for p in partners_coll().find(q).sort("createdAt", -1).limit(5000):
+        created = p.get("createdAt")
+        w.writerow([
+            p.get("partnerCode") or "",
+            p.get("fullName") or "",
+            p.get("email") or "",
+            p.get("phone") or "",
+            p.get("partnerType") or "",
+            p.get("status") or "",
+            int(p.get("totalSuccessful") or 0),
+            float(p.get("totalEarnings") or 0),
+            float(p.get("totalPaid") or 0),
+            created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else "",
+        ])
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=partners.csv"})
+
+
+@partners_admin_bp.route("/partners/<partner_id>/referrals/export", methods=["GET"])
+@jwt_required()
+def admin_export_partner_referrals(partner_id):
+    err = _admin_err()
+    if err:
+        return err
+    if not ObjectId.is_valid(partner_id):
+        return jsonify({"error": "Invalid id"}), 400
+    import csv
+    from io import StringIO
+    from flask import Response
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["date", "studentName", "studentEmail", "training", "source", "sourceDetail", "netPaid", "commission", "status"])
+    for row in _admin_partner_referrals(partner_id):
+        w.writerow([
+            row.get("date") or "",
+            row.get("studentName") or "",
+            row.get("studentEmail") or "",
+            row.get("training") or "",
+            row.get("source") or "",
+            row.get("sourceDetail") or "",
+            row.get("amount") or 0,
+            row.get("commission") or 0,
+            row.get("status") or "",
+        ])
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=partner-{partner_id}-referrals.csv"})
+
+
+@partners_admin_bp.route("/partners/payouts/export", methods=["GET"])
+@jwt_required()
+def admin_export_payouts():
+    err = _admin_err()
+    if err:
+        return err
+    import csv
+    from io import StringIO
+    from flask import Response
+    release_eligible_commissions()
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["partnerCode", "fullName", "email", "eligibleAmount", "commissionCount", "upiId", "lastPaidAt"])
+    pipeline = [
+        {"$match": {"status": "eligible"}},
+        {"$group": {"_id": "$partnerId", "amount": {"$sum": "$commissionAmount"}, "count": {"$sum": 1}}},
+        {"$match": {"amount": {"$gte": 500}}},
+    ]
+    for r in commissions_coll().aggregate(pipeline):
+        pid = r["_id"]
+        p = partners_coll().find_one({"_id": ObjectId(pid)}) if ObjectId.is_valid(str(pid)) else None
+        if not p:
+            continue
+        w.writerow([
+            p.get("partnerCode") or "",
+            p.get("fullName") or "",
+            p.get("email") or "",
+            round(float(r["amount"]), 2),
+            r["count"],
+            p.get("upiId") or "",
+            _partner_last_payout_date(str(pid)),
+        ])
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=eligible-payouts.csv"})

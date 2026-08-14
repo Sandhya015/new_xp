@@ -104,52 +104,71 @@ def resolve_checkout_coupon(
     if row is None:
         row = _find_row_in_list([x for x in global_rows if isinstance(x, dict)], cu)
 
-    # Partner affiliate coupons (after course/global catalog coupons)
-    if row is None:
-        try:
-            from app.partner_program import partner_coupon_to_pricing
-            cid0 = str(course.get("_id") or "")
-            pricing_p, err_p = partner_coupon_to_pricing(cu, course_id=cid0)
-            if pricing_p:
-                return pricing_p, None
+    if row is not None:
+        if _row_active_and_dates_ok(row):
+            pricing = _coupon_row_to_pricing_dict(row)
+            if pricing.get("percentOff") or pricing.get("rupeesOff"):
+                try:
+                    max_uses = int(row["maxUses"]) if row.get("maxUses") is not None and str(row.get("maxUses")).strip() != "" else None
+                except (TypeError, ValueError):
+                    max_uses = None
+                try:
+                    per_user = int(row.get("perUserLimit", 1))
+                except (TypeError, ValueError):
+                    per_user = 1
+                if per_user < 1:
+                    per_user = 1
+
+                cid = str(course.get("_id") or "")
+                if not cid:
+                    return None, "Invalid course."
+
+                if max_uses is not None and max_uses >= 0:
+                    used = _count_redemptions(orders_coll, cid, cu, user_id=None)
+                    if used >= max_uses:
+                        return None, "This coupon has reached its usage limit."
+
+                user_uses = _count_redemptions(orders_coll, cid, cu, user_id=user_id)
+                if user_uses >= per_user:
+                    return None, "You have already used this coupon the maximum number of times."
+
+                return pricing, None
+
+    return _resolve_partner_coupon(cu, course, user_id, orders_coll)
+
+
+def _resolve_partner_coupon(
+    cu: str,
+    course: dict,
+    user_id: str,
+    orders_coll,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve partner affiliate coupon; enforces per-student usage limits."""
+    try:
+        from app.partner_program import get_partner_coupon_by_code, partner_coupon_to_pricing
+
+        cid0 = str(course.get("_id") or "")
+        pricing_p, err_p = partner_coupon_to_pricing(cu, course_id=cid0)
+        if not pricing_p:
             if err_p and "not valid for this training" in (err_p or "").lower():
                 return None, err_p
             return None, err_p or "Invalid or expired coupon code."
-        except Exception:
-            return None, "Invalid or expired coupon code."
 
-    if not _row_active_and_dates_ok(row):
+        pc = get_partner_coupon_by_code(cu)
+        if pc and cid0:
+            try:
+                per_user = int(pc.get("usageLimitPerStudent") or 1)
+            except (TypeError, ValueError):
+                per_user = 1
+            if per_user < 1:
+                per_user = 1
+            user_uses = _count_redemptions(orders_coll, cid0, cu, user_id=user_id)
+            if user_uses >= per_user:
+                return None, "You have already used this coupon the maximum number of times."
+
+        return pricing_p, None
+    except Exception:
         return None, "Invalid or expired coupon code."
-
-    pricing = _coupon_row_to_pricing_dict(row)
-    if not pricing.get("percentOff") and not pricing.get("rupeesOff"):
-        return None, "Invalid or expired coupon code."
-
-    try:
-        max_uses = int(row["maxUses"]) if row.get("maxUses") is not None and str(row.get("maxUses")).strip() != "" else None
-    except (TypeError, ValueError):
-        max_uses = None
-    try:
-        per_user = int(row.get("perUserLimit", 1))
-    except (TypeError, ValueError):
-        per_user = 1
-    if per_user < 1:
-        per_user = 1
-
-    cid = str(course.get("_id") or "")
-    if not cid:
-        return None, "Invalid course."
-
-    if max_uses is not None and max_uses >= 0:
-        used = _count_redemptions(orders_coll, cid, cu, user_id=None)
-        if used >= max_uses:
-            return None, "This coupon has reached its usage limit."
-
-    user_uses = _count_redemptions(orders_coll, cid, cu, user_id=user_id)
-    if user_uses >= per_user:
-        return None, "You have already used this coupon the maximum number of times."
-
-    return pricing, None
 
 
 def kit_price_from_course_and_settings(course: dict, settings_doc: dict) -> float:

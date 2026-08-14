@@ -13,11 +13,14 @@ from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from app.partner_program import (
     append_app_history,
     applications_coll,
+    asset_net_revenue,
     can_apply,
     check_status_rate_limit,
     commissions_coll,
     coupons_coll,
     create_application,
+    enrich_coupons_with_revenue,
+    enrich_links_with_revenue,
     enhanced_partner_stats,
     generate_payout_receipt_pdf,
     get_partner_by_user_id,
@@ -34,6 +37,7 @@ from app.partner_program import (
     serialize_coupon,
     serialize_link,
     serialize_partner,
+    sign_reply_token,
     verify_partner_otp,
     verify_recaptcha,
     verify_reply_token,
@@ -113,6 +117,8 @@ def partners_apply():
     if get_db() is None:
         return jsonify({"error": "Database not configured"}), 503
     data = request.get_json() or {}
+    if (data.get("companyWebsite") or "").strip():
+        return jsonify({"error": "Submission rejected."}), 400
     if not verify_recaptcha(data.get("recaptchaToken") or "", current_app.config):
         return jsonify({"error": "Security check failed. Please refresh and try again."}), 400
     # Required fields
@@ -193,7 +199,11 @@ def partners_status():
     doc = applications_coll().find_one({"applicationId": ref, "email": email})
     if not doc:
         return jsonify({"error": "We couldn't find an application with these details."}), 404
-    return jsonify({"application": serialize_application(doc, public=True)})
+    app_out = serialize_application(doc, public=True)
+    if doc.get("status") == "needs_more_info":
+        secret = (current_app.config.get("SECRET_KEY") or "xpertintern")[:64]
+        app_out["replyToken"] = sign_reply_token(ref, secret)
+    return jsonify({"application": app_out})
 
 
 @partners_bp.route("/reply", methods=["POST"])
@@ -283,7 +293,10 @@ def partner_my_links():
     res = _partner_required()
     if not isinstance(res, dict):
         return res
-    items = [serialize_link(x) for x in links_coll().find({"partnerId": str(res["_id"])}).sort("createdAt", -1)]
+    pid = str(res["_id"])
+    items = [serialize_link(x) for x in links_coll().find({"partnerId": pid}).sort("createdAt", -1)]
+    by_slug, _ = asset_net_revenue(pid)
+    items = enrich_links_with_revenue(items, by_slug)
     return jsonify({"items": items})
 
 
@@ -293,7 +306,10 @@ def partner_my_coupons():
     res = _partner_required()
     if not isinstance(res, dict):
         return res
-    items = [serialize_coupon(x) for x in coupons_coll().find({"partnerId": str(res["_id"])}).sort("createdAt", -1)]
+    pid = str(res["_id"])
+    items = [serialize_coupon(x) for x in coupons_coll().find({"partnerId": pid}).sort("createdAt", -1)]
+    _, by_code = asset_net_revenue(pid)
+    items = enrich_coupons_with_revenue(items, by_code)
     return jsonify({"items": items})
 
 
@@ -525,10 +541,85 @@ def partner_marketing_kit():
             "id": "email-blurb",
             "type": "caption",
             "title": "Email intro",
-            "body": f"Hi! I wanted to share XpertIntern's skill programs — great for career readiness. {link_url}",
+            "body": f"Hi! I wanted to share XpertIntern's skill programs — great for career readiness. {link_url or 'https://www.xpertintern.com'}",
         },
     ]
+    items = db_items if db_items else default_items
+    for item in items:
+        if item.get("type") == "caption" and link_url and link_url not in (item.get("body") or ""):
+            item["body"] = f"{item.get('body') or ''} {link_url}".strip()
     return jsonify({
-        "items": db_items or default_items,
+        "items": items,
         "mainReferralUrl": link_url,
     })
+
+
+@partners_bp.route("/me/referrals/export", methods=["GET"])
+@jwt_required()
+def partner_export_referrals():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    import csv
+    from io import StringIO
+    pid = str(res["_id"])
+    users = get_users_collection()
+    courses = get_courses_collection()
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["date", "studentName", "studentEmail", "training", "source", "netPaid", "commission", "status"])
+    for c in commissions_coll().find({"partnerId": pid}).sort("earnedAt", -1).limit(2000):
+        student_name = "Student"
+        student_email = ""
+        uid = c.get("userId") or ""
+        if uid and ObjectId.is_valid(uid):
+            u = users.find_one({"_id": ObjectId(uid)}, {"name": 1, "fullName": 1, "email": 1})
+            if u:
+                student_name = mask_student_name(u.get("name") or u.get("fullName") or "Student")
+                student_email = _mask_email(u.get("email") or "")
+        title = ""
+        cid = c.get("courseId") or ""
+        if cid and ObjectId.is_valid(str(cid)):
+            cr = courses.find_one({"_id": ObjectId(str(cid))}, {"title": 1})
+            title = (cr or {}).get("title") or ""
+        earned = c.get("earnedAt")
+        w.writerow([
+            earned.strftime("%Y-%m-%d %H:%M") if hasattr(earned, "strftime") else "",
+            student_name,
+            student_email,
+            title,
+            c.get("source") or "",
+            float(c.get("netAmount") or 0),
+            float(c.get("commissionAmount") or 0),
+            c.get("status") or "",
+        ])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=partner-referrals.csv"})
+
+
+@partners_bp.route("/me/payouts/statement", methods=["GET"])
+@jwt_required()
+def partner_payout_statement():
+    res = _partner_required()
+    if not isinstance(res, dict):
+        return res
+    import csv
+    from io import StringIO
+    from flask import Response
+    pid = str(res["_id"])
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["payoutId", "date", "amount", "method", "transactionRef", "status", "period"])
+    for p in payouts_coll().find({"partnerId": pid}).sort("createdAt", -1).limit(500):
+        created = p.get("createdAt")
+        w.writerow([
+            p.get("payoutId") or "",
+            created.strftime("%Y-%m-%d") if hasattr(created, "strftime") else "",
+            float(p.get("amount") or 0),
+            p.get("method") or "",
+            p.get("transactionRef") or "",
+            p.get("status") or "",
+            p.get("period") or "",
+        ])
+    code = res.get("partnerCode") or "partner"
+    return Response(buf.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename={code}-payout-statement.csv"})

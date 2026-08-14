@@ -31,6 +31,23 @@
   .console-sidebar-nav-active {
     background-color: #2a303d;
   }
+  .console-sidebar-nav {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  }
+  .console-sidebar-nav::-webkit-scrollbar {
+    width: 3px;
+  }
+  .console-sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .console-sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+  }
+  .console-sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.38);
+  }
 }
 
 /* Strapi (richtext / Markdown-rendered) article body on public blog */

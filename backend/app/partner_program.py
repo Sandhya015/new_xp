@@ -959,6 +959,95 @@ def release_eligible_commissions() -> int:
     return int(res.modified_count or 0)
 
 
+_SUCCESS_STATUSES = ("earned", "eligible", "processing", "paid")
+
+
+def commission_source_split(partner_id: str) -> dict:
+    """Aggregate net paid and commission by referral link vs coupon."""
+    referral_net = 0.0
+    coupon_net = 0.0
+    referral_commission = 0.0
+    coupon_commission = 0.0
+    link_success = 0
+    coupon_success = 0
+    for c in commissions_coll().find({"partnerId": partner_id, "status": {"$in": _SUCCESS_STATUSES}}):
+        net = float(c.get("netAmount") or 0)
+        comm = float(c.get("commissionAmount") or 0)
+        src = (c.get("source") or "").strip().lower()
+        if src == "coupon" or (c.get("couponCode") or "").strip():
+            coupon_net += net
+            coupon_commission += comm
+            coupon_success += 1
+        else:
+            referral_net += net
+            referral_commission += comm
+            link_success += 1
+    refunded = commissions_coll().count_documents({"partnerId": partner_id, "status": "cancelled"})
+    return {
+        "referralNetPaid": round(referral_net, 2),
+        "couponNetPaid": round(coupon_net, 2),
+        "referralCommission": round(referral_commission, 2),
+        "couponCommission": round(coupon_commission, 2),
+        "referralSuccessful": link_success,
+        "couponSuccessful": coupon_success,
+        "refundedCount": int(refunded),
+    }
+
+
+def asset_net_revenue(partner_id: str) -> tuple[dict[str, float], dict[str, float]]:
+    """Map link slug and coupon code → total net paid from successful commissions."""
+    by_slug: dict[str, float] = {}
+    by_code: dict[str, float] = {}
+    for c in commissions_coll().find({"partnerId": partner_id, "status": {"$in": _SUCCESS_STATUSES}}):
+        net = float(c.get("netAmount") or 0)
+        slug = (c.get("linkSlug") or "").strip().upper()
+        code = (c.get("couponCode") or "").strip().upper()
+        src = (c.get("source") or "").strip().lower()
+        if src == "coupon" or code:
+            if code:
+                by_code[code] = by_code.get(code, 0.0) + net
+        elif slug:
+            by_slug[slug] = by_slug.get(slug, 0.0) + net
+    return by_slug, by_code
+
+
+def enrich_links_with_revenue(links: list[dict], by_slug: dict[str, float]) -> list[dict]:
+    out = []
+    for lk in links:
+        row = dict(lk)
+        slug = (row.get("slug") or "").strip().upper()
+        row["netRevenue"] = round(by_slug.get(slug, 0.0), 2)
+        out.append(row)
+    return out
+
+
+def enrich_coupons_with_revenue(coupons: list[dict], by_code: dict[str, float]) -> list[dict]:
+    out = []
+    for cp in coupons:
+        row = dict(cp)
+        code = (row.get("code") or "").strip().upper()
+        row["netRevenue"] = round(by_code.get(code, 0.0), 2)
+        out.append(row)
+    return out
+
+
+def payout_summary_stats() -> dict:
+    """Finance-level payout aggregates for admin payouts page."""
+    release_eligible_commissions()
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    paid_month = 0.0
+    for po in payouts_coll().find({"createdAt": {"$gte": month_start}, "status": "paid"}):
+        paid_month += float(po.get("amount") or 0)
+    hold = 0.0
+    for c in commissions_coll().find({"status": "earned"}):
+        hold += float(c.get("commissionAmount") or 0)
+    return {
+        "paidThisMonth": round(paid_month, 2),
+        "holdAmountTotal": round(hold, 2),
+    }
+
+
 def partner_stats(partner_id: str) -> dict:
     release_eligible_commissions()
     pid = partner_id
@@ -1369,15 +1458,20 @@ def notify_first_referral(partner_id: str, amount: float, config) -> None:
 
 def enhanced_partner_stats(partner_id: str) -> dict:
     base = partner_stats(partner_id)
+    split = commission_source_split(partner_id)
     # last 30 days daily series for charts
     now = datetime.utcnow()
     start = now - timedelta(days=30)
     daily_clicks: dict[str, int] = {}
     daily_earn: dict[str, float] = {}
+    daily_referral: dict[str, float] = {}
+    daily_coupon: dict[str, float] = {}
     for i in range(30):
         d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
         daily_clicks[d] = 0
         daily_earn[d] = 0.0
+        daily_referral[d] = 0.0
+        daily_coupon[d] = 0.0
     for cl in clicks_coll().find({"partnerId": partner_id, "createdAt": {"$gte": start}}):
         d = cl.get("createdAt")
         if hasattr(d, "strftime"):
@@ -1386,29 +1480,49 @@ def enhanced_partner_stats(partner_id: str) -> dict:
                 daily_clicks[key] += 1
     for c in commissions_coll().find({
         "partnerId": partner_id,
-        "status": {"$in": ["earned", "eligible", "processing", "paid"]},
+        "status": {"$in": list(_SUCCESS_STATUSES)},
         "earnedAt": {"$gte": start},
     }):
         d = c.get("earnedAt")
         if hasattr(d, "strftime"):
             key = d.strftime("%Y-%m-%d")
-            if key in daily_earn:
-                daily_earn[key] += float(c.get("commissionAmount") or 0)
+            if key not in daily_earn:
+                continue
+            amt = float(c.get("commissionAmount") or 0)
+            daily_earn[key] += amt
+            src = (c.get("source") or "").strip().lower()
+            if src == "coupon" or (c.get("couponCode") or "").strip():
+                daily_coupon[key] += amt
+            else:
+                daily_referral[key] += amt
     # payments created / failed estimates from commissions + links
     payments_created = sum(int(l.get("paymentsCreated") or 0) for l in links_coll().find({"partnerId": partner_id}))
     successful = int(base.get("successfulReferrals") or 0)
     conversion = round((successful / payments_created) * 100, 1) if payments_created else 0.0
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_net = round(sum(
+        float(c.get("netAmount") or 0)
+        for c in commissions_coll().find({
+            "partnerId": partner_id,
+            "status": {"$in": list(_SUCCESS_STATUSES)},
+            "earnedAt": {"$gte": month_start},
+        })
+    ), 2)
     base.update({
         "paymentsCreated": payments_created,
         "conversionRate": conversion,
         "chartEarnings": [{"date": k, "value": round(v, 2)} for k, v in sorted(daily_earn.items())],
+        "chartReferralEarnings": [{"date": k, "value": round(v, 2)} for k, v in sorted(daily_referral.items())],
+        "chartCouponEarnings": [{"date": k, "value": round(v, 2)} for k, v in sorted(daily_coupon.items())],
         "chartClicks": [{"date": k, "value": v} for k, v in sorted(daily_clicks.items())],
         "totalSales": round(sum(float(c.get("netAmount") or 0) for c in commissions_coll().find({
             "partnerId": partner_id,
-            "status": {"$in": ["earned", "eligible", "processing", "paid"]},
+            "status": {"$in": list(_SUCCESS_STATUSES)},
         })), 2),
+        "monthNetPaid": month_net,
         "uniqueVisitors": sum(int(l.get("uniqueVisitors") or 0) for l in links_coll().find({"partnerId": partner_id})),
         "signups": sum(int(l.get("signups") or 0) for l in links_coll().find({"partnerId": partner_id})),
+        **split,
     })
     return base
 

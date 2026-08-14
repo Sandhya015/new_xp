@@ -632,6 +632,85 @@ def resume_checkout():
     }), 200
 
 
+@payments_bp.route("/validate-coupon", methods=["POST"])
+@jwt_required()
+def validate_coupon():
+    """Preview coupon discount for a course (includes partner affiliate codes)."""
+    db = get_db()
+    if db is None:
+        return jsonify({"error": "Database not configured"}), 503
+
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    course_id = (data.get("courseId") or "").strip()
+    coupon_code = (data.get("couponCode") or "").strip().upper()
+
+    if not course_id or not ObjectId.is_valid(course_id):
+        return jsonify({"valid": False, "error": "Valid courseId is required"}), 400
+    if not coupon_code:
+        return jsonify({"valid": False, "error": "Coupon code is required"}), 400
+
+    courses_coll = get_courses_collection()
+    course = courses_coll.find_one({
+        "_id": ObjectId(course_id),
+        "$or": [{"active": True}, {"active": {"$exists": False}}],
+    })
+    if not course:
+        return jsonify({"valid": False, "error": "Course not found"}), 404
+
+    try:
+        course_gross = float(course.get("price") or 0)
+    except (TypeError, ValueError):
+        course_gross = 0.0
+
+    if course_gross <= 0:
+        return jsonify({"valid": False, "error": "This course has no paid amount"}), 400
+
+    settings_coll = get_app_settings_collection()
+    settings_doc = settings_coll.find_one({"_id": "global"}) or {}
+    orders_coll = get_orders_collection()
+
+    matched_coupon, cerr = resolve_checkout_coupon(
+        coupon_code,
+        course=course,
+        settings_doc=settings_doc,
+        user_id=str(user_id),
+        orders_coll=orders_coll,
+    )
+    if cerr:
+        return jsonify({"valid": False, "error": cerr}), 200
+
+    min_order = matched_coupon.get("minOrderValue") if matched_coupon else None
+    if min_order is not None:
+        try:
+            if course_gross < float(min_order):
+                return jsonify({
+                    "valid": False,
+                    "error": f"Minimum order value is ₹{int(float(min_order))}",
+                }), 200
+        except (TypeError, ValueError):
+            pass
+
+    bd = build_order_pricing_breakdown(
+        course_gross=course_gross,
+        kit_gross_if_included=0,
+        include_kit=False,
+        coupon=matched_coupon,
+        coupon_code=coupon_code,
+    )
+
+    if bd.coupon_inclusive_off <= 0:
+        return jsonify({"valid": False, "error": "This coupon does not apply a discount to this course."}), 200
+
+    return jsonify({
+        "valid": True,
+        "code": coupon_code,
+        "courseGross": course_gross,
+        "discountInr": bd.coupon_inclusive_off,
+        "payableInr": bd.course_inclusive_after_coupon,
+    }), 200
+
+
 @payments_bp.route("/create-order", methods=["POST"])
 @jwt_required()
 def create_order():
@@ -710,6 +789,13 @@ def create_order():
         )
         if cerr:
             return jsonify({"error": cerr}), 400
+        min_order = matched_coupon.get("minOrderValue") if matched_coupon else None
+        if min_order is not None:
+            try:
+                if course_gross < float(min_order):
+                    return jsonify({"error": f"Minimum order value is ₹{int(float(min_order))}"}), 400
+            except (TypeError, ValueError):
+                pass
 
     bd = build_order_pricing_breakdown(
         course_gross=course_gross,

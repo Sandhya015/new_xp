@@ -72,16 +72,40 @@ export function AdminStatCard({
 export function AdminStatusBadge({ status }: { status: string }) {
   const s = status.toLowerCase().replace(/\s+/g, '_')
   let cls = 'bg-gray-100 text-gray-700'
-  if (s === 'active' || s === 'approved' || s === 'eligible') cls = 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-  else if (s === 'suspended' || s === 'rejected') cls = 'bg-red-50 text-red-700 ring-1 ring-red-200'
-  else if (s === 'submitted') cls = 'bg-orange-50 text-orange-800 ring-1 ring-orange-200'
-  else if (s === 'under_review') cls = 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
-  else if (s === 'needs_more_info') cls = 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+  let dot = 'bg-gray-400'
+  if (s === 'active' || s === 'approved' || s === 'eligible') {
+    cls = 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+    dot = 'bg-emerald-500'
+  } else if (s === 'suspended' || s === 'rejected') {
+    cls = 'bg-red-50 text-red-700 ring-1 ring-red-200'
+    dot = 'bg-red-500'
+  } else if (s === 'submitted') {
+    cls = 'bg-orange-50 text-orange-800 ring-1 ring-orange-200'
+    dot = 'bg-orange-500'
+  } else if (s === 'under_review') {
+    cls = 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
+    dot = 'bg-blue-600'
+  } else if (s === 'needs_more_info') {
+    cls = 'bg-violet-50 text-violet-700 ring-1 ring-violet-200'
+    dot = 'bg-violet-500'
+  } else if (s === 'inactive') {
+    cls = 'bg-gray-100 text-gray-600 ring-1 ring-gray-200'
+    dot = 'bg-gray-400'
+  }
+  const label = status.replace(/_/g, ' ')
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>
-      {status.replace(/_/g, ' ')}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${cls}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {label}
     </span>
   )
+}
+
+export function fmtPartnerJoined(raw: string) {
+  if (!raw) return '—'
+  const d = new Date(raw.replace(' UTC', ''))
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 11)
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 export function PartnerAvatar({ name }: { name: string }) {

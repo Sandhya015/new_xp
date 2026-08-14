@@ -141,6 +141,58 @@ export function BarChart({ points, height = 160 }: { points: Array<{ date: strin
   )
 }
 
+export function SplitBarChart({
+  referral,
+  coupon,
+  height = 160,
+}: {
+  referral: Array<{ date: string; value: number }>
+  coupon: Array<{ date: string; value: number }>
+  height?: number
+}) {
+  const dates = [...new Set([...referral.map((p) => p.date), ...coupon.map((p) => p.date)])].sort()
+  if (!dates.length) {
+    return <p className="py-8 text-center text-sm text-slate-gray">No earnings data for this period yet.</p>
+  }
+  const refMap = Object.fromEntries(referral.map((p) => [p.date, p.value]))
+  const cpMap = Object.fromEntries(coupon.map((p) => [p.date, p.value]))
+  const max = Math.max(...dates.map((d) => (refMap[d] || 0) + (cpMap[d] || 0)), 1)
+  const w = Math.max(dates.length * 32, 280)
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap gap-4 text-xs text-slate-gray">
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#2563eb]" /> Referral links</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#ea580c]" /> Coupons</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${w} ${height}`} className="w-full min-w-[280px]" style={{ height }}>
+          {dates.map((date, i) => {
+            const refVal = refMap[date] || 0
+            const cpVal = cpMap[date] || 0
+            const total = refVal + cpVal
+            const barH = (total / max) * (height - 40)
+            const refH = total ? (refVal / total) * barH : 0
+            const cpH = barH - refH
+            const x = i * 32 + 8
+            const yRef = height - 24 - barH
+            return (
+              <g key={date}>
+                {refH > 0 ? <rect x={x} y={yRef} width={18} height={refH} rx={4} fill="#2563eb" /> : null}
+                {cpH > 0 ? <rect x={x} y={yRef + refH} width={18} height={cpH} rx={4} fill="#ea580c" /> : null}
+                {i % Math.ceil(dates.length / 6) === 0 ? (
+                  <text x={x + 9} y={height - 6} textAnchor="middle" fontSize="8" fill="#94a3b8">
+                    {date.slice(5)}
+                  </text>
+                ) : null}
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+    </div>
+  )
+}
+
 export function FunnelRow({ label, value, pct, color }: { label: string; value: string | number; pct: number; color: string }) {
   return (
     <div className="space-y-1.5">

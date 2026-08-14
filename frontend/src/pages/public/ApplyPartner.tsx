@@ -91,6 +91,7 @@ export function ApplyPartner() {
     referredBy: '',
     heardAbout: '',
     agreedTerms: false,
+    companyWebsite: '',
   })
   const [emailVid, setEmailVid] = useState('')
   const [emailVerified, setEmailVerified] = useState(false)
@@ -537,10 +538,11 @@ export function ApplyPartner() {
 
                 <FormSection num={3} title="Your plan">
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#334155]">How will you promote XpertIntern? *</label>
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                      <label className="block text-xs font-semibold uppercase tracking-wide text-brand-accent">How will you promote us? *</label>
+                      <p className="mt-1 text-xs text-slate-gray">Tell us your channels, audience, and how you plan to share XpertIntern.</p>
                       <textarea
-                        className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm"
+                        className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm"
                         rows={4}
                         value={form.promotePlan}
                         onChange={(e) => set('promotePlan', e.target.value)}
@@ -572,6 +574,17 @@ export function ApplyPartner() {
                     </label>
                   </div>
                 </FormSection>
+
+                <input
+                  type="text"
+                  name="companyWebsite"
+                  value={form.companyWebsite}
+                  onChange={(e) => set('companyWebsite', e.target.value)}
+                  tabIndex={-1}
+                  autoComplete="off"
+                  className="hidden"
+                  aria-hidden="true"
+                />
 
                 <button
                   type="button"

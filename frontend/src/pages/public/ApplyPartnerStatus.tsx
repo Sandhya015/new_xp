@@ -59,7 +59,19 @@ export function ApplyPartnerStatus() {
             ))}
           </div>
           {status === 'needs_more_info' && app.adminQuestion ? (
-            <p className="text-sm text-amber-800 bg-amber-50 p-3 rounded-xl">Admin question: {String(app.adminQuestion)}</p>
+            <div className="space-y-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+              <p><strong>Admin question:</strong> {String(app.adminQuestion)}</p>
+              {app.replyToken ? (
+                <Link
+                  to={`/apply-partner/reply?token=${encodeURIComponent(String(app.replyToken))}`}
+                  className="inline-flex rounded-xl bg-brand-accent px-4 py-2 text-sm font-semibold text-white hover:bg-primary-600"
+                >
+                  Reply to admin →
+                </Link>
+              ) : (
+                <p className="text-xs">Check your email for a secure reply link (valid 14 days).</p>
+              )}
+            </div>
           ) : null}
           {status === 'rejected' ? (
             <p className="text-sm text-red-700">Rejected{app.rejectReasonShared ? `: ${String(app.rejectReasonShared)}` : '.'}</p>
