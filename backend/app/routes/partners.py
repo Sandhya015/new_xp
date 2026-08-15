@@ -349,6 +349,8 @@ def partner_my_referrals():
             "linkSlug": c.get("linkSlug") or "",
             "amount": float(c.get("netAmount") or 0),
             "commission": float(c.get("commissionAmount") or 0),
+            "commissionPercent": float(c.get("commissionPercent") or 0),
+            "commissionBase": float(c.get("commissionBase") or c.get("netAmount") or 0),
             "commissionStatus": c.get("status") or "",
             "status": "successful",
         })

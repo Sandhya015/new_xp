@@ -3,7 +3,11 @@ import { IndianRupee, Users, UserCheck, Wallet, Mail, Zap, Shield } from 'lucide
 
 export function fmtInr(n: number, compact = false) {
   if (compact && n >= 100000) return `₹${(n / 100000).toFixed(2)}L`.replace('.00L', 'L')
-  return `₹${Math.round(n).toLocaleString('en-IN')}`
+  const val = Number(n) || 0
+  if (Math.abs(val) < 1000 || Math.abs(val - Math.round(val)) > 0.001) {
+    return `₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+  return `₹${Math.round(val).toLocaleString('en-IN')}`
 }
 
 export function partnerInitials(name: string) {

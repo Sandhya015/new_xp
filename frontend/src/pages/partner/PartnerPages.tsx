@@ -671,7 +671,14 @@ export function PartnerReferrals() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-semibold">{fmtInr(Number(r.amount || 0))}</td>
-                    <td className="px-4 py-3 font-semibold text-emerald-600">{fmtInr(Number(r.commission || 0))}</td>
+                    <td className="px-4 py-3 font-semibold text-emerald-600">
+                      {fmtInr(Number(r.commission || 0))}
+                      {Number(r.commissionPercent || 0) > 0 ? (
+                        <p className="text-[10px] font-normal text-slate-gray">
+                          {Number(r.commissionPercent)}% of {fmtInr(Number(r.commissionBase ?? r.amount ?? 0))}
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={commissionLabel(String(r.commissionStatus))} />
                     </td>

@@ -804,6 +804,45 @@ def get_partner_coupon_by_code(code: str) -> dict | None:
     return c
 
 
+def _commission_base_amount(order: dict) -> float:
+    """
+    Amount partner commission applies to: course net paid after coupon, excluding training kit.
+    Matches affiliate rule — commission on net course payment, not kit add-ons.
+    """
+    pricing = order.get("pricing") if isinstance(order.get("pricing"), dict) else {}
+    inv = order.get("invoiceBreakdown") if isinstance(order.get("invoiceBreakdown"), dict) else {}
+
+    if pricing.get("afterCouponGross") is not None:
+        try:
+            return max(0.0, round(float(pricing["afterCouponGross"]), 2))
+        except (TypeError, ValueError):
+            pass
+    if inv.get("course_inclusive_after_coupon") is not None:
+        try:
+            return max(0.0, round(float(inv["course_inclusive_after_coupon"]), 2))
+        except (TypeError, ValueError):
+            pass
+
+    amount = float(order.get("amount") or 0)
+    if order.get("includeTrainingKit"):
+        kit_subtracted = False
+        for key in ("afterCouponKitGross", "trainingKitGross"):
+            if pricing.get(key) is not None:
+                try:
+                    kit = float(pricing[key])
+                    amount = max(0.0, round(amount - kit, 2))
+                    kit_subtracted = True
+                    break
+                except (TypeError, ValueError):
+                    pass
+        if not kit_subtracted and inv.get("kit_inclusive_after_coupon") is not None:
+            try:
+                amount = max(0.0, round(amount - float(inv["kit_inclusive_after_coupon"]), 2))
+            except (TypeError, ValueError):
+                pass
+    return max(0.0, round(amount, 2))
+
+
 # ── Attribution on orders ───────────────────────────────────────────────────
 
 def attach_attribution_to_order_doc(doc: dict, *, ref_slug: str = "", coupon_code: str = "") -> dict:
@@ -872,14 +911,8 @@ def on_payment_success_attribution(order: dict) -> None:
         if not partner_id or not ObjectId.is_valid(partner_id):
             return
 
-    # Net paid amount
-    amount = float(order.get("amount") or 0)
-    pricing = order.get("pricing") or {}
-    if pricing.get("grandTotalInclusive") is not None:
-        try:
-            amount = float(pricing["grandTotalInclusive"])
-        except (TypeError, ValueError):
-            pass
+    # Net paid amount (course line only — excludes training kit from commission base)
+    amount = _commission_base_amount(order)
     pct = float(attr.get("commissionPercent") or 0)
     commission = round(amount * pct / 100.0, 2)
     now = datetime.utcnow()
@@ -906,6 +939,7 @@ def on_payment_success_attribution(order: dict) -> None:
         "netAmount": amount,
         "commissionPercent": pct,
         "commissionAmount": commission,
+        "commissionBase": amount,
         "source": attr.get("source") or "",
         "couponCode": attr.get("couponCode") or "",
         "linkSlug": attr.get("linkSlug") or "",

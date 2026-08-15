@@ -2,7 +2,12 @@ import { useState, type ReactNode } from 'react'
 import { Check, Copy, TrendingUp } from 'lucide-react'
 
 export function fmtInr(n: number) {
-  return `₹${Math.round(n).toLocaleString('en-IN')}`
+  const val = Number(n) || 0
+  // Show paise for fractional amounts and sub-₹1000 values so small commissions display correctly.
+  if (Math.abs(val) < 1000 || Math.abs(val - Math.round(val)) > 0.001) {
+    return `₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+  return `₹${Math.round(val).toLocaleString('en-IN')}`
 }
 
 export function partnerInitials(name: string) {
