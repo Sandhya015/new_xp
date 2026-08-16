@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
-import { isSuperAdminPanelUser } from '@/constants/adminAccess'
+import { isCrmPortalUser, isCrmManagerUser, isLeadAgentOnly, isSuperAdminPanelUser } from '@/constants/adminAccess'
 import {
   Home,
   BookOpen,
@@ -24,6 +24,7 @@ import {
   Ticket,
   HelpCircle,
   Package,
+  UserPlus,
   UsersRound,
 } from 'lucide-react'
 import { adminPartnerService } from '@/services/partnerService'
@@ -36,6 +37,7 @@ const SIDEBAR_LINKS = [
   { to: '/admin/payments', label: 'Payments', icon: CreditCard },
   { to: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
+  { to: '/admin/lead-agents', label: 'Lead Agents', icon: UserPlus, crmManagerOnly: true as const },
   { to: '/admin/students', label: 'Students', icon: GraduationCap },
   { to: '/admin/partners', label: 'Partners', icon: UsersRound, expandable: true as const },
   { to: '/admin/companies', label: 'Companies', icon: Building2, badge: 3 },
@@ -69,6 +71,7 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     payments: 'Payments',
     'kit-orders': 'Kit Orders',
     leads: 'Leads',
+    'lead-agents': 'Lead Agents',
     students: 'Students',
     companies: 'Companies',
     internships: 'Internships',
@@ -103,9 +106,22 @@ export function AdminLayout() {
   const breadcrumbs = getBreadcrumbs(path)
   const unreadNotifCount = 2
   const onPartners = path.startsWith('/admin/partners')
+  const leadAgentOnly = isLeadAgentOnly(user)
+  const crmManager = isCrmManagerUser(user)
+  const superAdmin = isSuperAdminPanelUser(user)
+  const visibleSidebarLinks = SIDEBAR_LINKS.filter((item) => {
+    if (leadAgentOnly) return item.to === '/admin/leads'
+    if (!superAdmin && crmManager) {
+      return item.to === '/admin/leads' || item.to === '/admin/lead-agents'
+    }
+    if ('crmManagerOnly' in item && item.crmManagerOnly && !superAdmin && !crmManager) {
+      return false
+    }
+    return true
+  })
 
   useEffect(() => {
-    if (!token || !user || !isSuperAdminPanelUser(user)) {
+    if (!token || !user || !isCrmPortalUser(user)) {
       navigate('/admin/login', { replace: true })
     }
   }, [token, user, navigate])
@@ -115,7 +131,7 @@ export function AdminLayout() {
   }, [onPartners])
 
   useEffect(() => {
-    if (!token || !user || !isSuperAdminPanelUser(user)) return
+    if (!token || !user || !superAdmin) return
     adminPartnerService.pendingMeta().then((m) => setPendingApps(m.pendingApplications || 0)).catch(() => setPendingApps(0))
   }, [token, user, path])
 
@@ -195,7 +211,7 @@ export function AdminLayout() {
         </div>
         <nav className="console-sidebar-nav flex-1 overflow-y-auto py-4">
           <ul className="space-y-0.5 px-2">
-            {SIDEBAR_LINKS.map((item) => {
+            {visibleSidebarLinks.map((item) => {
               const { to, label, icon: Icon, badge } = item as typeof item & { badge?: number; expandable?: boolean }
               const expandable = 'expandable' in item && item.expandable
               if (expandable) {

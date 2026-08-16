@@ -77,6 +77,26 @@ def get_contacts_collection() -> Collection:
     return get_db()["contacts"]
 
 
+def get_crm_leads_collection() -> Collection:
+    """Canonical CRM leads (deduplicated by mobile/email)."""
+    return get_db()["crm_leads"]
+
+
+def get_crm_lead_events_collection() -> Collection:
+    """Timeline events for CRM leads."""
+    return get_db()["crm_lead_events"]
+
+
+def get_crm_lead_notes_collection() -> Collection:
+    """Agent notes on CRM leads."""
+    return get_db()["crm_lead_notes"]
+
+
+def get_crm_call_attempts_collection() -> Collection:
+    """Click-to-call / TeleCMI call attempts."""
+    return get_db()["crm_call_attempts"]
+
+
 def get_certificates_collection() -> Collection:
     """Certificates (certNo, studentId, programName, etc.)."""
     return get_db()["certificates"]
@@ -217,6 +237,17 @@ def ensure_indexes(db: Database) -> None:
     _ix(db["course_reviews"], [("courseId", 1), ("userId", 1)], name="idx_reviews_course_user")
 
     _ix(db["contacts"], [("createdAt", -1)], name="idx_contacts_created")
+
+    _ix(db["crm_leads"], "mobile", unique=True, sparse=True, name="idx_crm_leads_mobile")
+    _ix(db["crm_leads"], "email", unique=True, sparse=True, name="idx_crm_leads_email")
+    _ix(db["crm_leads"], [("score", -1), ("lastEventAt", -1)], name="idx_crm_leads_score_event")
+    _ix(db["crm_leads"], [("assignedTo", 1), ("followUpAt", 1)], name="idx_crm_leads_assign_followup")
+    _ix(db["crm_leads"], [("temperature", 1), ("status", 1)], name="idx_crm_leads_temp_status")
+    _ix(db["crm_lead_events"], "leadId", name="idx_crm_events_lead")
+    _ix(db["crm_lead_events"], "idempotencyKey", unique=True, sparse=True, name="idx_crm_events_idem")
+    _ix(db["crm_lead_events"], [("eventType", 1), ("createdAt", -1)], name="idx_crm_events_type_created")
+    _ix(db["crm_lead_notes"], [("leadId", 1), ("createdAt", -1)], name="idx_crm_notes_lead_created")
+    _ix(db["crm_call_attempts"], [("leadId", 1), ("createdAt", -1)], name="idx_crm_calls_lead_created")
 
     _ix(
         db["applications"],

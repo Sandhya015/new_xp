@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { CourseCard } from '@/components/CourseCard'
 import { useCountUp } from '@/hooks/useCountUp'
+import { contactService } from '@/services/contactService'
 import { UNIVERSITIES_LIST } from '@/constants/universities'
 import { courseService } from '@/services/courseService'
 import { REGISTRATION_UNIVERSITIES_LIST } from '@/constants/registrationUniversities'
@@ -259,6 +260,7 @@ export function Home() {
   })
   const [popularPrograms, setPopularPrograms] = useState<PopularProgram[]>(programsPreview)
   const [inlineContactSubmitted, setInlineContactSubmitted] = useState(false)
+  const [inlineContactSubmitting, setInlineContactSubmitting] = useState(false)
   const [testimonialFilter, setTestimonialFilter] = useState<'all' | 'students' | 'educators'>('all')
   const whoRef = useInView()
   const whyRef = useInView()
@@ -309,9 +311,41 @@ export function Home() {
       alive = false
     }
   }, [])
-  const handleInlineContactSubmit = (e: React.FormEvent) => {
+  const handleInlineContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setInlineContactSubmitted(true)
+    if (inlineContactSubmitting) return
+    setInlineContactSubmitting(true)
+    try {
+      const course =
+        inlineContact.course === OTHER_OPTION_VALUE ? inlineContact.courseOther : inlineContact.course
+      const branch =
+        inlineContact.branch === BRANCH_OTHERS_LABEL ? inlineContact.branchOther : inlineContact.branch
+      const subject =
+        inlineContact.subject === OTHER_OPTION_VALUE ? inlineContact.subjectOther : inlineContact.subject
+      const university =
+        inlineContact.university === OTHER_OPTION_VALUE ? inlineContact.universityOther : inlineContact.university
+      const college = showCollegeDropdown
+        ? isOtherCollege(inlineContact.college)
+          ? inlineContact.collegeOther
+          : inlineContact.college
+        : inlineContact.collegeNameText
+      await contactService.submitCallback({
+        fullName: inlineContact.fullName,
+        contactNumber: inlineContact.contactNumber,
+        course,
+        branch: showBranch ? branch : undefined,
+        subject: showSubject ? subject : undefined,
+        university,
+        college,
+        semester: inlineContact.semester,
+        message: inlineContact.message,
+      })
+      setInlineContactSubmitted(true)
+    } catch {
+      alert('Could not submit your request. Please try again.')
+    } finally {
+      setInlineContactSubmitting(false)
+    }
   }
 
   return (
@@ -682,8 +716,8 @@ export function Home() {
                   </select>
                   
                   <textarea required placeholder="Message / Query *" rows={3} value={inlineContact.message} onChange={(e) => setInlineContact((c) => ({ ...c, message: e.target.value }))} className="block w-full min-w-0 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent" />
-                  <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-navy py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition">
-                    <Send className="h-4 w-4" /> Submit
+                  <button type="submit" disabled={inlineContactSubmitting} className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-navy py-2.5 text-sm font-semibold text-white hover:bg-primary-800 transition disabled:opacity-60">
+                    <Send className="h-4 w-4" /> {inlineContactSubmitting ? 'Submitting…' : 'Submit'}
                   </button>
                 </form>
               )}

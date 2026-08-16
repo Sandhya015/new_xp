@@ -131,6 +131,8 @@ def _user_to_response(user: dict) -> dict:
         "companyName": user.get("companyName"),
         "hrName": user.get("hrName"),
         "forcePasswordChange": bool(user.get("forcePasswordChange")),
+        "leadRole": user.get("leadRole") or "",
+        "adminPortalAccess": bool(user.get("adminPortalAccess")),
     }
     if user.get("role") == "student":
         out["university"] = user.get("university") or ""
@@ -338,6 +340,20 @@ def register():
                 wa_sent = bool(send_whatsapp_otp(m, otp))
     except Exception:
         wa_sent = False
+
+    try:
+        from app.lead_crm import ingest_lead_event
+        ingest_lead_event(
+            event_type="registration.started",
+            source="registration",
+            mobile=normalized.get("mobile"),
+            email=normalized.get("email"),
+            full_name=normalized.get("fullName"),
+            payload={"verificationId": verification_id},
+            idempotency_key=f"reg-start:{verification_id}",
+        )
+    except Exception:
+        current_app.logger.exception("CRM registration.started hook failed")
 
     return jsonify({
         "message": "OTP sent",
@@ -915,13 +931,9 @@ def admin_login():
         data = request.get_json() or {}
         email = (data.get("email") or "").strip().lower()
         password = data.get("password") or ""
-        allowed = (current_app.config.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
 
         if not email or not password:
             return jsonify({"error": "Email and password are required"}), 400
-
-        if email != allowed:
-            return jsonify({"error": "Invalid admin credentials."}), 401
 
         users = get_users_collection()
         user = users.find_one({"email": email})
@@ -929,6 +941,12 @@ def admin_login():
             return jsonify({"error": "Invalid admin credentials."}), 401
 
         if user.get("role") != "admin":
+            return jsonify({"error": "Invalid admin credentials."}), 401
+
+        allowed_super = (current_app.config.get("ADMIN_PANEL_ALLOWED_EMAIL") or "admin@xpertintern.com").strip().lower()
+        is_super = email == allowed_super
+        is_crm_agent = bool(user.get("adminPortalAccess")) or str(user.get("leadRole") or "") in ("agent", "manager", "super_admin")
+        if not is_super and not is_crm_agent:
             return jsonify({"error": "Invalid admin credentials."}), 401
 
         token = create_access_token(

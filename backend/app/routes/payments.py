@@ -297,6 +297,11 @@ def _finalize_successful_charge(
         enrollment_created=enrollment_created,
     )
     refreshed = coll.find_one({"_id": oid}) or order
+    try:
+        from app.lead_crm.payment_hooks import emit_payment_lead_event
+        emit_payment_lead_event(refreshed, "payment.successful")
+    except Exception:
+        current_app.logger.exception("CRM payment.successful hook failed order=%s", oid)
     return enrollment_created, refreshed
 
 
@@ -894,6 +899,12 @@ def create_order():
         except Exception:
             current_app.logger.exception("partner attribution attach failed (cashfree create)")
         result = coll.insert_one(doc)
+        try:
+            doc["_id"] = result.inserted_id
+            from app.lead_crm.payment_hooks import emit_payment_lead_event
+            emit_payment_lead_event(doc, "payment.created")
+        except Exception:
+            current_app.logger.exception("CRM payment.created hook failed")
         return jsonify({
             "gateway": "cashfree",
             "internalOrderId": str(result.inserted_id),
@@ -961,6 +972,12 @@ def create_order():
     except Exception:
         current_app.logger.exception("partner attribution attach failed (razorpay create)")
     result = coll.insert_one(doc)
+    try:
+        doc["_id"] = result.inserted_id
+        from app.lead_crm.payment_hooks import emit_payment_lead_event
+        emit_payment_lead_event(doc, "payment.created")
+    except Exception:
+        current_app.logger.exception("CRM payment.created hook failed")
 
     key_id = cfg.config.get("RAZORPAY_KEY_ID", "")
     return jsonify({

@@ -71,6 +71,7 @@ import { ApplyPartnerStatus } from './pages/public/ApplyPartnerStatus'
 import { ApplyPartnerReply } from './pages/public/ApplyPartnerReply'
 import { LeadTracker } from './pages/admin/LeadTracker'
 import { LeadDetail } from './pages/admin/LeadDetail'
+import { LeadAgents } from './pages/admin/LeadAgents'
 import { PaymentList } from './pages/admin/PaymentList'
 import { PaymentDetail } from './pages/admin/PaymentDetail'
 import { KitOrders } from './pages/admin/KitOrders'
@@ -159,6 +160,7 @@ function App() {
         <Route path="partners/:id" element={<AdminPartnerDetail />} />
         <Route path="leads" element={<LeadTracker />} />
         <Route path="leads/:id" element={<LeadDetail />} />
+        <Route path="lead-agents" element={<LeadAgents />} />
         <Route path="payments" element={<PaymentList />} />
         <Route path="payments/:id" element={<PaymentDetail />} />
         <Route path="kit-orders" element={<KitOrders />} />

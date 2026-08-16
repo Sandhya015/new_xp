@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Lock, Mail, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 import { useAuthStore, type User } from '@/store/authStore'
-import { isSuperAdminPanelUser } from '@/constants/adminAccess'
+import { isCrmPortalUser, isLeadAgentOnly, isSuperAdminPanelUser } from '@/constants/adminAccess'
 import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 export function AdminLogin() {
@@ -22,12 +22,12 @@ export function AdminLogin() {
     try {
       const data = await authService.loginAdmin(email, password)
       const user = data.user as unknown as User
-      if (!isSuperAdminPanelUser(user)) {
+      if (!isCrmPortalUser(user)) {
         setError('This account is not authorized for the admin panel.')
         return
       }
       setSession(user, data.token, typeof data.expiresIn === 'number' ? data.expiresIn : undefined)
-      navigate('/admin')
+      navigate(isLeadAgentOnly(user) ? '/admin/leads' : '/admin')
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error

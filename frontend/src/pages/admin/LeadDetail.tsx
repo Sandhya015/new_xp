@@ -1,179 +1,235 @@
 /**
- * Admin — Lead detail (AD-WF-14). View lead, Follow-up Timeline, Assign, Add Follow-up, Update status, Mark as Enrolled, Send Email.
+ * Admin — Lead CRM profile: timeline, disposition, assign, click-to-call, notes.
  */
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, User, Mail, Phone, Building2, MessageSquare, Plus, Send } from 'lucide-react'
-import { adminService, type LeadDetail as LeadDetailType } from '@/services/adminService'
+import { ArrowLeft, Mail, Phone, MessageSquare, User } from 'lucide-react'
+import { crmService, type CrmAgent, type CrmLeadDetail } from '@/services/crmService'
 
-const STATUS_OPTIONS = ['new', 'contacted', 'interested', 'enrolled', 'not_interested', 'no_response']
+function fmtDisposition(d: string) {
+  return d.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 export function LeadDetail() {
   const { id } = useParams<{ id: string }>()
-  const [lead, setLead] = useState<LeadDetailType | null>(null)
+  const [detail, setDetail] = useState<CrmLeadDetail | null>(null)
+  const [agents, setAgents] = useState<CrmAgent[]>([])
+  const [dispositions, setDispositions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [showFollowUp, setShowFollowUp] = useState(false)
-  const [showAssign, setShowAssign] = useState(false)
-  const [assignTo, setAssignTo] = useState('')
-  const [followUpType, setFollowUpType] = useState('Called')
-  const [followUpNotes, setFollowUpNotes] = useState('')
+  const [note, setNote] = useState('')
+  const [disposition, setDisposition] = useState('')
+  const [followUpAt, setFollowUpAt] = useState('')
+  const [assignAgentId, setAssignAgentId] = useState('')
+  const [callMsg, setCallMsg] = useState('')
+
+  const reload = () => {
+    if (!id) return
+    crmService.getLead(id).then(setDetail).catch(() => setDetail(null))
+  }
 
   useEffect(() => {
     if (!id) return
-    adminService.getLead(id).then(setLead).catch(() => setLead(null)).finally(() => setLoading(false))
+    setLoading(true)
+    Promise.all([
+      crmService.getLead(id),
+      crmService.listAgents().catch(() => []),
+      crmService.listDispositions().catch(() => []),
+    ])
+      .then(([d, a, disp]) => {
+        setDetail(d)
+        setAgents(a)
+        setDispositions(disp)
+      })
+      .catch(() => setDetail(null))
+      .finally(() => setLoading(false))
   }, [id])
 
-  const handleStatusChange = (newStatus: string) => {
-    if (!id || saving) return
+  const lead = detail?.lead
+
+  const handleAssign = async () => {
+    if (!id || !assignAgentId || saving) return
     setSaving(true)
-    adminService.updateLead(id, { status: newStatus }).then(setLead).finally(() => setSaving(false))
+    try {
+      await crmService.assignLead(id, assignAgentId)
+      reload()
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const handleAssign = () => {
-    if (!id || saving) return
+  const handleDisposition = async () => {
+    if (!id || !disposition || saving) return
+    if (!note.trim()) {
+      alert('A note is required for every disposition (PRD after-call workflow)')
+      return
+    }
+    const needsFollowUp = disposition.startsWith('followup_') || disposition.startsWith('interested_')
+    if (needsFollowUp && !followUpAt) {
+      alert('Follow-up date/time is required for this disposition')
+      return
+    }
     setSaving(true)
-    adminService.updateLead(id, { assignedTo: assignTo }).then(setLead).then(() => { setShowAssign(false); setAssignTo('') }).finally(() => setSaving(false))
+    try {
+      await crmService.setDisposition(id, {
+        disposition,
+        followUpAt: followUpAt || undefined,
+        note: note || undefined,
+      })
+      setNote('')
+      setFollowUpAt('')
+      reload()
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const handleAddFollowUp = () => {
+  const handleNote = async () => {
+    if (!id || !note.trim() || saving) return
+    setSaving(true)
+    try {
+      await crmService.addNote(id, note.trim())
+      setNote('')
+      reload()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCall = async () => {
     if (!id || saving) return
     setSaving(true)
-    adminService.updateLead(id, { followUp: { type: followUpType, notes: followUpNotes } }).then(setLead).then(() => { setShowFollowUp(false); setFollowUpNotes('') }).finally(() => setSaving(false))
+    setCallMsg('')
+    try {
+      const r = await crmService.initiateCall(id)
+      setCallMsg(
+        r.mode === 'mock'
+          ? (r.message || 'Mock call — configure TeleCMI Agent ID in backend .env')
+          : (r.message || 'Call initiated — answer your phone first, then the lead will be connected'),
+      )
+      reload()
+    } catch {
+      setCallMsg('Call failed — check TeleCMI credentials')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <div className="p-6 text-slate-gray">Loading lead…</div>
   if (!lead) return <div className="p-6 text-red-600">Lead not found.</div>
 
   return (
-    <div className="space-y-6 w-full max-w-4xl">
+    <div className="space-y-6 w-full max-w-5xl">
       <div className="flex items-center gap-4">
         <Link to="/admin/leads" className="rounded-lg p-2 text-gray-600 hover:bg-gray-100">
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <h2 className="text-lg font-semibold text-brand-navy">Lead Details</h2>
+        <div>
+          <h2 className="text-lg font-semibold text-brand-navy">{lead.fullName}</h2>
+          <p className="text-sm text-slate-gray capitalize">{lead.temperature} · score {lead.score} · {lead.lifecycleStage.replace(/_/g, ' ')}</p>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-accent/10 text-brand-accent">
-                <User className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-brand-navy">{lead.name || `Lead #${id}`}</h3>
-                <p className="text-sm text-slate-gray">From contact form. Assigned to: {lead.assignedTo || '—'}</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAssign(true)}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Assign
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowFollowUp(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white"
-              >
-                <Plus className="h-4 w-4" /> Add Follow-up
-              </button>
-              <button type="button" className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                <Send className="h-4 w-4" /> Send Email
-              </button>
-              <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
-                Mark as Enrolled
-              </button>
-            </div>
-          </div>
-        </div>
-
-          <div className="grid gap-6 p-6 sm:grid-cols-2">
-          <div>
-            <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Contact</h4>
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-2"><Mail className="h-4 w-4 text-slate-gray" /> {lead.email || '—'}</li>
-              <li className="flex items-center gap-2"><Phone className="h-4 w-4 text-slate-gray" /> {lead.mobile || '—'}</li>
-              <li className="flex items-center gap-2"><Building2 className="h-4 w-4 text-slate-gray" /> {lead.university || '—'} · {lead.course || '—'}</li>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="font-semibold text-brand-navy flex items-center gap-2"><User className="h-4 w-4" /> Contact</h3>
+            <ul className="mt-3 space-y-2 text-sm">
+              <li className="flex items-center gap-2"><Phone className="h-4 w-4 text-gray-400" /> {lead.mobile || '—'}</li>
+              <li className="flex items-center gap-2"><Mail className="h-4 w-4 text-gray-400" /> {lead.email || '—'}</li>
+              {lead.lastCourseTitle && <li className="text-gray-600">Course interest: {lead.lastCourseTitle}</li>}
+              <li className="text-gray-500">Assigned: {lead.assignedToName || 'Unassigned'}</li>
             </ul>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button type="button" onClick={handleCall} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                <Phone className="h-4 w-4" /> Click to call
+              </button>
+              {callMsg && <span className="text-sm text-gray-600 self-center">{callMsg}</span>}
+            </div>
           </div>
-          <div>
-            <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Status</h4>
-            <select
-              value={lead.status || 'new'}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              disabled={saving}
-              className="w-full max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        <div className="border-t border-gray-200 p-6">
-          <h4 className="font-semibold text-brand-navy flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" /> Follow-up Timeline
-          </h4>
-          <p className="mt-2 text-sm text-slate-gray">Activity Type (Called / WhatsApp / Email / Meeting), Date & Time, Notes.</p>
-          {lead.followUps && lead.followUps.length > 0 ? (
-            <ul className="mt-4 space-y-2">
-              {lead.followUps.map((fu, i) => (
-                <li key={i} className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm">
-                  <span className="font-medium">{fu.type}</span> · {fu.createdAt} — {fu.notes}
+          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="font-semibold text-brand-navy flex items-center gap-2"><MessageSquare className="h-4 w-4" /> Timeline</h3>
+            <ul className="mt-4 space-y-3 max-h-96 overflow-y-auto">
+              {(detail?.events || []).map((ev) => (
+                <li key={ev.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-medium text-brand-navy">{ev.eventType.replace(/\./g, ' ')}</span>
+                    <span className="text-xs text-gray-500">{ev.createdAt ? new Date(ev.createdAt).toLocaleString() : ''}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">Source: {ev.source}{ev.scoreDelta ? ` · +${ev.scoreDelta} score` : ''}</p>
                 </li>
               ))}
             </ul>
-          ) : (
-            <div className="mt-4 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 py-8 text-center text-sm text-slate-gray">
-              No follow-up entries yet. Click &quot;Add Follow-up&quot; to log activity.
+          </div>
+
+          {(detail?.calls?.length ?? 0) > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h3 className="font-semibold text-brand-navy">Call history</h3>
+              <ul className="mt-3 space-y-2 text-sm">
+                {detail!.calls.map((c) => (
+                  <li key={c.id} className="flex flex-col gap-1 border-b border-gray-100 pb-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>{c.direction} · {c.status}{c.durationSec != null ? ` · ${c.durationSec}s` : ''}</span>
+                      <span className="text-gray-500">{c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
+                    </div>
+                    {c.recordingUrl && (
+                      <a href={c.recordingUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-accent hover:underline">
+                        Play recording
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
-      </div>
 
-      {showAssign && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <h3 className="font-semibold text-brand-navy">Assign to staff</h3>
-            <input type="text" value={assignTo} onChange={(e) => setAssignTo(e.target.value)} placeholder="Staff name or ID" className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <div className="mt-4 flex gap-2 justify-end">
-              <button type="button" onClick={() => setShowAssign(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700">Cancel</button>
-              <button type="button" onClick={handleAssign} disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">Confirm</button>
-            </div>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="font-semibold text-brand-navy">Assign</h3>
+            <select value={assignAgentId} onChange={(e) => setAssignAgentId(e.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">Select agent</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.fullName} ({a.email})</option>
+              ))}
+            </select>
+            <button type="button" onClick={handleAssign} disabled={!assignAgentId || saving} className="mt-2 w-full rounded-lg bg-brand-navy px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              Assign
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="font-semibold text-brand-navy">Disposition</h3>
+            <select value={disposition} onChange={(e) => setDisposition(e.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+              <option value="">Select outcome</option>
+              {dispositions.map((d) => (
+                <option key={d} value={d}>{fmtDisposition(d)}</option>
+              ))}
+            </select>
+            <input type="datetime-local" value={followUpAt} onChange={(e) => setFollowUpAt(e.target.value)} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <button type="button" onClick={handleDisposition} disabled={!disposition || saving} className="mt-2 w-full rounded-lg bg-brand-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              Save disposition
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="font-semibold text-brand-navy">Notes</h3>
+            <ul className="mt-2 space-y-2 max-h-40 overflow-y-auto text-sm">
+              {(detail?.notes || []).map((n) => (
+                <li key={n.id} className="rounded bg-gray-50 px-2 py-1">
+                  <p>{n.body}</p>
+                  <p className="text-xs text-gray-500">{n.authorName} · {n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</p>
+                </li>
+              ))}
+            </ul>
+            <button type="button" onClick={handleNote} disabled={!note.trim() || saving} className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50">
+              Add note only
+            </button>
           </div>
         </div>
-      )}
-      {showFollowUp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h3 className="font-semibold text-brand-navy">Add Follow-up</h3>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Activity Type</label>
-                <select value={followUpType} onChange={(e) => setFollowUpType(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-                  <option>Called</option>
-                  <option>WhatsApp</option>
-                  <option>Email</option>
-                  <option>Meeting</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Notes</label>
-                <textarea rows={3} value={followUpNotes} onChange={(e) => setFollowUpNotes(e.target.value)} placeholder="What was discussed / outcome" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-              </div>
-            </div>
-            <div className="mt-4 flex gap-2 justify-end">
-              <button type="button" onClick={() => setShowFollowUp(false)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700">Cancel</button>
-              <button type="button" onClick={handleAddFollowUp} disabled={saving} className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white">Save</button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

@@ -20,6 +20,9 @@ export interface User {
   collegeRegNo?: string
   /** Set when SA forces password rotation after direct password reset */
   forcePasswordChange?: boolean
+  /** Lead CRM role: agent | manager | super_admin */
+  leadRole?: string
+  adminPortalAccess?: boolean
   /** Public URL path e.g. `/api/auth/media/profile/....jpg` */
   profilePhotoUrl?: string
 }

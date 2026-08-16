@@ -90,6 +90,12 @@ class Config:
     RECAPTCHA_SECRET = os.environ.get("RECAPTCHA_SECRET", "").strip()
     RECAPTCHA_SITE_KEY = os.environ.get("RECAPTCHA_SITE_KEY", "").strip()
     SUPPORT_EMAIL = (os.environ.get("SUPPORT_EMAIL") or os.environ.get("MAIL_REPLY_TO") or "partners@xpertintern.com").strip()
+    # TeleCMI CHUB — agent id (e.g. 103_1234567) + password from CHUB dashboard (not dashboard email)
+    TELECMI_AGENT_ID = os.environ.get("TELECMI_AGENT_ID", "").strip()
+    TELECMI_AGENT_PASSWORD = os.environ.get("TELECMI_AGENT_PASSWORD", "").strip()
+    TELECMI_AGENT_TOKEN = os.environ.get("TELECMI_AGENT_TOKEN", "").strip()
+    TELECMI_APP_ID = os.environ.get("TELECMI_APP_ID", "").strip()
+    TELECMI_APP_SECRET = os.environ.get("TELECMI_APP_SECRET", "").strip()
 
 
 class DevelopmentConfig(Config):

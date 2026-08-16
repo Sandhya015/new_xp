@@ -23,6 +23,8 @@ def jwt_claims_for_user(user: dict, **extra) -> dict:
         "email": user.get("email") or "",
         "role": user.get("role") or "student",
         "se": session_epoch_of(user),
+        "leadRole": user.get("leadRole") or "",
+        "adminPortalAccess": bool(user.get("adminPortalAccess")),
     }
     claims.update(extra)
     return claims

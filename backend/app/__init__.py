@@ -163,6 +163,7 @@ def create_app(config_class=None):
     from app.routes.masters import masters_bp
     from app.routes.partners import partners_bp
     from app.routes.partners_admin import partners_admin_bp
+    from app.routes.lead_crm import crm_bp
 
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -184,6 +185,7 @@ def create_app(config_class=None):
     app.register_blueprint(reviews_bp, url_prefix="/api/reviews")
     app.register_blueprint(settings_public_bp, url_prefix="/api/settings")
     app.register_blueprint(masters_bp, url_prefix="/api/masters")
+    app.register_blueprint(crm_bp, url_prefix="/api/crm")
 
     @app.route("/")
     def index():

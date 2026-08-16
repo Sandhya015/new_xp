@@ -20,4 +20,9 @@ export const contactService = {
     const { data } = await api.post<{ message: string }>('/api/contact', payload)
     return data
   },
+
+  async submitCallback(payload: Record<string, unknown>) {
+    const { data } = await api.post<{ message: string }>('/api/contact/callback', payload)
+    return data
+  },
 }
