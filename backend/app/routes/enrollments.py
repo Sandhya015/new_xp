@@ -225,6 +225,12 @@ def list_enrollments():
     if db is None:
         return jsonify({"items": [], "message": "Database not configured"}), 503
     user_id = get_jwt_identity()
+    try:
+        from app.cashfree_sync import sync_pending_cashfree_for_user
+
+        sync_pending_cashfree_for_user(str(user_id), limit=5)
+    except Exception:
+        pass
     coll = get_enrollments_collection()
     courses_coll = get_courses_collection()
     status_filter = request.args.get("status", "").strip().lower()
