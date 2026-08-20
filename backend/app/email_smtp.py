@@ -26,7 +26,9 @@ def smtp_configured(config: Mapping[str, Any]) -> bool:
 
 
 def _from_header(config: Mapping[str, Any]) -> str:
-    addr = (config.get("MAIL_FROM") or config.get("SMTP_USER") or "").strip()
+    addr = (config.get("MAIL_FROM") or config.get("SMTP_USER") or "admin@xpertintern.com").strip()
+    if "accounts@gmail" in addr.lower() or addr.lower().endswith("@gmail.com"):
+        addr = "admin@xpertintern.com"
     name = (config.get("MAIL_FROM_NAME") or "XpertIntern").strip()
     if not addr:
         return ""
@@ -117,7 +119,9 @@ def send_email(
     recipients = [to_addr] + [b for b in bcc_list if b.lower() != to_addr.lower()]
     try:
         context = ssl.create_default_context()
-        envelope_from = (config.get("MAIL_FROM") or user).strip()
+        envelope_from = (config.get("MAIL_FROM") or user or "admin@xpertintern.com").strip()
+        if "accounts@gmail" in envelope_from.lower() or envelope_from.lower().endswith("@gmail.com"):
+            envelope_from = "admin@xpertintern.com"
         use_ssl = bool(config.get("SMTP_USE_SSL")) or port == 465
         timeout = float(config.get("SMTP_TIMEOUT") or 30)
         if use_ssl:
@@ -246,10 +250,13 @@ def send_payment_success_email(
 ) -> bool:
     """
     Sent when payment is verified. Attaches PDF invoice only (HTML attachment deprecated).
-    BCC accounts@xpertintern.com for finance copies.
+    BCC admin@xpertintern.com for finance copies.
     """
     # html_invoice_* kept for call-site compat; never attached.
     _ = (html_invoice_bytes, html_filename)
+    from app.payment_admin import OFFICIAL_FROM_EMAIL
+
+    official_bcc = OFFICIAL_FROM_EMAIL
     name = html_module.escape(student_name or "there")
     safe_title = course_title or "your course"
     title_esc = html_module.escape(safe_title)
@@ -284,7 +291,7 @@ def send_payment_success_email(
         subject,
         html,
         attachments=attachments or None,
-        bcc=["accounts@xpertintern.com"],
+        bcc=[official_bcc],
     )
 
 

@@ -1905,6 +1905,21 @@ def verify_payment(payment_id):
     return jsonify({"ok": True, "message": "Payment marked as verified"})
 
 
+@admin_bp.route("/payments/sync-cashfree", methods=["POST"])
+@jwt_required()
+def sync_cashfree_payments():
+    """Admin: finalize Cashfree orders stuck in 'created' but PAID on gateway."""
+    err = _admin_required()
+    if err:
+        return err
+    limit = int((request.get_json() or {}).get("limit") or 200)
+    from app.cashfree_sync import sync_all_pending_cashfree_orders
+
+    result = sync_all_pending_cashfree_orders(limit=limit)
+    _log_admin("payment.sync_cashfree", "payment", "bulk", new_value=result)
+    return jsonify(result)
+
+
 @admin_bp.route("/payments/<payment_id>/refund", methods=["POST"])
 @jwt_required()
 def refund_payment(payment_id):

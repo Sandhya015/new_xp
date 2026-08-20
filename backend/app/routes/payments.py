@@ -204,7 +204,16 @@ def _ensure_enrollment_for_successful_order(user_id: Any, order: dict) -> bool:
     cid_str = str(course_raw)
     enroll = get_enrollments_collection()
     try:
-        if enroll.find_one(user_course_enrollment_filter(uid, cid_str)):
+        existing = enroll.find_one(user_course_enrollment_filter(uid, cid_str))
+        if existing:
+            try:
+                from app.cashfree_sync import resolve_enrollment_batch
+
+                batch_name = resolve_enrollment_batch(order, cid_str)
+                if batch_name and not str(existing.get("batch") or "").strip():
+                    enroll.update_one({"_id": existing["_id"]}, {"$set": {"batch": batch_name, "updatedAt": datetime.utcnow()}})
+            except Exception:
+                pass
             return False
     except Exception:
         current_app.logger.exception(
@@ -228,6 +237,15 @@ def _ensure_enrollment_for_successful_order(user_id: Any, order: dict) -> bool:
         "certificateProfile": snap,
         "billingAddress": bill,
     }
+    batch_name = ""
+    try:
+        from app.cashfree_sync import resolve_enrollment_batch
+
+        batch_name = resolve_enrollment_batch(order, cid_str)
+    except Exception:
+        pass
+    if batch_name:
+        doc["batch"] = batch_name
     try:
         enroll.insert_one(doc)
         return True
@@ -462,6 +480,13 @@ def list_my_orders():
     if db is None:
         return jsonify({"items": [], "message": "Database not configured"}), 503
     user_id = get_jwt_identity()
+    try:
+        from app.cashfree_sync import sync_pending_cashfree_for_user
+
+        sync_pending_cashfree_for_user(str(user_id), limit=5)
+    except Exception:
+        current_app.logger.exception("cashfree auto-sync on /payments/my failed")
+
     coll = get_orders_collection()
     courses_coll = get_courses_collection()
     orders_rows = list(coll.find({"userId": user_id}).sort("createdAt", -1))
@@ -1143,69 +1168,43 @@ def verify_cashfree():
             "courseId": str(refreshed.get("courseId") or ""),
         }), 200
 
-    base_url = cashfree_base_url(current_app.config.get("CASHFREE_ENV", "production"))
-    api_ver = current_app.config.get("CASHFREE_API_VERSION", "2023-08-01")
-    cf_ord, ferr = cashfree_fetch_order(
-        base_url=base_url,
-        api_version=api_ver,
-        client_id=cid,
-        client_secret=csecret,
-        merchant_order_id=merchant_order_id,
-    )
-    if ferr or not isinstance(cf_ord, dict):
-        return jsonify({"error": ferr or "Could not fetch Cashfree order"}), 502
+    from app.cashfree_sync import sync_cashfree_order
 
-    st_cf = str(cf_ord.get("order_status") or "").upper()
-    if st_cf != "PAID":
+    r = sync_cashfree_order(order, user_id=str(user_id))
+    if r.get("ok"):
+        return jsonify({
+            "ok": True,
+            "message": "Payment verified",
+            "orderStatus": "PAID",
+            "enrollmentCreated": bool(r.get("enrollmentCreated")),
+            "invoiceNumber": r.get("invoiceNumber") or "",
+            "courseId": r.get("courseId") or "",
+        }), 200
+
+    st_cf = str(r.get("cashfreeStatus") or "UNKNOWN").upper()
+    if r.get("message") == "not_paid_yet":
         return jsonify({
             "ok": False,
             "orderStatus": st_cf or "UNKNOWN",
             "message": "Payment not completed yet. Try again in a moment or check your SMS/email receipt.",
         }), 409
 
+    return jsonify({"error": r.get("error") or "Could not verify Cashfree payment"}), 502
+
+
+@payments_bp.route("/cashfree/webhook", methods=["POST"])
+def cashfree_webhook():
+    """Cashfree PG webhook — finalize PAID orders server-side (no JWT)."""
+    payload = request.get_json(silent=True) or {}
     try:
-        remote_amt = float(cf_ord.get("order_amount") or 0)
-        local_amt = float(order.get("amount") or 0)
-        if abs(remote_amt - local_amt) > 0.05:
-            current_app.logger.warning(
-                "Cashfree amount mismatch mongo=%s cashfree=%s order=%s",
-                local_amt,
-                remote_amt,
-                order.get("_id"),
-            )
-    except (TypeError, ValueError):
-        pass
+        from app.cashfree_sync import handle_cashfree_webhook
 
-    pay_ref = str(cf_ord.get("cf_order_id") or merchant_order_id)
-    receipt_ts = datetime.utcnow()
-    ts_raw = cf_ord.get("created_at")
-    if isinstance(ts_raw, str) and ts_raw.strip():
-        try:
-            iso = ts_raw.replace("Z", "+00:00")
-            receipt_ts = datetime.fromisoformat(iso)
-            if receipt_ts.tzinfo is not None:
-                receipt_ts = receipt_ts.replace(tzinfo=None)
-        except (TypeError, ValueError):
-            pass
-
-    enrollment_created, refreshed = _finalize_successful_charge(
-        coll,
-        order,
-        user_id=user_id,
-        gateway_payment_ref=pay_ref,
-        payment_method="cashfree",
-        receipt_ts=receipt_ts,
-    )
-    enrollment_created = enrollment_created or _ensure_enrollment_for_successful_order(user_id, refreshed)
-
-    return jsonify({
-        "ok": True,
-        "message": "Payment verified",
-        "orderStatus": "PAID",
-        "enrollmentCreated": enrollment_created,
-        "invoiceNumber": refreshed.get("invoiceNumber") or "",
-        "courseId": str(refreshed.get("courseId") or ""),
-    }), 200
+        result = handle_cashfree_webhook(payload if isinstance(payload, dict) else {})
+        code = 200 if result.get("ok") else 404 if result.get("error") == "order_not_found" else 400
+        return jsonify(result), code
+    except Exception:
+        current_app.logger.exception("cashfree webhook failed")
+        return jsonify({"ok": False, "error": "webhook_handler_failed"}), 500
 
 
 @payments_bp.route("/invoice/<order_id>", methods=["GET"])

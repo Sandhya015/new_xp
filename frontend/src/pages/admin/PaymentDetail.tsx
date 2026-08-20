@@ -255,7 +255,7 @@ export function PaymentDetail() {
           )}
           <p className="text-sm text-slate-gray">
             Manual verify: for offline UPI/bank payments. Process Refund: reason required; optional amount and gateway
-            reference. Regenerating an invoice emails the student (PDF only) and BCC accounts@xpertintern.com.
+            reference. Regenerating an invoice emails the student (PDF only) and BCC admin@xpertintern.com.
           </p>
         </div>
       </div>

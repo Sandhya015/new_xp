@@ -37,7 +37,8 @@ _SUMMARY_TTL_SEC = 60.0
 BULK_THRESHOLD = 500
 BULK_CONCURRENT_LIMIT = 3
 
-ACCOUNTS_BCC = "accounts@xpertintern.com"
+OFFICIAL_FROM_EMAIL = "admin@xpertintern.com"
+ACCOUNTS_BCC = OFFICIAL_FROM_EMAIL
 
 
 def parse_dt_arg(raw: str | None, *, end_of_day: bool = False) -> datetime | None:
