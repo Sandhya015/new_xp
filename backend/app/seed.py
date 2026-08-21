@@ -39,6 +39,54 @@ def _hash(password: str) -> str:
     return generate_password_hash(password, method="pbkdf2:sha256")
 
 
+CRM_DEV_USERS = [
+    {
+        "email": "priya@gmail.com",
+        "password": "1234",
+        "fullName": "Priya",
+        "leadRole": "manager",
+    },
+    {
+        "email": "seema@gmail.com",
+        "password": "12345",
+        "fullName": "Seema",
+        "leadRole": "agent",
+    },
+]
+
+
+def seed_crm_dev_users() -> None:
+    """Ensure local/test CRM manager + agent accounts exist (temporary until full auth)."""
+    if os.environ.get("FLASK_ENV", "").strip().lower() not in ("development", "dev"):
+        if os.environ.get("SEED_CRM_DEV_USERS", "").strip().lower() not in ("1", "true", "yes"):
+            return
+    try:
+        users = get_users_collection()
+        now = datetime.utcnow()
+        for spec in CRM_DEV_USERS:
+            email = spec["email"].strip().lower()
+            doc = {
+                "email": email,
+                "password": _hash(spec["password"]),
+                "name": spec["fullName"],
+                "fullName": spec["fullName"],
+                "role": "admin",
+                "leadRole": spec["leadRole"],
+                "adminPortalAccess": True,
+                "forcePasswordChange": False,
+                "accountStatus": "active",
+                "updatedAt": now,
+            }
+            existing = users.find_one({"email": email})
+            if existing:
+                users.update_one({"email": email}, {"$set": doc})
+            else:
+                doc["createdAt"] = now
+                users.insert_one(doc)
+    except Exception:
+        pass
+
+
 def seed_admin_if_missing() -> None:
     try:
         users = get_users_collection()

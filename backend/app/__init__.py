@@ -24,8 +24,9 @@ def create_app(config_class=None):
         try:
             from app.db import init_db_with_retry
             init_db_with_retry(uri, attempts=3)
-            from app.seed import seed_admin_if_missing
+            from app.seed import seed_admin_if_missing, seed_crm_dev_users
             seed_admin_if_missing()
+            seed_crm_dev_users()
         except Exception as exc:
             # Don't fail app startup if DB is unreachable (e.g. Lambda cold start, network).
             # CORS preflight and health checks can still run; DB routes will return 503.

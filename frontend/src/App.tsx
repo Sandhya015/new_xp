@@ -69,9 +69,20 @@ import { ApplyPartner } from './pages/public/ApplyPartner'
 import { ApplyPartnerThanks } from './pages/public/ApplyPartnerThanks'
 import { ApplyPartnerStatus } from './pages/public/ApplyPartnerStatus'
 import { ApplyPartnerReply } from './pages/public/ApplyPartnerReply'
-import { LeadTracker } from './pages/admin/LeadTracker'
+import { LeadCommandLogin } from './pages/admin/leads/LeadCommandLogin'
+import { LeadCommandShell } from './pages/admin/leads/LeadCommandShell'
+import { LeadCommandIndex } from './pages/admin/leads/LeadCommandIndex'
+import { LeadOverviewPage } from './pages/admin/leads/LeadOverviewPage'
+import { LeadInbox } from './pages/admin/leads/LeadInbox'
+import { LeadAssignmentCenter } from './pages/admin/leads/LeadAssignmentCenter'
+import { LeadFollowUps } from './pages/admin/leads/LeadFollowUps'
+import { LeadCallsRecordings } from './pages/admin/leads/LeadCallsRecordings'
+import { LeadImportsExports } from './pages/admin/leads/LeadImportsExports'
+import { ManagerMyAgents } from './pages/admin/leads/ManagerMyAgents'
+import { LeadPeopleTeams } from './pages/admin/leads/LeadPeopleTeams'
+import { LeadCrmReports } from './pages/admin/leads/LeadCrmReports'
+import { LeadCrmSettings } from './pages/admin/leads/LeadCrmSettings'
 import { LeadDetail } from './pages/admin/LeadDetail'
-import { LeadAgents } from './pages/admin/LeadAgents'
 import { PaymentList } from './pages/admin/PaymentList'
 import { PaymentDetail } from './pages/admin/PaymentDetail'
 import { KitOrders } from './pages/admin/KitOrders'
@@ -97,6 +108,11 @@ function App() {
       <AppToastHost />
       <Routes>
       <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/leadmanagement/login" element={<LeadCommandLogin />} />
+      <Route path="/leadmanagement/manager/login" element={<LeadCommandLogin />} />
+      <Route path="/leadmanagement/agent/login" element={<LeadCommandLogin />} />
+      <Route path="/leadmanagement" element={<Navigate to="/leadmanagement/login" replace />} />
+      <Route path="/admin/leads/login" element={<Navigate to="/leadmanagement/login" replace />} />
       {/* Student dashboard: no navbar/footer */}
       <Route path="/dashboard" element={<StudentLayout />}>
         <Route index element={<Dashboard />} />
@@ -158,9 +174,21 @@ function App() {
         <Route path="partners/applications/:id" element={<AdminPartnerApplicationDetail />} />
         <Route path="partners/payouts" element={<AdminPartnerPayouts />} />
         <Route path="partners/:id" element={<AdminPartnerDetail />} />
-        <Route path="leads" element={<LeadTracker />} />
-        <Route path="leads/:id" element={<LeadDetail />} />
-        <Route path="lead-agents" element={<LeadAgents />} />
+        <Route path="leads" element={<LeadCommandShell />}>
+          <Route index element={<LeadCommandIndex />} />
+          <Route path="overview" element={<LeadOverviewPage />} />
+          <Route path="inbox" element={<LeadInbox />} />
+          <Route path="assignment" element={<LeadAssignmentCenter />} />
+          <Route path="follow-ups" element={<LeadFollowUps />} />
+          <Route path="calls" element={<LeadCallsRecordings />} />
+          <Route path="imports" element={<LeadImportsExports />} />
+          <Route path="people" element={<LeadPeopleTeams />} />
+          <Route path="my-agents" element={<ManagerMyAgents />} />
+          <Route path="reports" element={<LeadCrmReports />} />
+          <Route path="settings" element={<LeadCrmSettings />} />
+        </Route>
+        <Route path="leads/profile/:id" element={<LeadDetail />} />
+        <Route path="lead-agents" element={<Navigate to="/admin/leads/people" replace />} />
         <Route path="payments" element={<PaymentList />} />
         <Route path="payments/:id" element={<PaymentDetail />} />
         <Route path="kit-orders" element={<KitOrders />} />

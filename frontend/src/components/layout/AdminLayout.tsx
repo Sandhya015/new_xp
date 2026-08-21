@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
-import { isCrmPortalUser, isCrmManagerUser, isLeadAgentOnly, isSuperAdminPanelUser } from '@/constants/adminAccess'
+import { isCrmManagerUser, isCrmPortalUser, isLeadAgentOnly, isSuperAdminPanelUser } from '@/constants/adminAccess'
 import {
   Home,
   BookOpen,
@@ -24,11 +24,12 @@ import {
   Ticket,
   HelpCircle,
   Package,
-  UserPlus,
   UsersRound,
 } from 'lucide-react'
 import { adminPartnerService } from '@/services/partnerService'
+import { crmService, type CrmSummary } from '@/services/crmService'
 import { ConsoleBrandMark } from '@/components/brand/ConsoleBrandMark'
+import { MANAGER_LEAD_TABS, AGENT_LEAD_TABS } from '@/pages/admin/leads/leadCommandNav'
 
 const SIDEBAR_LINKS = [
   { to: '/admin', label: 'Dashboard', icon: Home },
@@ -37,7 +38,6 @@ const SIDEBAR_LINKS = [
   { to: '/admin/payments', label: 'Payments', icon: CreditCard },
   { to: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
-  { to: '/admin/lead-agents', label: 'Lead Agents', icon: UserPlus, crmManagerOnly: true as const },
   { to: '/admin/students', label: 'Students', icon: GraduationCap },
   { to: '/admin/partners', label: 'Partners', icon: UsersRound, expandable: true as const },
   { to: '/admin/companies', label: 'Companies', icon: Building2, badge: 3 },
@@ -71,7 +71,15 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     payments: 'Payments',
     'kit-orders': 'Kit Orders',
     leads: 'Leads',
-    'lead-agents': 'Lead Agents',
+    overview: 'Overview',
+    inbox: 'Lead Inbox',
+    assignment: 'Assignment',
+    'follow-ups': 'Follow-ups',
+    calls: 'Calls',
+    imports: 'Imports',
+    people: 'People & Teams',
+    'my-agents': 'My Agents',
+    profile: 'Lead profile',
     students: 'Students',
     companies: 'Companies',
     internships: 'Internships',
@@ -107,24 +115,28 @@ export function AdminLayout() {
   const unreadNotifCount = 2
   const onPartners = path.startsWith('/admin/partners')
   const leadAgentOnly = isLeadAgentOnly(user)
-  const crmManager = isCrmManagerUser(user)
+  const leadManagerOnly = isCrmManagerUser(user)
   const superAdmin = isSuperAdminPanelUser(user)
+  const [crmSummary, setCrmSummary] = useState<CrmSummary | null>(null)
+  const [agentNavCounts, setAgentNavCounts] = useState({ assigned: 0, followUps: 0 })
   const visibleSidebarLinks = SIDEBAR_LINKS.filter((item) => {
-    if (leadAgentOnly) return item.to === '/admin/leads'
-    if (!superAdmin && crmManager) {
-      return item.to === '/admin/leads' || item.to === '/admin/lead-agents'
-    }
-    if ('crmManagerOnly' in item && item.crmManagerOnly && !superAdmin && !crmManager) {
-      return false
-    }
+    if (leadAgentOnly || leadManagerOnly) return item.to === '/admin/leads'
     return true
   })
+  const crmWorkspaceSidebar = leadManagerOnly || leadAgentOnly
+  const homePath = leadManagerOnly || leadAgentOnly ? '/admin/leads/overview' : '/admin'
+  const consoleSubtitle = leadManagerOnly ? 'Manager Console' : leadAgentOnly ? 'Lead Command' : 'Admin Console'
 
   useEffect(() => {
-    if (!token || !user || !isCrmPortalUser(user)) {
+    if (!token || !user) {
+      const leadsPath = path.startsWith('/admin/leads') || path.startsWith('/leadmanagement')
+      navigate(leadsPath ? '/leadmanagement/login' : '/admin/login', { replace: true })
+      return
+    }
+    if (!isCrmPortalUser(user)) {
       navigate('/admin/login', { replace: true })
     }
-  }, [token, user, navigate])
+  }, [token, user, navigate, path])
 
   useEffect(() => {
     if (onPartners) setPartnersOpen(true)
@@ -135,10 +147,27 @@ export function AdminLayout() {
     adminPartnerService.pendingMeta().then((m) => setPendingApps(m.pendingApplications || 0)).catch(() => setPendingApps(0))
   }, [token, user, path])
 
+  useEffect(() => {
+    if (!token || !leadManagerOnly) return
+    crmService.getSummary().then(setCrmSummary).catch(() => setCrmSummary(null))
+  }, [token, leadManagerOnly, path])
+
+  useEffect(() => {
+    if (!token || !leadAgentOnly) return
+    Promise.all([
+      crmService.listLeads({ limit: 1 }),
+      crmService.listLeads({ followUpDue: true, limit: 1 }),
+    ])
+      .then(([assigned, followUps]) => {
+        setAgentNavCounts({ assigned: assigned.total, followUps: followUps.total })
+      })
+      .catch(() => setAgentNavCounts({ assigned: 0, followUps: 0 }))
+  }, [token, leadAgentOnly, path])
+
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
     logout()
-    navigate('/admin/login')
+    navigate(isLeadAgentOnly(user) || isCrmManagerUser(user) ? '/leadmanagement/login' : '/admin/login')
   }
 
   const handleGoToPublicSite = () => {
@@ -188,7 +217,8 @@ export function AdminLayout() {
       <aside
         className={`
           console-sidebar-shell
-          fixed inset-y-0 left-0 z-50 w-56 shrink-0 bg-[#202636] text-white flex flex-col
+          fixed inset-y-0 left-0 z-50 shrink-0 bg-[#202636] text-white flex flex-col
+          ${crmWorkspaceSidebar ? 'w-64' : 'w-56'}
           md:static md:z-auto
           transform transition-transform duration-200 ease-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
@@ -196,8 +226,8 @@ export function AdminLayout() {
       >
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-white/10">
           <div className="flex items-center justify-between gap-2">
-            <Link to="/admin" onClick={closeSidebar} className="min-w-0">
-              <ConsoleBrandMark subtitle="Admin Console" size="sm" />
+            <Link to={homePath} onClick={closeSidebar} className="min-w-0">
+              <ConsoleBrandMark subtitle={consoleSubtitle} size="sm" />
             </Link>
             <button
               type="button"
@@ -211,7 +241,73 @@ export function AdminLayout() {
         </div>
         <nav className="console-sidebar-nav flex-1 overflow-y-auto py-4">
           <ul className="space-y-0.5 px-2">
-            {visibleSidebarLinks.map((item) => {
+            {leadAgentOnly ? (
+              <>
+                <li className="px-3 pb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-white/35">My workspace</p>
+                </li>
+                {AGENT_LEAD_TABS.map((tab) => {
+                  const Icon = tab.icon
+                  const badge =
+                    tab.badgeKey === 'totalOpen'
+                      ? agentNavCounts.assigned
+                      : tab.badgeKey === 'followUpsDue'
+                        ? agentNavCounts.followUps
+                        : null
+                  return (
+                    <li key={tab.id}>
+                      <NavLink
+                        to={`/admin/leads/${tab.path}`}
+                        onClick={closeSidebar}
+                        title={tab.label}
+                        className={({ isActive }) =>
+                          `flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium leading-snug transition-colors ${
+                            isActive
+                              ? 'bg-emerald-600/20 text-white ring-1 ring-emerald-500/35'
+                              : 'text-white/90 hover:bg-white/10'
+                          }`
+                        }
+                      >
+                        <Icon className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+                        <span className="flex-1 min-w-0 [overflow-wrap:anywhere]">{tab.label}</span>
+                        {typeof badge === 'number' && badge > 0 && (
+                          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">
+                            {badge > 99 ? '99+' : badge}
+                          </span>
+                        )}
+                      </NavLink>
+                    </li>
+                  )
+                })}
+              </>
+            ) : leadManagerOnly ? (
+              MANAGER_LEAD_TABS.map((tab) => {
+                const Icon = tab.icon
+                const badge = tab.badgeKey && crmSummary ? crmSummary[tab.badgeKey] : null
+                return (
+                  <li key={tab.id}>
+                    <NavLink
+                      to={`/admin/leads/${tab.path}`}
+                      onClick={closeSidebar}
+                      title={tab.label}
+                      className={({ isActive }) =>
+                        `flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium leading-snug transition-colors ${
+                          isActive ? 'console-sidebar-nav-active bg-[#2A303D] text-white' : 'text-white/90 hover:bg-white/10'
+                        }`
+                      }
+                    >
+                      <Icon className="mt-0.5 h-[18px] w-[18px] shrink-0" />
+                      <span className="flex-1 min-w-0 [overflow-wrap:anywhere]">{tab.label}</span>
+                      {typeof badge === 'number' && badge > 0 && (
+                        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">
+                          {badge > 99 ? '99+' : badge}
+                        </span>
+                      )}
+                    </NavLink>
+                  </li>
+                )
+              })
+            ) : visibleSidebarLinks.map((item) => {
               const { to, label, icon: Icon, badge } = item as typeof item & { badge?: number; expandable?: boolean }
               const expandable = 'expandable' in item && item.expandable
               if (expandable) {
@@ -282,6 +378,18 @@ export function AdminLayout() {
             })}
           </ul>
         </nav>
+        {leadAgentOnly && (
+          <div className="shrink-0 space-y-2 px-3 pb-3">
+            <div className="rounded-lg bg-white/5 px-3 py-2.5 text-[11px] leading-relaxed text-white/60">
+              <p className="font-semibold text-white/80">Agent access</p>
+              <p className="mt-0.5">Only leads assigned to you are visible here.</p>
+            </div>
+            <div className="rounded-lg bg-emerald-950/40 px-3 py-2.5 text-[11px] text-emerald-100 ring-1 ring-emerald-500/20">
+              <p className="font-semibold">TeleCMI connected</p>
+              <p className="mt-0.5 text-emerald-200/80">Extension ready for outbound calls.</p>
+            </div>
+          </div>
+        )}
         <div className="border-t border-white/10 p-4 space-y-0.5">
           <button
             type="button"
@@ -357,12 +465,14 @@ export function AdminLayout() {
                   className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 pl-2 pr-3 py-1.5 hover:bg-gray-100 transition"
                 >
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
-                    SA
+                    {(user?.name || user?.email || 'U').charAt(0).toUpperCase()}
                   </div>
-<div className="text-left min-w-0 hidden md:block">
-                <p className="text-base font-semibold text-brand-navy truncate">Super Admin</p>
-                <p className="text-sm text-slate-gray">admin@xpertintern.com</p>
-              </div>
+                  <div className="text-left min-w-0 hidden md:block">
+                    <p className="text-base font-semibold text-brand-navy truncate">
+                      {leadManagerOnly || leadAgentOnly ? (user?.name || 'User') : 'Super Admin'}
+                    </p>
+                    <p className="text-sm text-slate-gray truncate">{user?.email || 'admin@xpertintern.com'}</p>
+                  </div>
                   <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" />
                 </button>
                 {profileOpen && (

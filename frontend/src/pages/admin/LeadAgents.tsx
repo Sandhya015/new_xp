@@ -47,7 +47,7 @@ export function LeadAgents() {
   }, [canManage, load])
 
   if (!canManage) {
-    return <Navigate to="/admin/leads" replace />
+    return <Navigate to="/admin/leads/inbox" replace />
   }
 
   const handleSubmit = async (e: FormEvent) => {

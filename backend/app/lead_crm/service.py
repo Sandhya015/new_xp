@@ -716,6 +716,147 @@ def list_crm_agents(*, assignable_only: bool = True) -> list[dict[str, Any]]:
     return out
 
 
+def create_manual_lead(
+    *,
+    full_name: str,
+    mobile: str,
+    source: str = "manual.entry",
+    course_id: str | None = None,
+    course_title: str | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    from app.lead_crm.constants import EVENT_SCORES
+
+    src = (source or "manual.entry").strip()
+    event_type = src if src in EVENT_SCORES else "manual.entry"
+    payload: dict[str, Any] = {}
+    if course_id:
+        payload["courseId"] = course_id
+    if course_title:
+        payload["courseTitle"] = course_title
+    return ingest_lead_event(
+        event_type=event_type,
+        source=src,
+        mobile=mobile,
+        full_name=full_name.strip(),
+        payload=payload,
+        actor_id=actor_id,
+    )
+
+
+def agent_workload() -> list[dict[str, Any]]:
+    agents = list_crm_agents()
+    leads_col = get_crm_leads_collection()
+    calls_col = get_crm_call_attempts_collection()
+    today_start = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    out: list[dict[str, Any]] = []
+    for a in agents:
+        role = str(a.get("leadRole") or "")
+        if role not in ("agent", "manager"):
+            continue
+        aid = _oid(a["id"])
+        active = leads_col.count_documents({"assignedTo": aid, "status": "open"}) if aid else 0
+        calls_today = calls_col.count_documents({"agentId": aid, "createdAt": {"$gte": today_start}}) if aid else 0
+        capacity = min(100, int(round(active / 40 * 100))) if active else 0
+        out.append({**a, "activeLeads": active, "callsToday": calls_today, "capacityPct": capacity})
+    out.sort(key=lambda x: (-x["activeLeads"], -x["callsToday"]))
+    return out[:8]
+
+
+def recent_activity(limit: int = 8) -> list[dict[str, Any]]:
+    events_col = get_crm_lead_events_collection()
+    leads_col = get_crm_leads_collection()
+    events = list(events_col.find().sort("createdAt", -1).limit(max(1, min(limit, 30))))
+    if not events:
+        return []
+    lead_ids = list({e["leadId"] for e in events if e.get("leadId")})
+    name_map: dict[Any, str] = {}
+    for doc in leads_col.find({"_id": {"$in": lead_ids}}, {"fullName": 1}):
+        name_map[doc["_id"]] = doc.get("fullName") or "Lead"
+    out: list[dict[str, Any]] = []
+    for e in events:
+        lid = e.get("leadId")
+        out.append(
+            {
+                "id": str(e["_id"]),
+                "eventType": e.get("eventType"),
+                "source": e.get("source"),
+                "leadId": str(lid) if lid else None,
+                "leadName": name_map.get(lid, "Lead"),
+                "createdAt": e.get("createdAt").isoformat() if e.get("createdAt") else None,
+                "payload": e.get("payload") or {},
+            }
+        )
+    return out
+
+
+def call_log_stats(agent_id: str | None = None) -> dict[str, Any]:
+    col = get_crm_call_attempts_collection()
+    filt: dict[str, Any] = {}
+    if agent_id:
+        oid = _oid(agent_id)
+        if oid:
+            filt["agentId"] = oid
+    total = col.count_documents(filt)
+    connected_filt = {**filt, "status": {"$in": ["connected", "completed", "answered"]}}
+    connected = col.count_documents(connected_filt)
+    pipeline = [
+        {"$match": {**filt, "durationSec": {"$gt": 0}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$durationSec"}}},
+    ]
+    avg_row = list(col.aggregate(pipeline))
+    avg_sec = int(avg_row[0]["avg"]) if avg_row else 0
+    lead_filt: dict[str, Any] = {"followUpAt": {"$ne": None}, "status": "open"}
+    if agent_id:
+        oid = _oid(agent_id)
+        if oid:
+            lead_filt["assignedTo"] = oid
+    follow_ups = get_crm_leads_collection().count_documents(lead_filt)
+    return {
+        "totalCalls": total,
+        "connected": connected,
+        "avgDurationSec": avg_sec,
+        "followUpsSet": follow_ups,
+    }
+
+
+def list_call_log(limit: int = 50, agent_id: str | None = None) -> list[dict[str, Any]]:
+    col = get_crm_call_attempts_collection()
+    filt: dict[str, Any] = {}
+    if agent_id:
+        oid = _oid(agent_id)
+        if oid:
+            filt["agentId"] = oid
+    calls = list(col.find(filt).sort("createdAt", -1).limit(max(1, min(limit, 200))))
+    if not calls:
+        return []
+    leads_col = get_crm_leads_collection()
+    lead_ids = list({c["leadId"] for c in calls if c.get("leadId")})
+    lead_map: dict[Any, dict] = {}
+    for doc in leads_col.find({"_id": {"$in": lead_ids}}):
+        lead_map[doc["_id"]] = serialize_lead(doc)
+    out: list[dict[str, Any]] = []
+    for c in calls:
+        lid = c.get("leadId")
+        lead = lead_map.get(lid) or {}
+        status = str(c.get("status") or "initiated")
+        out.append(
+            {
+                "id": str(c["_id"]),
+                "leadId": str(lid) if lid else None,
+                "leadName": lead.get("fullName") or "Lead",
+                "leadMobile": lead.get("mobile"),
+                "agentName": c.get("agentName") or "Agent",
+                "direction": c.get("direction"),
+                "status": status,
+                "durationSec": c.get("durationSec"),
+                "recordingUrl": c.get("recordingUrl"),
+                "createdAt": c.get("createdAt").isoformat() if c.get("createdAt") else None,
+            }
+        )
+    return out
+
+
 def migrate_contacts_to_crm(limit: int = 500) -> dict[str, Any]:
     from app.db import get_contacts_collection
 

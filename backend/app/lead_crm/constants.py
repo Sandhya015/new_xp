@@ -12,6 +12,7 @@ EVENT_SCORES: dict[str, int] = {
     "inbound.call": 15,
     "campaign": 10,
     "manual.upload": 5,
+    "manual.entry": 10,
     "payment.successful": 0,
 }
 
@@ -24,7 +25,7 @@ SOURCE_VIEWS: dict[str, list[str]] = {
     "converted": ["payment.successful"],
     "inbound": ["inbound.call"],
     "campaigns": ["campaign"],
-    "uploads": ["manual.upload"],
+    "uploads": ["manual.upload", "manual.entry"],
 }
 
 LIFECYCLE_STAGES = (

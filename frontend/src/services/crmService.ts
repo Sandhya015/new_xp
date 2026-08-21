@@ -93,16 +93,14 @@ export type CrmListResponse = {
 }
 
 export const CRM_VIEWS = [
-  { id: '', label: 'All Leads', countKey: null },
-  { id: 'contact_us', label: 'Contact Us', countKey: 'contact_us' },
-  { id: 'callback', label: 'Callbacks', countKey: 'callback' },
+  { id: '', label: 'All Leads', countKey: null as string | null },
+  { id: 'contact_us', label: 'Contact & Callback', countKey: 'contact_us' },
   { id: 'training_interest', label: 'Training Interest', countKey: 'training_interest' },
   { id: 'registration', label: 'Registration', countKey: 'registration' },
   { id: 'payment_recovery', label: 'Payment Recovery', countKey: 'payment_recovery' },
+  { id: 'campaigns', label: 'Campaign | QR', countKey: 'campaigns' },
+  { id: 'uploads', label: 'Uploaded', countKey: 'uploads' },
   { id: 'converted', label: 'Converted', countKey: 'converted' },
-  { id: 'inbound', label: 'Inbound Calls', countKey: 'inbound' },
-  { id: 'campaigns', label: 'Campaigns', countKey: 'campaigns' },
-  { id: 'uploads', label: 'Uploads', countKey: 'uploads' },
 ] as const
 
 export const LIFECYCLE_OPTIONS = [
@@ -188,7 +186,11 @@ export const crmService = {
     email: string
     mobile?: string
     telecmiAgentId?: string
+    telecmiExtension?: string
     leadRole?: string
+    password?: string
+    reportingManagerId?: string
+    dailyLeadCapacity?: number
   }) {
     const { data } = await api.post<{
       ok: boolean
@@ -226,4 +228,155 @@ export const crmService = {
     const { data } = await api.post('/api/crm/migrate-contacts', { limit })
     return data
   },
+
+  async createLead(body: {
+    fullName: string
+    mobile: string
+    source?: string
+    courseId?: string
+    courseTitle?: string
+  }) {
+    const { data } = await api.post<{ ok: boolean; leadId?: string; error?: string }>('/api/crm/leads', body)
+    return data
+  },
+
+  async getCallLog(limit = 50): Promise<{
+    stats: { totalCalls: number; connected: number; avgDurationSec: number; followUpsSet: number }
+    items: Array<{
+      id: string
+      leadId: string | null
+      leadName: string
+      leadMobile: string | null
+      agentName: string
+      status: string
+      durationSec?: number
+      recordingUrl?: string
+      createdAt: string | null
+    }>
+  }> {
+    const { data } = await api.get('/api/crm/calls', { params: { limit } })
+    return data
+  },
+
+  async getOverviewExtras(): Promise<{
+    agentWorkload: Array<CrmAgent & { activeLeads: number; callsToday: number; capacityPct: number }>
+    recentActivity: Array<{
+      id: string
+      eventType: string
+      source: string
+      leadId: string | null
+      leadName: string
+      createdAt: string | null
+      payload: Record<string, unknown>
+    }>
+  }> {
+    const { data } = await api.get('/api/crm/overview-extras')
+    return data
+  },
+
+  async getSettings(): Promise<CrmSettings> {
+    const { data } = await api.get<CrmSettings>('/api/crm/settings')
+    return data
+  },
+
+  async updateSettings(patch: Partial<CrmSettings>): Promise<{ ok: boolean; settings: CrmSettings }> {
+    const { data } = await api.patch('/api/crm/settings', patch)
+    return data
+  },
+
+  async getAuditLog(limit = 30): Promise<CrmAuditEntry[]> {
+    const { data } = await api.get<{ items: CrmAuditEntry[] }>('/api/crm/audit-log', { params: { limit } })
+    return data.items
+  },
+
+  async getFollowUps(): Promise<{ items: CrmLead[]; stats: CrmFollowUpStats }> {
+    const { data } = await api.get<{ items: CrmLead[]; stats: CrmFollowUpStats }>('/api/crm/follow-ups')
+    return data
+  },
+
+  async scheduleFollowUp(leadId: string, body: { followUpAt: string; note: string }) {
+    const { data } = await api.post(`/api/crm/leads/${leadId}/follow-up`, body)
+    return data
+  },
+
+  async rescheduleFollowUp(leadId: string, body: { followUpAt: string; note?: string }) {
+    const { data } = await api.patch(`/api/crm/leads/${leadId}/follow-up`, body)
+    return data
+  },
+
+  async completeFollowUp(leadId: string, note?: string) {
+    const { data } = await api.post(`/api/crm/leads/${leadId}/follow-up/complete`, { note })
+    return data
+  },
+
+  async importLeads(file: File, opts?: { duplicateMode?: string; assignMode?: string }) {
+    const form = new FormData()
+    form.append('file', file)
+    if (opts?.duplicateMode) form.append('duplicateMode', opts.duplicateMode)
+    if (opts?.assignMode) form.append('assignMode', opts.assignMode)
+    const { data } = await api.post('/api/crm/imports', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data as {
+      ok: boolean
+      added: number
+      updated: number
+      errors: string[]
+      status: string
+    }
+  },
+
+  async listImports(limit = 20): Promise<CrmImportRecord[]> {
+    const { data } = await api.get<{ items: CrmImportRecord[] }>('/api/crm/imports', { params: { limit } })
+    return data.items
+  },
+
+  async downloadImportTemplate(): Promise<Blob> {
+    const { data } = await api.get<Blob>('/api/crm/imports/template', { responseType: 'blob' })
+    return data
+  },
+
+  async testTelecmi(): Promise<{ ok: boolean; status: Record<string, unknown> }> {
+    const { data } = await api.post('/api/crm/telecmi/test')
+    return data
+  },
+}
+
+export type CrmSettings = {
+  autoAssign: boolean
+  duplicateDetection: boolean
+  overdueFollowUpAlerts: boolean
+  recordingAccess: boolean
+  emailAlerts: boolean
+  whatsappAlerts: boolean
+  recordingRetentionDays: number
+}
+
+export type CrmAuditEntry = {
+  id: string
+  action: string
+  actorName: string
+  meta: Record<string, unknown>
+  ip?: string | null
+  createdAt: string | null
+}
+
+export type CrmFollowUpStats = {
+  open: number
+  overdue: number
+  dueToday: number
+  upcoming: number
+  completedOnTimePct: number
+}
+
+export type CrmImportRecord = {
+  id: string
+  filename: string
+  type: string
+  added: number
+  updated: number
+  errorCount: number
+  status: string
+  meta: string
+  createdAt: string | null
 }

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Lock, Mail, Eye, EyeOff } from 'lucide-react'
 import { authService } from '@/services/authService'
 import { useAuthStore, type User } from '@/store/authStore'
-import { isCrmPortalUser, isLeadAgentOnly, isSuperAdminPanelUser } from '@/constants/adminAccess'
+import { isCrmManagerUser, isCrmPortalUser, isLeadAgentOnly } from '@/constants/adminAccess'
 import { AuthLoadingOverlay } from '@/components/ui/AuthLoadingOverlay'
 
 export function AdminLogin() {
@@ -27,7 +27,13 @@ export function AdminLogin() {
         return
       }
       setSession(user, data.token, typeof data.expiresIn === 'number' ? data.expiresIn : undefined)
-      navigate(isLeadAgentOnly(user) ? '/admin/leads' : '/admin')
+      if (isLeadAgentOnly(user)) {
+        navigate('/admin/leads/overview', { replace: true })
+      } else if (isCrmManagerUser(user)) {
+        navigate('/admin/leads/overview', { replace: true })
+      } else {
+        navigate('/admin', { replace: true })
+      }
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error

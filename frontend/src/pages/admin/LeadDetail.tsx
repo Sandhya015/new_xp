@@ -121,7 +121,7 @@ export function LeadDetail() {
   return (
     <div className="space-y-6 w-full max-w-5xl">
       <div className="flex items-center gap-4">
-        <Link to="/admin/leads" className="rounded-lg p-2 text-gray-600 hover:bg-gray-100">
+        <Link to="/admin/leads/inbox" className="rounded-lg p-2 text-gray-600 hover:bg-gray-100">
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div>

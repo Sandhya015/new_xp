@@ -1,0 +1,246 @@
+.lc-login-page {
+  position: relative;
+  min-height: 100vh;
+  background: #eef2f6;
+  overflow: hidden;
+}
+
+/* Diagonal blue partition — wider blue so copy stays inside */
+.lc-login-bg-blue {
+  position: absolute;
+  inset: 0;
+  background: #0f2744;
+  clip-path: polygon(0 0, 70% 0, 24% 100%, 0 100%);
+  z-index: 0;
+}
+
+.lc-login-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+@media (min-width: 1024px) {
+  .lc-login-inner {
+    flex-direction: row;
+    align-items: stretch;
+  }
+}
+
+.lc-login-copy {
+  flex: 1;
+  width: 100%;
+  padding: 2.5rem 1.5rem 2rem;
+  color: #fff;
+}
+
+@media (min-width: 1024px) {
+  .lc-login-copy {
+    flex: 0 0 58%;
+    max-width: 58%;
+    padding: 3.5rem 2.5rem 3rem 3.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+}
+
+.lc-login-brand-name {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.lc-login-brand-sub {
+  margin-top: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.lc-login-kicker {
+  margin-top: 2.75rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.lc-login-headline {
+  margin-top: 0.625rem;
+  width: 100%;
+  max-width: 36rem;
+  font-size: clamp(1.875rem, 4.5vw, 2.875rem);
+  font-weight: 800;
+  line-height: 1.12;
+}
+
+.lc-login-lead {
+  margin-top: 1rem;
+  width: 100%;
+  max-width: 38rem;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: #cbd5e1;
+}
+
+/* White zone — login form only here */
+.lc-login-white {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem 2.5rem;
+  background: transparent;
+}
+
+@media (min-width: 1024px) {
+  .lc-login-white {
+    flex: 1;
+    margin-left: auto;
+    max-width: 42%;
+    padding: 2rem 3rem 2rem 1.5rem;
+  }
+}
+
+.lc-login-form-card {
+  width: 100%;
+  max-width: 24rem;
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  padding: 2rem 1.75rem;
+  box-shadow: 0 12px 40px rgba(15, 39, 68, 0.1);
+}
+
+@media (min-width: 640px) {
+  .lc-login-form-card {
+    padding: 2.25rem 2rem;
+  }
+}
+
+.lc-login-form-kicker {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.lc-login-form-title {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  font-size: 1.625rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.lc-login-form-sub {
+  display: none;
+}
+
+.lc-login-footer-links--single {
+  justify-content: center;
+}
+
+.lc-login-footer-links--single span {
+  display: none;
+}
+
+.lc-login-dev-test {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #e2e8f0;
+  text-align: center;
+}
+
+.lc-login-form {
+  margin-top: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.lc-login-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.lc-login-input {
+  display: block;
+  width: 100%;
+  border-radius: 0.625rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  padding: 0.6875rem 0.75rem 0.6875rem 2.5rem;
+  font-size: 0.875rem;
+  color: #0f172a;
+}
+
+.lc-login-input:focus {
+  outline: 2px solid #2563eb33;
+  border-color: #93c5fd;
+}
+
+.lc-login-submit {
+  width: 100%;
+  margin-top: 0.25rem;
+  border-radius: 0.625rem;
+  background: #1e3a5f;
+  padding: 0.8125rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fff;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.lc-login-submit:hover:not(:disabled) {
+  background: #152a45;
+}
+
+.lc-login-submit:disabled {
+  opacity: 0.55;
+}
+
+.lc-login-footer-links {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.lc-login-footer-links a {
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.lc-login-footer-links a:last-child {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.lc-login-footer-links a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1023px) {
+  .lc-login-bg-blue {
+    clip-path: polygon(0 0, 100% 0, 100% 42%, 0 52%);
+  }
+
+  .lc-login-copy {
+    padding-bottom: 3rem;
+  }
+}

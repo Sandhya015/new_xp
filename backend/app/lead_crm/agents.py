@@ -24,7 +24,11 @@ def create_crm_agent(
     email: str,
     mobile: str | None = None,
     telecmi_agent_id: str | None = None,
+    telecmi_extension: str | None = None,
     lead_role: str = "agent",
+    password: str | None = None,
+    reporting_manager_id: str | None = None,
+    daily_lead_capacity: int | None = None,
 ) -> dict[str, Any]:
     email = email.strip().lower()
     name = full_name.strip()
@@ -35,21 +39,41 @@ def create_crm_agent(
     if col.find_one({"email": email}):
         return {"ok": False, "error": "email_exists"}
 
-    temp_password = _gen_password()
-    doc = {
+    if password is not None:
+        password = password.strip()
+        if len(password) < 8:
+            return {"ok": False, "error": "password_too_short"}
+        temp_password = password
+    else:
+        temp_password = _gen_password()
+
+    telecmi_id = (telecmi_agent_id or telecmi_extension or "").strip() or None
+    role = lead_role if lead_role in ("agent", "manager") else "agent"
+
+    doc: dict[str, Any] = {
         "email": email,
         "fullName": name,
         "name": name,
         "mobile": (mobile or "").strip() or None,
         "role": "admin",
-        "leadRole": lead_role if lead_role in ("agent", "manager") else "agent",
+        "leadRole": role,
         "adminPortalAccess": True,
-        "telecmiAgentId": (telecmi_agent_id or "").strip() or None,
+        "telecmiAgentId": telecmi_id,
         "password": generate_password_hash(temp_password, method="pbkdf2:sha256"),
         "forcePasswordChange": True,
         "accountStatus": "active",
         "createdAt": __import__("datetime").datetime.utcnow(),
     }
+
+    if reporting_manager_id and ObjectId.is_valid(reporting_manager_id):
+        doc["reportingManagerId"] = ObjectId(reporting_manager_id)
+
+    if daily_lead_capacity is not None:
+        try:
+            doc["dailyLeadCapacity"] = max(1, min(int(daily_lead_capacity), 200))
+        except (TypeError, ValueError):
+            pass
+
     ins = col.insert_one(doc)
     return {
         "ok": True,
@@ -66,26 +90,34 @@ def send_agent_welcome_email(
     agent_email: str,
     agent_name: str,
     password: str,
+    lead_role: str = "agent",
 ) -> bool:
     cfg = current_app.config
     if not smtp_configured(cfg):
         current_app.logger.warning("SMTP not configured — skip agent welcome email")
         return False
     base = (cfg.get("PUBLIC_APP_URL") or "http://localhost:5173").rstrip("/")
-    login_url = f"{base}/admin/login"
+    login_url = f"{base}/leadmanagement/login"
+    role_label = "Lead CRM Manager" if lead_role == "manager" else "Lead CRM Agent"
+    access_line = (
+        "Assign leads · Calls · Manage agents"
+        if lead_role == "manager"
+        else "Assigned leads · Calls · Follow-ups"
+    )
     html = f"""
     <p>Hi {agent_name},</p>
-    <p>You have been added as a <strong>Lead CRM Agent</strong> on XpertIntern.</p>
-    <p><strong>Login URL:</strong> <a href="{login_url}">{login_url}</a></p>
+    <p>Your <strong>{role_label}</strong> account on XpertIntern Lead Command is ready.</p>
+    <p><strong>Access:</strong> {access_line}</p>
+    <p><strong>Lead Management login:</strong> <a href="{login_url}">{login_url}</a></p>
     <p><strong>Email:</strong> {agent_email}<br/>
     <strong>Temporary password:</strong> {password}</p>
-    <p>After login, open <strong>Leads → My Day</strong> to work assigned leads (call, disposition, follow-up).</p>
+    <p>Sign in at the link above — your Manager or Agent dashboard opens automatically based on your role.</p>
     <p>Please change your password after first login.</p>
     """
     return send_email(
         cfg,
-        to=agent_email,
-        subject="Your XpertIntern Lead CRM login",
+        to_addr=agent_email,
+        subject=f"Your XpertIntern Lead Command login ({role_label})",
         html_body=html,
     )
 
@@ -133,7 +165,7 @@ def send_lead_assignment_email(
     """
     return send_email(
         cfg,
-        to=agent_email,
+        to_addr=agent_email,
         subject=f"Lead assigned: {lead.get('fullName') or 'New lead'}",
         html_body=html,
     )
