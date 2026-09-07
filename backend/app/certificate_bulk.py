@@ -96,7 +96,7 @@ INSTRUCTIONS = [
     "Mode allowed values: Online, Offline, Hybrid.",
     "Performance Rating allowed values: Excellent, Very Good, Good, Average.",
     "Do not upload more than 1000 rows in one file.",
-    "Domain must match an existing training title (case-insensitive).",
+    "Domain is free text (e.g. AutoCAD). It does not need to match a training title in the system.",
     "Student Email (optional column) — if provided, the student receives the certificate PDF by email.",
 ]
 
@@ -263,7 +263,6 @@ def parse_upload_file(raw: bytes, filename: str) -> tuple[list[dict[str, str]] |
 
 def validate_bulk_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     titles = training_titles()
-    title_set_empty = len(titles) == 0
     seen_in_file: set[str] = set()
     preview: list[dict[str, Any]] = []
     valid_count = 0
@@ -276,13 +275,10 @@ def validate_bulk_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
             errors.append("Student name missing")
 
         domain_raw = (row.get("Domain") or "").strip()
+        # Optional: normalize to catalog title when an exact match exists; otherwise keep uploaded value.
         domain_matched = _match_domain(domain_raw, titles) if domain_raw else None
         if not domain_raw:
             errors.append("Domain missing")
-        elif title_set_empty:
-            errors.append("No active trainings found to match Domain")
-        elif not domain_matched:
-            errors.append("Domain does not match an existing training title")
 
         duration = (row.get("Duration") or "").strip()
         if not duration:

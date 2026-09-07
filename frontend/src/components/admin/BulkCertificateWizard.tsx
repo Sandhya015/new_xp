@@ -211,7 +211,7 @@ export function BulkCertificateWizard({ open, onClose, onDone }: Props) {
               <ul className="list-disc pl-5 text-xs text-slate-gray space-y-1">
                 <li>Leave Certificate Number blank to auto-generate (XP/YYYY/…).</li>
                 <li>Dates must be DD-MM-YYYY. Mode: Online / Offline / Hybrid.</li>
-                <li>Domain must match an existing training title.</li>
+                <li>Domain is free text (e.g. AutoCAD) — no need to match a training title in the system.</li>
                 <li>Optional column Student Email — used to email the PDF when ready.</li>
               </ul>
             </div>
