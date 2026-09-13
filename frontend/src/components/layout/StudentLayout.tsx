@@ -9,6 +9,7 @@ import {
   Play,
   ClipboardList,
   Award,
+  FileText,
   CreditCard,
   Bell,
   User,
@@ -27,6 +28,7 @@ const SIDEBAR_LINKS = [
   { to: '/dashboard/internships', label: 'Internships', icon: Briefcase },
   { to: '/dashboard/my-courses', label: 'My Enrolled Courses', icon: Play },
   { to: '/dashboard/applied-internships', label: 'Applied Internships', icon: ClipboardList },
+  { to: '/dashboard/documents', label: 'My Documents', icon: FileText },
   { to: '/dashboard/certificates', label: 'My Certificates', icon: Award },
   { to: '/dashboard/payments', label: 'Payments & Invoices', icon: CreditCard },
   { to: '/dashboard/notifications', label: 'Notifications', icon: Bell, badge: 3 },
@@ -48,6 +50,7 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     internships: 'Internships',
     'my-courses': 'My Enrolled Courses',
     'applied-internships': 'Applied Internships',
+    documents: 'My Documents',
     certificates: 'My Certificates',
     payments: 'Payments & Invoices',
     notifications: 'Notifications',
@@ -85,8 +88,7 @@ export function StudentLayout() {
 
   useEffect(() => {
     if (!token) {
-      const dest = `${location.pathname}${location.search}`
-      navigate(`/login?next=${encodeURIComponent(dest)}`, { replace: true })
+      navigate('/login', { replace: true })
       return
     }
     if (!user) {
@@ -113,7 +115,7 @@ export function StudentLayout() {
   const handleLogout = () => {
     setLogoutConfirmOpen(false)
     logout()
-    navigate('/login')
+    navigate('/login', { replace: true })
   }
 
   const handleGoToPublicSite = () => {

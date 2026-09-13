@@ -341,6 +341,79 @@ def student_course_attendance(course_id):
     })
 
 
+@enrollments_bp.route("/by-course/<course_id>/attendance/history", methods=["GET"])
+@jwt_required()
+def student_attendance_history(course_id):
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = str(get_jwt_identity() or "")
+    enroll_coll = get_enrollments_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    from app.attendance.service import student_daily_history
+
+    return jsonify(student_daily_history(course_id, user_id))
+
+
+@enrollments_bp.route("/by-course/<course_id>/attendance/mark-in", methods=["POST"])
+@jwt_required()
+def student_attendance_mark_in(course_id):
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = str(get_jwt_identity() or "")
+    enroll_coll = get_enrollments_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    photo = request.files.get("photo")
+    if not photo:
+        return jsonify({"error": "Photo required"}), 400
+    raw = photo.read()
+    if not raw or len(raw) < 100:
+        return jsonify({"error": "Invalid photo"}), 400
+    lat = request.form.get("latitude")
+    lng = request.form.get("longitude")
+    location = (request.form.get("locationLabel") or "").strip()
+    try:
+        latitude = float(lat) if lat not in (None, "") else None
+        longitude = float(lng) if lng not in (None, "") else None
+    except ValueError:
+        latitude = longitude = None
+    from app.attendance.service import mark_in
+
+    result = mark_in(
+        course_id=course_id,
+        user_id=user_id,
+        enrollment_id=str(e["_id"]),
+        photo_bytes=raw,
+        latitude=latitude,
+        longitude=longitude,
+        location_label=location,
+    )
+    if not result.get("ok"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@enrollments_bp.route("/by-course/<course_id>/attendance/mark-out", methods=["POST"])
+@jwt_required()
+def student_attendance_mark_out(course_id):
+    if not ObjectId.is_valid(course_id):
+        return jsonify({"error": "Invalid course id"}), 400
+    user_id = str(get_jwt_identity() or "")
+    enroll_coll = get_enrollments_collection()
+    e = enroll_coll.find_one(user_course_enrollment_filter(user_id, course_id))
+    if not e:
+        return jsonify({"error": "Not enrolled in this course"}), 404
+    from app.attendance.service import mark_out
+
+    result = mark_out(course_id=course_id, user_id=user_id)
+    if not result.get("ok"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
 @enrollments_bp.route("/by-course/<course_id>/curriculum-topic-complete", methods=["PATCH"])
 @jwt_required()
 def patch_curriculum_topic_complete(course_id):

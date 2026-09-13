@@ -48,6 +48,44 @@
   .console-sidebar-nav::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.38);
   }
+
+  /* Light vertical scrollbar — dropdowns, student lists */
+  .scroll-light {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  }
+  .scroll-light::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scroll-light::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-light::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 999px;
+  }
+  .scroll-light::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.55);
+  }
+
+  /* Thin horizontal scrollbar — payments table footer area */
+  .scroll-x-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+  }
+  .scroll-x-thin::-webkit-scrollbar {
+    height: 3px;
+  }
+  .scroll-x-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-x-thin::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 999px;
+  }
+  .scroll-x-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.6);
+  }
 }
 
 /* Strapi (richtext / Markdown-rendered) article body on public blog */

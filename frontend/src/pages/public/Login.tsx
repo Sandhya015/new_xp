@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { authService } from '@/services/authService'
 import { useAuthStore } from '@/store/authStore'
@@ -15,13 +15,8 @@ export function Login() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const setSession = useAuthStore((s) => s.setSession)
 
-  const safeRedirect = (path: string | null) => {
-    if (!path || !path.startsWith('/') || path.startsWith('//')) return null
-    return path
-  }
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>()
 
   const onSubmit = async (data: LoginForm) => {
@@ -47,8 +42,7 @@ export function Login() {
           navigate('/change-password?forced=1', { replace: true })
           return
         }
-        const r = safeRedirect(searchParams.get('redirect') || searchParams.get('next'))
-        navigate(r || '/dashboard', { replace: true })
+        navigate('/dashboard', { replace: true })
       } else {
         if (role !== 'company') {
           setError('This is a company login. Please use the "Login as Student" tab for student accounts.')

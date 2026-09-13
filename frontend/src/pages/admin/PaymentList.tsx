@@ -427,7 +427,7 @@ export function PaymentList() {
         </div>
 
         {loading && <p className="p-4 text-sm text-gray-500">Loading...</p>}
-        <div className="overflow-x-auto">
+        <div className="scroll-x-thin overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>

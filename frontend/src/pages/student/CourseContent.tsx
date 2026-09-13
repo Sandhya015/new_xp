@@ -24,6 +24,7 @@ import {
 import { courseService, type CourseContent, type PythonQuizQuestion } from '@/services/courseService'
 import type { EnrollmentItem } from '@/services/enrollmentService'
 import { enrollmentService, type AssignmentSubmissionItem } from '@/services/enrollmentService'
+import { attendanceService } from '@/services/attendanceService'
 import { certificateService } from '@/services/certificateService'
 import { plainTextFromHtml, sanitizeRichHtml } from '@/utils/sanitizeHtml'
 import { getYoutubeEmbedUrl, getYoutubeWatchUrl } from '@/utils/youtubeEmbed'
@@ -1164,6 +1165,15 @@ export function CourseContent() {
     summary: { markedSessions: number; attended: number; percent: number | null }
   } | null>(null)
   const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [dailyAttendance, setDailyAttendance] = useState<{
+    percent: number | null
+    completedHours: number
+    requiredHours: number
+    today: { date: string; timeIn?: string | null; timeOut?: string | null; status?: string | null }
+    history: Array<Record<string, unknown>>
+  } | null>(null)
+  const [attendanceActionBusy, setAttendanceActionBusy] = useState(false)
+  const [attendanceActionMsg, setAttendanceActionMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (!toast) return
@@ -1198,15 +1208,83 @@ export function CourseContent() {
     refreshEnrollment()
   }, [refreshEnrollment])
 
+  const refreshAttendance = useCallback(() => {
+    if (!courseId) return Promise.resolve()
+    setAttendanceLoading(true)
+    return Promise.all([
+      enrollmentService.getAttendanceForCourse(courseId).then(setAttendanceOverview).catch(() => setAttendanceOverview(null)),
+      attendanceService.getDailyHistory(courseId).then(setDailyAttendance).catch(() => setDailyAttendance(null)),
+    ]).finally(() => setAttendanceLoading(false))
+  }, [courseId])
+
   useEffect(() => {
     if (!courseId || activeTab !== 'attendance') return
-    setAttendanceLoading(true)
-    enrollmentService
-      .getAttendanceForCourse(courseId)
-      .then(setAttendanceOverview)
-      .catch(() => setAttendanceOverview(null))
-      .finally(() => setAttendanceLoading(false))
-  }, [courseId, activeTab])
+    refreshAttendance()
+  }, [courseId, activeTab, refreshAttendance])
+
+  const captureAndMarkIn = useCallback(async () => {
+    if (!courseId) return
+    setAttendanceActionBusy(true)
+    setAttendanceActionMsg(null)
+    try {
+      let blob: Blob
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+        const video = document.createElement('video')
+        video.srcObject = stream
+        await video.play()
+        await new Promise((r) => setTimeout(r, 400))
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth || 640
+        canvas.height = video.videoHeight || 480
+        canvas.getContext('2d')?.drawImage(video, 0, 0)
+        stream.getTracks().forEach((t) => t.stop())
+        blob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('capture failed'))), 'image/jpeg', 0.85)
+        })
+      } catch {
+        setAttendanceActionMsg('Camera unavailable. Allow camera access or try again.')
+        return
+      }
+      let latitude: number | undefined
+      let longitude: number | undefined
+      let locationLabel = ''
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000 }),
+        )
+        latitude = pos.coords.latitude
+        longitude = pos.coords.longitude
+        locationLabel = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+      } catch {
+        /* geolocation optional */
+      }
+      await attendanceService.markIn(courseId, blob, { latitude, longitude, locationLabel })
+      setAttendanceActionMsg('Marked IN successfully.')
+      await refreshAttendance()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      setAttendanceActionMsg(err.response?.data?.error || 'Could not mark IN.')
+    } finally {
+      setAttendanceActionBusy(false)
+    }
+  }, [courseId, refreshAttendance])
+
+  const handleMarkOut = useCallback(async () => {
+    if (!courseId) return
+    setAttendanceActionBusy(true)
+    setAttendanceActionMsg(null)
+    try {
+      await attendanceService.markOut(courseId)
+      setAttendanceActionMsg('Marked OUT successfully.')
+      await refreshAttendance()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } }
+      setAttendanceActionMsg(err.response?.data?.error || 'Could not mark OUT.')
+    } finally {
+      setAttendanceActionBusy(false)
+    }
+  }, [courseId, refreshAttendance])
 
   useEffect(() => {
     setOpenAdditionalQuizTitle(null)
@@ -1675,8 +1753,56 @@ export function CourseContent() {
         )}
         {activeTab === 'attendance' && (
           <div className="space-y-4">
+            <div className="rounded-xl border border-brand-accent/20 bg-brand-accent/5 p-4">
+              <h3 className="font-semibold text-brand-navy">Daily IN / OUT</h3>
+              <p className="mt-1 text-sm text-slate-gray">
+                Mark your daily internship attendance with a photo and location (when allowed by your university dates).
+              </p>
+              {dailyAttendance ? (
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                  <span>
+                    Progress: {dailyAttendance.completedHours}h / {dailyAttendance.requiredHours || '—'}h
+                    {dailyAttendance.percent != null ? ` (${dailyAttendance.percent}%)` : ''}
+                  </span>
+                  <span>
+                    Today: IN {dailyAttendance.today.timeIn || '—'} · OUT {dailyAttendance.today.timeOut || '—'}
+                  </span>
+                </div>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={attendanceActionBusy || !!dailyAttendance?.today.timeIn}
+                  onClick={captureAndMarkIn}
+                  className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {attendanceActionBusy ? 'Working…' : 'Mark IN (photo)'}
+                </button>
+                <button
+                  type="button"
+                  disabled={attendanceActionBusy || !dailyAttendance?.today.timeIn || !!dailyAttendance?.today.timeOut}
+                  onClick={handleMarkOut}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-800 disabled:opacity-50"
+                >
+                  Mark OUT
+                </button>
+              </div>
+              {attendanceActionMsg ? <p className="mt-2 text-sm text-slate-gray">{attendanceActionMsg}</p> : null}
+              {dailyAttendance && dailyAttendance.history.length > 0 ? (
+                <ul className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-100 text-sm">
+                  {dailyAttendance.history.slice(-10).reverse().map((h, i) => (
+                    <li key={i} className="flex justify-between px-3 py-2">
+                      <span>{String(h.date || h.sessionDate || '')}</span>
+                      <span>
+                        {String(h.timeIn || '—')} – {String(h.timeOut || '—')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
             <p className="text-sm text-slate-gray">
-              Attendance for your class sessions. Status appears after your trainer saves attendance for a session.
+              Class session attendance below is recorded by your trainer during live sessions.
             </p>
             {attendanceLoading ? (
               <p className="text-sm inline-flex items-center gap-2 text-slate-gray">

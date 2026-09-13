@@ -2961,12 +2961,15 @@ def certificate_admin_pdf(cert_id):
     except Exception as ex:
         return jsonify({"error": f"Could not build PDF: {ex}"}), 500
     safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
-    return send_file(
+    resp = send_file(
         BytesIO(pdf_bytes),
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"XpertIntern-{safe_name or 'certificate'}.pdf",
     )
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @admin_bp.route("/certificates/<cert_id>/revoke", methods=["POST"])
@@ -3233,6 +3236,25 @@ def admin_put_course_attendance_session(course_id, session_key):
         {"_id": ObjectId(course_id)},
         {"$set": {f"sessionAttendance.{sk}": {"records": records_out, "updatedAt": now}}},
     )
+    batch_map: dict[str, str] = {}
+    for e in enroll_coll.find(course_id_enrollment_filter(course_id)):
+        uid = e.get("userId")
+        if uid is not None:
+            batch_map[str(uid).strip()] = str(e.get("batch") or "")
+    try:
+        from app.attendance.service import sync_class_session_records
+
+        sync_class_session_records(
+            course_id=course_id,
+            session_key=sk,
+            session_date=sd,
+            records=records_out,
+            enrollment_batch_map=batch_map,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("attendance dual-write failed")
     return jsonify({"ok": True, "count": len(records_out)}), 200
 
 

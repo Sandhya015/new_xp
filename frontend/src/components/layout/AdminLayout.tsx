@@ -25,6 +25,7 @@ import {
   HelpCircle,
   Package,
   UsersRound,
+  ClipboardList,
 } from 'lucide-react'
 import { adminPartnerService } from '@/services/partnerService'
 import { crmService, type CrmSummary } from '@/services/crmService'
@@ -34,7 +35,8 @@ import { MANAGER_LEAD_TABS, AGENT_LEAD_TABS } from '@/pages/admin/leads/leadComm
 const SIDEBAR_LINKS = [
   { to: '/admin', label: 'Dashboard', icon: Home },
   { to: '/admin/courses', label: 'Training', icon: BookOpen },
-  { to: '/admin/certificates', label: 'Documents', icon: Award },
+  { to: '/admin/documents', label: 'Documents', icon: Award },
+  { to: '/admin/attendance', label: 'Attendance', icon: ClipboardList },
   { to: '/admin/payments', label: 'Payments', icon: CreditCard },
   { to: '/admin/kit-orders', label: 'Kit Orders', icon: Package },
   { to: '/admin/leads', label: 'Leads', icon: MessageSquare },
@@ -64,7 +66,9 @@ function getBreadcrumbs(pathname: string): { label: string; path: string }[] {
     courses: 'Training',
     new: 'Add Training',
     manage: 'Manage',
-    certificates: 'Documents',
+    documents: 'Documents',
+    attendance: 'Attendance',
+    certificates: 'Manual Certificates',
     partners: 'Partners',
     applications: 'Applications',
     payouts: 'Payouts',

@@ -94,6 +94,16 @@ import { AdminNotifications } from './pages/admin/AdminNotifications'
 import { AdminManagement } from './pages/admin/AdminManagement'
 import { AdminTickets } from './pages/admin/AdminTickets'
 import { AdminSupportFAQ } from './pages/admin/AdminSupportFAQ'
+import { DocumentsHub } from './pages/admin/DocumentsHub'
+import { OfferLetterManage } from './pages/admin/OfferLetterManage'
+import { IdCardManage } from './pages/admin/IdCardManage'
+import { LogbookManage } from './pages/admin/LogbookManage'
+import { AttendanceLogGenerate } from './pages/admin/AttendanceLogGenerate'
+import { CertificateBatchManage } from './pages/admin/CertificateBatchManage'
+import { AttendanceHub } from './pages/admin/AttendanceHub'
+import { AttendanceConfig } from './pages/admin/AttendanceConfig'
+import { AttendanceMonitor } from './pages/admin/AttendanceMonitor'
+import { MyDocuments } from './pages/student/MyDocuments'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { LegalPlaceholder } from './pages/public/LegalPlaceholder'
 import { PublicFaq } from './pages/public/PublicFaq'
@@ -123,6 +133,7 @@ function App() {
         <Route path="my-courses/:id" element={<CourseContent />} />
         <Route path="applied-internships" element={<AppliedInternships />} />
         <Route path="certificates" element={<Certificates />} />
+        <Route path="documents" element={<MyDocuments />} />
         <Route path="payments" element={<Invoices />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="profile" element={<Profile />} />
@@ -167,6 +178,15 @@ function App() {
         <Route path="courses/:id/edit" element={<AddTraining />} />
         <Route path="students" element={<StudentList />} />
         <Route path="students/:id" element={<StudentDetail />} />
+        <Route path="documents" element={<DocumentsHub />} />
+        <Route path="documents/offer-letter/:variant" element={<OfferLetterManage />} />
+        <Route path="documents/id-card/:variant" element={<IdCardManage />} />
+        <Route path="documents/logbook/:variant" element={<LogbookManage />} />
+        <Route path="documents/attendance-log" element={<AttendanceLogGenerate />} />
+        <Route path="documents/certificates/:variant" element={<CertificateBatchManage />} />
+        <Route path="attendance" element={<AttendanceHub />} />
+        <Route path="attendance/config" element={<AttendanceConfig />} />
+        <Route path="attendance/monitor" element={<AttendanceMonitor />} />
         <Route path="certificates" element={<CertificateUpload />} />
         <Route path="certificates/bulk-history" element={<BulkCertificateHistory />} />
         <Route path="partners" element={<AdminPartnersList />} />

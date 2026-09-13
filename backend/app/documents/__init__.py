@@ -1,0 +1,1 @@
+"""Admin-generated student documents."""

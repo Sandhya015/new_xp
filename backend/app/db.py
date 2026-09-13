@@ -197,6 +197,21 @@ def get_bulk_certificate_jobs_collection() -> Collection:
     return get_db()["bulk_certificate_jobs"]
 
 
+def get_student_documents_collection() -> Collection:
+    """Admin-generated student documents (offer letters, ID cards, logbooks, etc.)."""
+    return get_db()["student_documents"]
+
+
+def get_attendance_config_collection() -> Collection:
+    """Per-course attendance configuration (valid dates, hours, session)."""
+    return get_db()["attendance_config"]
+
+
+def get_attendance_records_collection() -> Collection:
+    """Unified attendance records (class sessions + daily IN/OUT)."""
+    return get_db()["attendance_records"]
+
+
 def _ix(collection: Collection, keys, **kwargs) -> None:
     """Create one index; log and continue if it fails (e.g. duplicate keys on unique)."""
     try:
@@ -301,6 +316,29 @@ def ensure_indexes(db: Database) -> None:
         db["certificate_audit_logs"],
         [("certificateId", 1), ("createdAt", -1)],
         name="idx_cert_audit_cert_created",
+    )
+
+    _ix(
+        db["student_documents"],
+        [("studentId", 1), ("courseId", 1), ("docType", 1), ("createdAt", -1)],
+        name="idx_student_docs_student_course_type",
+    )
+    _ix(db["student_documents"], "letterNo", sparse=True, name="idx_student_docs_letterNo")
+    _ix(
+        db["attendance_config"],
+        [("courseId", 1), ("session", 1), ("semester", 1)],
+        unique=True,
+        name="idx_attendance_config_course_session",
+    )
+    _ix(
+        db["attendance_records"],
+        [("courseId", 1), ("userId", 1), ("sessionKey", 1)],
+        name="idx_attendance_records_course_user_session",
+    )
+    _ix(
+        db["attendance_records"],
+        [("userId", 1), ("sessionDate", -1)],
+        name="idx_attendance_records_user_date",
     )
 
     _ix(

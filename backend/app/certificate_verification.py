@@ -49,7 +49,9 @@ def _date_str(val: Any) -> str:
 
 def certificate_pdf_bytes(c: dict) -> bytes:
     key = (c.get("certificatePdfKey") or "").strip()
-    if key:
+    source = (c.get("source") or "").strip().lower()
+    manual_upload = bool(c.get("certificatePdfUploadedAt") or source in ("uploaded", "admin-upload"))
+    if key and manual_upload:
         stored = read_certificate_pdf(key)
         if stored:
             return stored
