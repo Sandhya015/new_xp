@@ -21,7 +21,6 @@ from app.services.course_media_storage import (
     parse_stored_course_media_url,
     save_uploaded_file,
 )
-from app.certificate_pdf import build_course_certificate_pdf
 from app.certificate_quiz_pass import apply_quiz_pass_certificate
 from app.certificate_storage import delete_certificate_pdf, save_certificate_pdf
 from app.certificate_verification import (

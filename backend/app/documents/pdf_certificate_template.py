@@ -1,9 +1,6 @@
 """Certificate PDF — delegates to native FPDF builder (single page, selectable text)."""
 from __future__ import annotations
 
-from app.certificate_pdf import build_course_certificate_pdf
-
-
 def build_certificate_from_profile(
     *,
     student_name: str,
@@ -26,6 +23,8 @@ def build_certificate_from_profile(
     performance_rating: str = "Good",
 ) -> bytes:
     """Render a one-page internship certificate with selectable PDF text."""
+    from app.certificate_pdf import build_course_certificate_pdf
+
     return build_course_certificate_pdf(
         student_name=student_name,
         course_title=course_title,

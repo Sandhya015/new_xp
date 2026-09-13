@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Union
 
 from flask import Response
-from app.certificate_pdf import build_course_certificate_pdf
 from app.db import get_certificates_collection, get_enrollments_collection, get_users_collection
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.notifications import schedule_certificate_email
@@ -88,6 +87,8 @@ def apply_quiz_pass_certificate(
         from app.certificate_verification import verify_url_for_cert
 
         verify_url = verify_url_for_cert(cert_no)
+    from app.certificate_pdf import build_course_certificate_pdf
+
     pdf_bytes = build_course_certificate_pdf(
         student_name,
         course_title,

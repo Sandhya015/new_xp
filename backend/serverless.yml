@@ -117,10 +117,18 @@ custom:
     packRequirements: false
   pythonRequirements:
     slim: true
-    strip: true
+    strip: false
     layer: true
-    dockerizePip: false
+    dockerizePip: true
+    useDownloadCache: false
+    useStaticCache: false
+    # Avoid root-owned ~/.cache from prior docker pip runs.
+    cacheLocation: .sls-pip-cache-v2
+    # Local dev may be Python 3.14; Lambda runtime is 3.11 — build wheels in SAM image.
+    dockerImage: public.ecr.aws/sam/build-python3.11:latest
     pythonBin: python3
+    pipCmdExtraArgs:
+      - '--only-binary=Pillow'
     noDeploy:
       - pytest
       - pytest-cov
@@ -146,6 +154,9 @@ functions:
         - '!venv_bak/**'
         - '!.git/**'
         - '!node_modules/**'
+        - '!.serverless-cache/**'
+        - '!.serverless-cache.broken/**'
+        - '!.sls-pip-cache-v2/**'
         - '!__pycache__/**'
         - '!*.pyc'
         - '!.env'

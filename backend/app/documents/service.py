@@ -9,15 +9,10 @@ from typing import Any
 
 from bson import ObjectId
 
-from app.documents.pdf_certificate_template import build_certificate_from_profile
 from app.certificate_storage import save_certificate_pdf
 from app.certificate_verification import allocate_certificate_number, verify_url_for_cert
 from app.db import get_certificates_collection, get_courses_collection, get_student_documents_collection
 from app.document_storage import read_student_document_pdf, save_student_document_pdf
-from app.documents.pdf_attendance_log import build_attendance_log_pdf
-from app.documents.pdf_id_card import build_id_card_pdf
-from app.documents.pdf_logbook import build_logbook_pdf
-from app.documents.pdf_offer_letter import build_offer_letter_pdf
 from app.documents.student_profile import get_enrolled_students_for_course, profile_for_enrollment
 from app.email_smtp import send_email
 
@@ -198,6 +193,8 @@ def generate_offer_letters(
     actor: dict,
     app_config,
 ) -> dict[str, Any]:
+    from app.documents.pdf_offer_letter import build_offer_letter_pdf
+
     course = get_courses_collection().find_one({"_id": ObjectId(course_id)}, {"title": 1}) if ObjectId.is_valid(course_id) else None
     course_title = (course or {}).get("title") or "Training"
     created = []
@@ -241,6 +238,8 @@ def generate_id_cards(
     actor: dict,
     app_config,
 ) -> dict[str, Any]:
+    from app.documents.pdf_id_card import build_id_card_pdf
+
     course = get_courses_collection().find_one({"_id": ObjectId(course_id)}, {"title": 1}) if ObjectId.is_valid(course_id) else None
     course_title = (course or {}).get("title") or "Training"
     created = []
@@ -279,6 +278,8 @@ def generate_logbooks(
     actor: dict,
     app_config,
 ) -> dict[str, Any]:
+    from app.documents.pdf_logbook import build_logbook_pdf
+
     course = get_courses_collection().find_one({"_id": ObjectId(course_id)}, {"title": 1}) if ObjectId.is_valid(course_id) else None
     course_title = (course or {}).get("title") or "Training"
     created = []
@@ -317,6 +318,7 @@ def generate_attendance_logs(
     app_config,
 ) -> dict[str, Any]:
     from app.attendance.service import attendance_history_for_user
+    from app.documents.pdf_attendance_log import build_attendance_log_pdf
 
     course = get_courses_collection().find_one({"_id": ObjectId(course_id)}, {"title": 1}) if ObjectId.is_valid(course_id) else None
     course_title = (course or {}).get("title") or "Training"
@@ -367,6 +369,7 @@ def generate_certificates_batch(
     with_sign: bool = True,
 ) -> dict[str, Any]:
     from app.attendance.service import attendance_percent_for_user
+    from app.documents.pdf_certificate_template import build_certificate_from_profile
 
     course = get_courses_collection().find_one({"_id": ObjectId(course_id)}, {"title": 1}) if ObjectId.is_valid(course_id) else None
     course_title = (course or {}).get("title") or "Training"
@@ -487,6 +490,8 @@ def _fresh_certificate_pdf(doc: dict) -> bytes | None:
         end = (sdt + timedelta(weeks=weeks)).strftime("%Y-%m-%d")
     except ValueError:
         end = ""
+    from app.documents.pdf_certificate_template import build_certificate_from_profile
+
     return build_certificate_from_profile(
         student_name=profile.get("name") or "Student",
         course_title=doc.get("courseTitle") or profile.get("domain") or "Internship",
@@ -582,6 +587,12 @@ PREVIEW_ATTENDANCE_ROWS: list[dict[str, Any]] = [
 
 def preview_pdf(sample_key: str) -> bytes | None:
     """Generate a live PDF preview using the same builders as production (mock data)."""
+    from app.documents.pdf_attendance_log import build_attendance_log_pdf
+    from app.documents.pdf_certificate_template import build_certificate_from_profile
+    from app.documents.pdf_id_card import build_id_card_pdf
+    from app.documents.pdf_logbook import build_logbook_pdf
+    from app.documents.pdf_offer_letter import build_offer_letter_pdf
+
     key = (sample_key or "").strip()
     profile = PREVIEW_PROFILE
     inputs = PREVIEW_INPUTS

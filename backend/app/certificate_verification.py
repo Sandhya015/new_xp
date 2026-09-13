@@ -10,7 +10,6 @@ from urllib.parse import quote
 from bson import ObjectId
 from flask import current_app
 
-from app.certificate_pdf import build_course_certificate_pdf
 from app.certificate_storage import delete_certificate_pdf, read_certificate_pdf
 from app.db import get_certificates_collection, get_db
 
@@ -61,6 +60,8 @@ def certificate_pdf_bytes(c: dict) -> bytes:
     date_str = _date_str(c.get("completionDate") or c.get("issueDate") or c.get("internshipEndDate"))
     if not date_str:
         date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    from app.certificate_pdf import build_course_certificate_pdf
+
     return build_course_certificate_pdf(
         student_name=student_name,
         course_title=program,
