@@ -14,8 +14,8 @@ export function MyDocuments() {
       .finally(() => setLoading(false))
   }, [])
 
-  const openPdf = async (id: string, download = false) => {
-    const blob = await documentsService.downloadMy(id)
+  const openPdf = async (doc: DocumentItem, download = false) => {
+    const blob = await documentsService.downloadMy(doc.id, doc)
     const url = URL.createObjectURL(blob)
     if (download) {
       const a = document.createElement('a')
@@ -56,21 +56,21 @@ export function MyDocuments() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => openPdf(d.id)}
+                  onClick={() => openPdf(d)}
                   className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50"
                 >
                   View
                 </button>
                 <button
                   type="button"
-                  onClick={() => openPdf(d.id, true)}
+                  onClick={() => openPdf(d, true)}
                   className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50"
                 >
                   <Download className="h-3.5 w-3.5" /> Download
                 </button>
                 <button
                   type="button"
-                  onClick={() => openPdf(d.id).then(() => window.print())}
+                  onClick={() => openPdf(d).then(() => window.print())}
                   className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50"
                 >
                   <Printer className="h-3.5 w-3.5" /> Print

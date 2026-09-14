@@ -77,7 +77,7 @@ export function DocumentManageShell({
   const setField = (key: string, value: unknown) => setInputs((prev) => ({ ...prev, [key]: value }))
 
   const downloadDoc = (d: DocumentItem) => {
-    documentsService.download(d.id).then((blob) => {
+    documentsService.download(d.id, d).then((blob) => {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -219,6 +219,7 @@ export function DocumentManageShell({
       {viewDoc ? (
         <DocumentPdfModal
           docId={viewDoc.id}
+          item={viewDoc}
           title={viewDoc.studentName || 'Student document'}
           subtitle={[viewDoc.courseTitle, viewDoc.letterNo].filter(Boolean).join(' · ')}
           onClose={() => setViewDoc(null)}

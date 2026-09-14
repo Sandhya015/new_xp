@@ -9,13 +9,11 @@ from fpdf.enums import XPos, YPos
 
 from app.documents.pdf_common import (
     BRAND_BLUE,
-    CLOSING_SIGNATURE_W,
     TEXT_DARK,
-    closing_signature_height,
+    closing_signature_layout,
     draw_canva_footer,
     draw_canva_header,
-    draw_closing_signature,
-    footer_top_y,
+    draw_closing_signature_area,
     format_letter_date,
     page_layout,
     pdf_text,
@@ -130,10 +128,8 @@ def _draw_offer_page(
     w = pdf.w
     _, x0, inner_w, _ = page_layout(pdf)
     part_variant = "offer_technical" if variant == "technical" else "offer_non_technical"
-    footer_y = footer_top_y(part_variant, w)
-    sig_h = closing_signature_height(CLOSING_SIGNATURE_W)
-    sig_y = footer_y - sig_h - 4
-    body_bottom = sig_y - 2
+    sig_y, _, footer_y = closing_signature_layout(part_variant, page_w=w, page_h=pdf.h)
+    body_bottom = sig_y - 3
     technical = variant == "technical"
 
     y = draw_canva_header(pdf, variant=part_variant)
@@ -235,10 +231,7 @@ def _draw_offer_page(
         y = _paragraph(pdf, x0=x0, inner_w=inner_w, y=y, max_y=body_bottom, text="We appreciate your interest in our organization.")
         y = _paragraph(pdf, x0=x0, inner_w=inner_w, y=y, max_y=body_bottom, text="Thank you.")
 
-    pdf.set_fill_color(255, 255, 255)
-    pdf.rect(x0, sig_y - 1, inner_w, footer_y - sig_y + 2, style="F")
-    draw_closing_signature(pdf, x=x0, y=sig_y, width_mm=CLOSING_SIGNATURE_W)
-
+    draw_closing_signature_area(pdf, variant=part_variant, x0=x0, inner_w=inner_w)
     draw_canva_footer(pdf, variant=part_variant)
 
 

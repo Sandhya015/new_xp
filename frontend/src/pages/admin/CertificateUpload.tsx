@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { Award, Ban, Download, Eye, FileDown, Loader2, RefreshCw, Send, Upload, X } from 'lucide-react'
 import { adminService } from '@/services/adminService'
+import { certificateService } from '@/services/certificateService'
 import { AdminCertificateManage } from '@/components/admin/AdminCertificateManage'
 
 type CoursePick = { id: string; title: string }
@@ -118,7 +119,7 @@ export function CertificateUpload() {
     setRegisterActionBusy(id)
     setRegisterNotice(null)
     try {
-      const blob = await adminService.downloadAdminCertificatePdf(id)
+      const blob = await certificateService.pdfBlobForCertNo(certNo)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

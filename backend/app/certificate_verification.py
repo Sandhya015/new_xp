@@ -46,10 +46,21 @@ def _date_str(val: Any) -> str:
     return str(val or "").strip()[:10]
 
 
+def is_manual_certificate_pdf(c: dict | None) -> bool:
+    """True only when an admin uploaded a custom PDF (not auto-generated batch/quiz PDFs)."""
+    if not c:
+        return False
+    source = (c.get("source") or "").strip().lower()
+    if c.get("certificatePdfUploadedAt"):
+        return True
+    if source in ("uploaded", "admin-upload"):
+        return True
+    return False
+
+
 def certificate_pdf_bytes(c: dict) -> bytes:
     key = (c.get("certificatePdfKey") or "").strip()
-    source = (c.get("source") or "").strip().lower()
-    manual_upload = bool(c.get("certificatePdfUploadedAt") or source in ("uploaded", "admin-upload"))
+    manual_upload = is_manual_certificate_pdf(c)
     if key and manual_upload:
         stored = read_certificate_pdf(key)
         if stored:
@@ -164,7 +175,7 @@ def certificate_to_verify_response(c: dict | None, *, cert_no_input: str = "") -
         "attendance": attendance,
         "certificate_url": pdf_url,
         "verify_url": verify_url_for_cert(cert_no),
-        "has_uploaded_pdf": bool((c.get("certificatePdfKey") or "").strip()),
+        "has_uploaded_pdf": is_manual_certificate_pdf(c),
     }, 200
 
 
@@ -268,7 +279,7 @@ def certificate_admin_detail_fields(c: dict) -> dict:
         "duration": c.get("duration") or c.get("internshipDuration") or "",
         "performanceRating": c.get("performanceRating") or "Good",
         "certificatePdfKey": c.get("certificatePdfKey") or "",
-        "hasUploadedPdf": bool((c.get("certificatePdfKey") or "").strip()),
+        "hasUploadedPdf": is_manual_certificate_pdf(c),
         "verifyUrl": verify_url_for_cert(str(c.get("certNo") or "")),
         "pdfStatus": c.get("pdfStatus")
         or ("uploaded" if (c.get("certificatePdfKey") or "").strip() else "generated"),

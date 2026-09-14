@@ -34,12 +34,14 @@ CERT_HEADER_MM = 218.0 * _PAGE_MM_H / _PAGE_PX_H
 # Fallback footer heights; actual values come from PNG aspect ratio when present.
 OFFER_FOOTER_MM = 210.0 * 224 / 1241
 CERT_FOOTER_MM = 210.0 * 214 / 1241
-CLOSING_SIGNATURE_W = 72.0
+CLOSING_SIGNATURE_W = 54.0
 SIGNATURE_BLOCK_W = 58.0
 SIGNATURE_STAMP_W = 46.0
 _SIGNATURE_CROP_RATIO = 0.68
 FOOTER_LOGOS_H = 14.0
 PAGE_BOTTOM = 287.0
+SIG_FOOTER_GAP_MM = 4.0
+CLOSING_GREETING_H = 6.5
 
 ASSESSMENT_CRITERIA = (
     "Technical Knowledge & Application",
@@ -109,104 +111,153 @@ def draw_canva_footer(pdf: FPDF, *, variant: str) -> float:
     return y
 
 
+def footer_band_top_y(
+    variant: str,
+    *,
+    page_w: float = 210.0,
+    page_h: float = _PAGE_MM_H,
+) -> float:
+    """Y coordinate where the footer logo band starts (matches draw_canva_footer)."""
+    footer_h = _footer_height_mm(variant, page_w) * 0.985
+    return page_h - footer_h - 0.5
+
+
 def footer_top_y(variant: str, page_w_mm: float = 210.0) -> float:
-    return _PAGE_MM_H - _footer_height_mm(variant, page_w_mm)
+    return footer_band_top_y(variant, page_w=page_w_mm)
 
 
-def _signature_asset() -> Path:
-    for name in ("signature_stamp.png", "signature_official.png"):
+def _signatory_block_asset() -> Path:
+    for name in (
+        "closing_signatory_block.png",
+        "signature_block.png",
+        "signatory_block.png",
+    ):
         path = _ASSETS / name
         if path.is_file():
             return path
-    return _ASSETS / "signature_stamp.png"
+    return _ASSETS / "signature_block.png"
 
 
-def _signature_image_height() -> float:
-    path = _signature_asset()
+def _trim_signatory_image(path: Path) -> tuple[bytes, int, int]:
+    """Trim white margins so layout height matches visible signatory art."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            rgba = im.convert("RGBA")
+            px = rgba.load()
+            w, h = rgba.size
+            threshold = 248
+            min_x, min_y, max_x, max_y = w, h, 0, 0
+            for yy in range(h):
+                for xx in range(w):
+                    r, g, b, a = px[xx, yy]
+                    if a < 8:
+                        continue
+                    if r >= threshold and g >= threshold and b >= threshold:
+                        continue
+                    min_x = min(min_x, xx)
+                    min_y = min(min_y, yy)
+                    max_x = max(max_x, xx)
+                    max_y = max(max_y, yy)
+            if max_x <= min_x or max_y <= min_y:
+                buf = io.BytesIO()
+                rgba.save(buf, format="PNG")
+                return buf.getvalue(), w, h
+            cropped = rgba.crop((min_x, min_y, max_x + 1, max_y + 1))
+            buf = io.BytesIO()
+            cropped.save(buf, format="PNG")
+            cw, ch = cropped.size
+            return buf.getvalue(), cw, ch
+    except Exception:
+        return b"", 0, 0
+
+
+def _signatory_block_height(width_mm: float) -> float:
+    path = _signatory_block_asset()
     if path.is_file():
-        _, h_mm = _image_mm_size(path, width_mm=SIGNATURE_STAMP_W)
-        return h_mm * _SIGNATURE_CROP_RATIO
-    return 12.0
+        _, w_px, h_px = _trim_signatory_image(path)
+        if w_px > 0 and h_px > 0:
+            return width_mm * h_px / w_px
+        _, h_mm = _image_mm_size(path, width_mm=width_mm)
+        return h_mm
+    return 28.0
 
 
-def closing_signature_height(_width_mm: float = CLOSING_SIGNATURE_W) -> float:
-    return 6.5 + _signature_image_height() + 13.0
+def closing_signature_height(width_mm: float = CLOSING_SIGNATURE_W) -> float:
+    """Yours faithfully + full signatory block image."""
+    return CLOSING_GREETING_H + _signatory_block_height(width_mm)
 
 
-def signature_block_height(_width_mm: float = SIGNATURE_BLOCK_W) -> float:
-    return _signature_image_height() + 13.0
+def closing_signature_layout(
+    variant: str,
+    *,
+    page_w: float = 210.0,
+    page_h: float = _PAGE_MM_H,
+    width_mm: float = CLOSING_SIGNATURE_W,
+) -> tuple[float, float, float]:
+    """Return (sig_y, sig_total_h, footer_top_y) for bottom-aligned closing block."""
+    footer_top = footer_band_top_y(variant, page_w=page_w, page_h=page_h)
+    sig_total_h = closing_signature_height(width_mm)
+    sig_y = footer_top - SIG_FOOTER_GAP_MM - sig_total_h
+    return sig_y, sig_total_h, footer_top
 
 
-def _draw_signature_image(pdf: FPDF, *, x: float, y: float) -> float:
-    path = _signature_asset()
-    img_h = _signature_image_height()
+def draw_closing_signature_area(
+    pdf: FPDF,
+    *,
+    variant: str,
+    x0: float,
+    inner_w: float,
+    width_mm: float = CLOSING_SIGNATURE_W,
+) -> tuple[float, float]:
+    """White backdrop + closing signatory, positioned above footer band."""
+    sig_y, sig_h, footer_top = closing_signature_layout(
+        variant,
+        page_w=pdf.w,
+        page_h=pdf.h,
+        width_mm=width_mm,
+    )
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(x0, sig_y - 1, inner_w, footer_top - sig_y + 1, style="F")
+    draw_closing_signature(pdf, x=x0, y=sig_y, width_mm=width_mm)
+    return sig_y, footer_top
+
+
+def signature_block_height(width_mm: float = SIGNATURE_BLOCK_W) -> float:
+    return _signatory_block_height(width_mm) + 1.0
+
+
+def _draw_signatory_block_image(pdf: FPDF, *, x: float, y: float, width_mm: float) -> float:
+    path = _signatory_block_asset()
+    img_h = _signatory_block_height(width_mm)
     if path.is_file():
         try:
-            from PIL import Image
-
-            with Image.open(path) as im:
-                crop_h = max(1, int(im.height * _SIGNATURE_CROP_RATIO))
-                cropped = im.crop((0, 0, im.width, crop_h))
-                buf = io.BytesIO()
-                cropped.save(buf, format="PNG")
-                buf.seek(0)
-                pdf.image(buf, x=x, y=y, w=SIGNATURE_STAMP_W, h=img_h)
+            trimmed, w_px, h_px = _trim_signatory_image(path)
+            if trimmed and w_px > 0 and h_px > 0:
+                img_h = width_mm * h_px / w_px
+                buf = io.BytesIO(trimmed)
+                pdf.image(buf, x=x, y=y, w=width_mm, h=img_h)
+            else:
+                pdf.image(str(path), x=x, y=y, w=width_mm, h=img_h)
         except Exception:
-            try:
-                pdf.image(str(path), x=x, y=y, w=SIGNATURE_STAMP_W, h=img_h)
-            except Exception:
-                pass
+            pass
     return y + img_h
 
 
-def _draw_signature_name_lines(pdf: FPDF, *, x: float, y: float, width_mm: float, centered: bool) -> float:
-    if centered:
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "B", 8.5)
-        pdf.set_text_color(*TEXT_DARK)
-        pdf.cell(width_mm, 3.8, pdf_text("Om Raj"), align="C")
-        y += 4.0
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "", 8)
-        pdf.set_text_color(*BRAND_BLUE)
-        pdf.cell(width_mm, 3.8, pdf_text("Founder & CEO"), align="C")
-        y += 4.0
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "B", 8)
-        pdf.set_text_color(*TEXT_DARK)
-        pdf.cell(width_mm, 3.8, pdf_text("Xpert Ventures Private Limited"), align="C")
-    else:
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "B", 8.5)
-        pdf.set_text_color(*TEXT_DARK)
-        pdf.cell(0, 3.8, pdf_text("Om Raj"))
-        y += 4.0
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "", 8.5)
-        pdf.cell(0, 3.8, pdf_text("Founder and CEO"))
-        y += 4.0
-        pdf.set_xy(x, y)
-        pdf.set_font("helvetica", "B", 8.5)
-        pdf.cell(0, 3.8, pdf_text("Xpert Ventures Private Limited"))
-    return y + 3.5
-
-
 def draw_closing_signature(pdf: FPDF, *, x: float, y: float, width_mm: float = CLOSING_SIGNATURE_W) -> float:
-    """Left-aligned closing with official Om Raj signature image + title lines."""
+    """Left-aligned closing — Yours faithfully, + official signatory block image."""
     pdf.set_xy(x, y)
     pdf.set_font("helvetica", "", 9.5)
     pdf.set_text_color(*TEXT_DARK)
     pdf.cell(0, 5, pdf_text("Yours faithfully,"))
-    y += 7.0
-    y = _draw_signature_image(pdf, x=x, y=y) + 1.0
-    return _draw_signature_name_lines(pdf, x=x, y=y, width_mm=width_mm, centered=False)
+    y += CLOSING_GREETING_H
+    return _draw_signatory_block_image(pdf, x=x, y=y, width_mm=width_mm)
 
 
 def draw_signature_block(pdf: FPDF, *, x: float, y: float, width_mm: float = SIGNATURE_BLOCK_W) -> float:
-    """Right-aligned signature block with official Om Raj signature image."""
-    stamp_x = x + max(0.0, (width_mm - SIGNATURE_STAMP_W) / 2)
-    y = _draw_signature_image(pdf, x=stamp_x, y=y) + 1.0
-    return _draw_signature_name_lines(pdf, x=x, y=y, width_mm=width_mm, centered=True)
+    """Right-aligned signatory block image (signature + stamp + name lines)."""
+    return _draw_signatory_block_image(pdf, x=x, y=y, width_mm=width_mm) + 0.5
 
 
 def pdf_text(s: str) -> str:

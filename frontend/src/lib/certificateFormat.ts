@@ -2,13 +2,21 @@ import type { CertificateVerifySuccess } from '@/services/certificateService'
 
 export const CERTIFICATE_VERIFY_URL = 'https://www.xpertintern.com/verify'
 
-export const CERTIFICATE_COMPANY = 'XPERT VENTURES PRIVATE LIMITED'
+export const CERTIFICATE_COMPANY = 'Xpert Ventures Private Limited'
 
 export const CERTIFICATE_SIGNATORY = 'Om Raj'
 
 export const CERTIFICATE_SIGNATORY_TITLE = 'Founder & CEO'
 
-export const CERTIFICATE_SIGNATURE_SRC = '/certificate/signature-stamp.png'
+/** Complete signatory block image (signature, stamp, name, title, company). */
+export const CERTIFICATE_SIGNATORY_BLOCK_SRC = '/certificate/signatory-block.png'
+
+/** @deprecated Use CERTIFICATE_SIGNATORY_BLOCK_SRC via SignatoryBlock */
+export const CERTIFICATE_SIGNATURE_SRC = CERTIFICATE_SIGNATORY_BLOCK_SRC
+
+export const CERTIFICATE_HEADER_BAND_SRC = '/certificate/header-band.png'
+
+export const CERTIFICATE_FOOTER_BAND_SRC = '/certificate/footer-band.png'
 
 export const CERTIFICATE_DEFAULT_MODE = 'Online'
 

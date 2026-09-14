@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { ExternalLink, Loader2, X } from 'lucide-react'
-import { documentsService } from '@/services/documentsService'
+import { documentsService, type DocumentItem } from '@/services/documentsService'
 
 type Props = {
   docId: string
   title: string
   subtitle?: string
+  item?: DocumentItem
   onClose: () => void
 }
 
-export function DocumentPdfModal({ docId, title, subtitle, onClose }: Props) {
+export function DocumentPdfModal({ docId, title, subtitle, item, onClose }: Props) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +23,7 @@ export function DocumentPdfModal({ docId, title, subtitle, onClose }: Props) {
     setBlobUrl(null)
 
     documentsService
-      .download(docId)
+      .download(docId, item)
       .then((blob) => {
         if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
@@ -41,7 +42,7 @@ export function DocumentPdfModal({ docId, title, subtitle, onClose }: Props) {
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [docId])
+  }, [docId, item])
 
   return (
     <div
@@ -59,7 +60,7 @@ export function DocumentPdfModal({ docId, title, subtitle, onClose }: Props) {
             <h2 className="text-lg font-semibold text-brand-navy">{title}</h2>
             {subtitle ? <p className="text-sm text-slate-gray">{subtitle}</p> : null}
             <p className="mt-0.5 text-xs text-slate-gray">
-              Certificates are rendered live with the latest layout. Other documents use the stored PDF from generation time.
+              Certificates use the clean React layout. Offer letters and attendance logs are rebuilt with the latest template on each view.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">

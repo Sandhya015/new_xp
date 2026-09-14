@@ -28,6 +28,7 @@ from app.certificate_verification import (
     certificate_admin_detail_fields,
     certificate_pdf_bytes,
     find_certificate_by_no,
+    is_manual_certificate_pdf,
     log_certificate_audit,
     normalize_cert_no,
     parse_certificate_admin_fields,
@@ -2431,9 +2432,9 @@ def certificates_list():
             "mode": c.get("mode", ""),
             "status": c.get("status", "valid"),
             "source": c.get("source", "") or "",
-            "hasUploadedPdf": bool((c.get("certificatePdfKey") or "").strip()),
+            "hasUploadedPdf": is_manual_certificate_pdf(c),
             "pdfStatus": c.get("pdfStatus")
-            or ("uploaded" if (c.get("certificatePdfKey") or "").strip() else "generated"),
+            or ("uploaded" if is_manual_certificate_pdf(c) else "generated"),
             "pdfError": c.get("pdfError") or "",
             "bulkUploadedAt": (
                 c["bulkUploadedAt"].strftime("%Y-%m-%d")

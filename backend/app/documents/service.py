@@ -514,6 +514,54 @@ def _fresh_certificate_pdf(doc: dict) -> bytes | None:
     )
 
 
+def _fresh_document_pdf(doc: dict) -> bytes | None:
+    """Rebuild PDF with latest templates (offer letter, attendance log, etc.)."""
+    doc_type = doc.get("docType") or ""
+    if doc_type == "certificate_generated":
+        return _fresh_certificate_pdf(doc)
+
+    profile = doc.get("profileSnapshot") or {}
+    inputs = doc.get("inputs") or {}
+    letter_no = str(doc.get("letterNo") or "DOC")
+
+    try:
+        if doc_type == "offer_letter_technical":
+            from app.documents.pdf_offer_letter import build_offer_letter_pdf
+
+            return build_offer_letter_pdf(
+                profile=profile, inputs=inputs, variant="technical", letter_no=letter_no
+            )
+        if doc_type == "offer_letter_non_technical":
+            from app.documents.pdf_offer_letter import build_offer_letter_pdf
+
+            return build_offer_letter_pdf(
+                profile=profile, inputs=inputs, variant="non-technical", letter_no=letter_no
+            )
+        if doc_type == "attendance_log":
+            from app.attendance.service import attendance_history_for_user
+            from app.documents.pdf_attendance_log import build_attendance_log_pdf
+
+            course_id = str(doc.get("courseId") or "")
+            student_id = str(doc.get("studentId") or "")
+            history = (
+                attendance_history_for_user(course_id, student_id)
+                if course_id and student_id
+                else []
+            )
+            return build_attendance_log_pdf(profile=profile, inputs=inputs, attendance_rows=history)
+        if doc_type == "logbook":
+            from app.documents.pdf_logbook import build_logbook_pdf
+
+            return build_logbook_pdf(profile=profile, inputs=inputs)
+        if doc_type == "id_card":
+            from app.documents.pdf_id_card import build_id_card_pdf
+
+            return build_id_card_pdf(profile=profile, letter_no=letter_no)
+    except Exception:
+        return None
+    return None
+
+
 def get_document_pdf(doc_id: str) -> tuple[bytes | None, str]:
     if not ObjectId.is_valid(doc_id):
         return None, ""
@@ -521,10 +569,9 @@ def get_document_pdf(doc_id: str) -> tuple[bytes | None, str]:
     if not doc:
         return None, ""
     name = f"{doc.get('docType', 'document')}-{doc.get('letterNo', doc_id)}.pdf"
-    if doc.get("docType") == "certificate_generated":
-        fresh = _fresh_certificate_pdf(doc)
-        if fresh:
-            return fresh, name
+    fresh = _fresh_document_pdf(doc)
+    if fresh:
+        return fresh, name
     key = doc.get("storageKey") or ""
     data = read_student_document_pdf(key)
     return data, name

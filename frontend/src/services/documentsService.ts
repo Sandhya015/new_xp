@@ -2,6 +2,7 @@ import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
 import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
+import { certificateService, isCertificateDocument } from '@/services/certificateService'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
 api.interceptors.request.use(async (config) => {
@@ -132,7 +133,11 @@ export const documentsService = {
     return data.items
   },
 
-  async download(docId: string): Promise<Blob> {
+  async download(docId: string, item?: DocumentItem): Promise<Blob> {
+    const certNo = item?.letterNo || item?.certificateId
+    if (item && isCertificateDocument(item) && certNo) {
+      return certificateService.pdfBlobForCertNo(certNo)
+    }
     const { data } = await api.get(`/api/admin/documents/${docId}/download`, {
       params: { _t: Date.now() },
       responseType: 'arraybuffer',
@@ -160,7 +165,11 @@ export const documentsService = {
     return data.items
   },
 
-  async downloadMy(docId: string): Promise<Blob> {
+  async downloadMy(docId: string, item?: DocumentItem): Promise<Blob> {
+    const certNo = item?.letterNo || item?.certificateId
+    if (item && isCertificateDocument(item) && certNo) {
+      return certificateService.pdfBlobForCertNo(certNo)
+    }
     const { data } = await api.get(`/api/student/documents/${docId}/download`, {
       responseType: 'arraybuffer',
       headers: { Accept: 'application/pdf, application/octet-stream' },

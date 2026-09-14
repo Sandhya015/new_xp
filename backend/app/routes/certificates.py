@@ -41,7 +41,18 @@ def _verify_handler(cert_no: str):
     return jsonify(body), code
 
 
-@certificates_bp.route("/verify/<cert_no>", methods=["GET"])
+@certificates_bp.route("/verify", methods=["GET"])
+def verify_get_query():
+    cert_no = (
+        request.args.get("cert_no")
+        or request.args.get("certificate_no")
+        or request.args.get("certNo")
+        or ""
+    )
+    return _verify_handler(str(cert_no))
+
+
+@certificates_bp.route("/verify/<path:cert_no>", methods=["GET"])
 def verify_get(cert_no):
     return _verify_handler(cert_no)
 
@@ -59,8 +70,7 @@ def verify_post():
     return _verify_handler(str(cert_no))
 
 
-@certificates_bp.route("/verify/<cert_no>/pdf", methods=["GET"])
-def verify_download_pdf(cert_no):
+def _verify_download_pdf_response(cert_no: str):
     db = get_db()
     if db is None:
         return jsonify({"error": "Service unavailable"}), 503
@@ -83,6 +93,22 @@ def verify_download_pdf(cert_no):
         mimetype="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="XpertIntern-{safe}.pdf"'},
     )
+
+
+@certificates_bp.route("/verify/pdf", methods=["GET"])
+def verify_download_pdf_query():
+    cert_no = (
+        request.args.get("cert_no")
+        or request.args.get("certificate_no")
+        or request.args.get("certNo")
+        or ""
+    )
+    return _verify_download_pdf_response(str(cert_no))
+
+
+@certificates_bp.route("/verify/<path:cert_no>/pdf", methods=["GET"])
+def verify_download_pdf(cert_no):
+    return _verify_download_pdf_response(cert_no)
 
 
 @certificates_bp.route("/generate-from-quiz", methods=["POST"])

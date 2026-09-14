@@ -9,16 +9,14 @@ from fpdf.enums import XPos, YPos
 from app.documents.pdf_common import (
     BRAND_BLUE,
     BRAND_BLUE_LIGHT,
-    CLOSING_SIGNATURE_W,
     TEXT_DARK,
-    closing_signature_height,
+    closing_signature_layout,
     draw_canva_footer,
     draw_canva_header,
-    draw_closing_signature,
+    draw_closing_signature_area,
     draw_section_bar,
     draw_student_details_table,
     draw_title,
-    footer_top_y,
     format_date,
     page_layout,
     pdf_text,
@@ -26,6 +24,12 @@ from app.documents.pdf_common import (
 
 _ATT_HEADERS = ["Sl. No.", "Date", "Time In", "Time Out", "Total Hours", "Signature of the Supervisor", "Remarks"]
 _COL_W = [10, 24, 22, 22, 22, 38, 38]
+_ATT_NOTE = "*Note: Attendance must be verified daily by the authorized supervisor."
+_MAX_ATT_ROWS = 11
+_ROW_H = 5.6
+_HEAD_H = 6.5
+_NOTE_H = 4.5
+_NOTE_GAP = 3.0
 
 
 def build_attendance_log_pdf(
@@ -41,16 +45,17 @@ def build_attendance_log_pdf(
     w = pdf.w
     _, x0, inner_w, _ = page_layout(pdf)
     variant = "offer_technical"
-    footer_y = footer_top_y(variant, w)
-    sig_h = closing_signature_height(CLOSING_SIGNATURE_W)
-    sig_y = footer_y - sig_h - 4
+
+    sig_y, _, footer_top = closing_signature_layout(variant, page_w=w, page_h=pdf.h)
+    note_y = sig_y - _NOTE_GAP - _NOTE_H
+    max_table_bottom = note_y - _NOTE_GAP
 
     y = draw_canva_header(pdf, variant=variant)
     y = draw_title(pdf, y=y, w=w, title="Internship Attendance Log")
     y = draw_student_details_table(pdf, x=x0, y=y, w=inner_w, profile=profile, inputs=inputs)
 
     y = draw_section_bar(pdf, x=x0, y=y, w=inner_w, label="ATTENDANCE LOG")
-    head_h = 6.5
+    table_body_start = y
     pdf.set_draw_color(*BRAND_BLUE)
     pdf.set_line_width(0.25)
     pdf.set_fill_color(*BRAND_BLUE_LIGHT)
@@ -61,7 +66,7 @@ def build_attendance_log_pdf(
         last = i == len(_ATT_HEADERS) - 1
         pdf.cell(
             _COL_W[i],
-            head_h,
+            _HEAD_H,
             pdf_text(label),
             border=1,
             fill=True,
@@ -69,20 +74,20 @@ def build_attendance_log_pdf(
             new_x=XPos.LMARGIN if last else XPos.RIGHT,
             new_y=YPos.NEXT if last else YPos.TOP,
         )
-    y += head_h
+    y += _HEAD_H
 
-    row_count = 12
-    if not attendance_rows:
-        attendance_rows = [{} for _ in range(row_count)]
-    else:
-        while len(attendance_rows) < row_count:
-            attendance_rows.append({})
+    rows = list(attendance_rows or [])
+    while len(rows) < _MAX_ATT_ROWS:
+        rows.append({})
 
-    row_h = 5.8
+    available_body_h = max(_ROW_H, max_table_bottom - y)
+    row_count = min(_MAX_ATT_ROWS, max(1, int(available_body_h // _ROW_H)))
+    row_h = min(_ROW_H, available_body_h / row_count) if row_count else _ROW_H
+
     pdf.set_font("helvetica", "", 7)
     pdf.set_text_color(*TEXT_DARK)
     for idx in range(row_count):
-        row = attendance_rows[idx] if idx < len(attendance_rows) else {}
+        row = rows[idx] if idx < len(rows) else {}
         vals = [
             str(idx + 1),
             format_date(row.get("date") or row.get("sessionDate")) if row.get("date") or row.get("sessionDate") else "",
@@ -107,14 +112,14 @@ def build_attendance_log_pdf(
             )
         y += row_h
 
-    note_y = min(y + 1, sig_y - 8)
+    table_bottom = table_body_start + _HEAD_H + row_count * row_h
+    note_y = min(max(table_bottom + _NOTE_GAP, table_bottom + 2.0), sig_y - _NOTE_GAP - _NOTE_H)
     pdf.set_xy(x0, note_y)
     pdf.set_font("helvetica", "I", 7)
     pdf.set_text_color(*TEXT_DARK)
-    pdf.cell(inner_w, 4, pdf_text("*Note: Attendance must be verified daily by the authorized supervisor."))
-    pdf.set_fill_color(255, 255, 255)
-    pdf.rect(x0, sig_y - 2, inner_w, footer_y - sig_y + 3, style="F")
-    draw_closing_signature(pdf, x=x0, y=sig_y, width_mm=CLOSING_SIGNATURE_W)
+    pdf.cell(inner_w, _NOTE_H, pdf_text(_ATT_NOTE), border=0)
+
+    draw_closing_signature_area(pdf, variant=variant, x0=x0, inner_w=inner_w)
     draw_canva_footer(pdf, variant=variant)
 
     out = pdf.output()

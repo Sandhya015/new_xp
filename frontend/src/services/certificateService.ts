@@ -110,17 +110,21 @@ function normalizeVerifyPayload(data: Record<string, unknown>): VerifyResult {
 }
 
 async function downloadServerPdf(certNo: string): Promise<Blob> {
-  const encoded = encodeURIComponent((certNo || '').trim().toUpperCase())
+  const id = (certNo || '').trim().toUpperCase()
   const base = (getApiBase() || '').replace(/\/$/, '')
-  const url = `${base}/api/certificates/verify/${encoded}/pdf`
+  const url = `${base}/api/certificates/verify/pdf?cert_no=${encodeURIComponent(id)}`
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) {
     let msg = 'Could not download certificate PDF'
     try {
-      const j = (await res.json()) as { error?: string }
+      const j = (await res.json()) as { error?: string; message?: string }
       if (j.error) msg = j.error
+      else if (j.message) msg = j.message
     } catch {
       /* ignore */
+    }
+    if (res.status === 404 && msg === 'Could not download certificate PDF') {
+      msg = 'Certificate PDF not found'
     }
     throw new Error(msg)
   }
@@ -138,7 +142,23 @@ function triggerBlobDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+export function isCertificateDocument(item: { docType?: string; title?: string }): boolean {
+  const dt = (item.docType || '').toLowerCase()
+  if (dt === 'certificate_generated' || dt === 'certificate') return true
+  return (item.title || '').toLowerCase().includes('certificate')
+}
+
 export const certificateService = {
+  /** Client-rendered PDF blob for a certificate number (skips server PIL template). */
+  async pdfBlobForCertNo(certNo: string, options?: { showSignature?: boolean }): Promise<Blob> {
+    const verify = await this.verify(certNo)
+    if (!verify.valid) throw new Error(verify.message || 'Certificate not found')
+    if (verify.has_uploaded_pdf) return downloadServerPdf(certNo)
+    const display = certificateDisplayFromVerify(verify)
+    const { buildCertificatePdfBlob } = await import('@/lib/certificatePdfExport')
+    return buildCertificatePdfBlob(display, { showSignature: options?.showSignature ?? true })
+  },
+
   async verify(certNo: string): Promise<VerifyResult> {
     const certId = (certNo || '').trim()
     if (!certId) {
@@ -151,8 +171,9 @@ export const certificateService = {
       return normalizeVerifyPayload(data)
     } catch (err: unknown) {
       try {
-        const encoded = encodeURIComponent(certId.toUpperCase())
-        const { data } = await api.get<Record<string, unknown>>(`/api/certificates/verify/${encoded}`)
+        const { data } = await api.get<Record<string, unknown>>('/api/certificates/verify', {
+          params: { cert_no: certId.toUpperCase() },
+        })
         return normalizeVerifyPayload(data)
       } catch {
         const res =
