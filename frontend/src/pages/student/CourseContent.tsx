@@ -1307,13 +1307,7 @@ export function CourseContent() {
     setCertMessageTone('success')
     certificateService
       .generateFromQuiz(courseId)
-      .then((blob) => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `XpertIntern-certificate-${courseId.slice(-8)}.pdf`
-        a.click()
-        URL.revokeObjectURL(url)
+      .then(() => {
         setCertMessageTone('success')
         setCertMessage('Your certificate PDF has started downloading. A copy is also being sent to your email.')
         void refreshEnrollment()

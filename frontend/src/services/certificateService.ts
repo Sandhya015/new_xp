@@ -2,6 +2,8 @@ import axios from 'axios'
 import { getApiBase } from '@/config/api'
 import { useAuthStore } from '@/store/authStore'
 import { runBeforeAuthorizedRequest } from '@/lib/attachAuthRefresh'
+import { certificateDisplayFromVerify } from '@/lib/certificateFormat'
+import { downloadCertificatePdf } from '@/lib/certificatePdfExport'
 
 const api = axios.create({ baseURL: getApiBase(), withCredentials: true })
 api.interceptors.request.use(async (config) => {
@@ -10,6 +12,11 @@ api.interceptors.request.use(async (config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
+
+export type CertificateAssessmentRow = {
+  criteria: string
+  rating: 'Good' | 'Outstanding'
+}
 
 export type CertificateVerifySuccess = {
   status: true
@@ -27,6 +34,10 @@ export type CertificateVerifySuccess = {
   registration_no: string
   domain: string
   mode: string
+  session?: string
+  duration?: string
+  performanceRating?: string
+  issueDate?: string
   start_date: string
   end_date: string
   internship_start_date: string
@@ -34,6 +45,7 @@ export type CertificateVerifySuccess = {
   completionDate: string
   marks: string
   attendance: string
+  assessmentRows?: CertificateAssessmentRow[]
   certificate_url: string
   verify_url?: string
   has_uploaded_pdf?: boolean
@@ -77,6 +89,10 @@ function normalizeVerifyPayload(data: Record<string, unknown>): VerifyResult {
     registration_no: String(data.registration_no || ''),
     domain: String(data.domain || data.programName || ''),
     mode: String(data.mode || ''),
+    session: typeof data.session === 'string' ? data.session : '',
+    duration: typeof data.duration === 'string' ? data.duration : '',
+    performanceRating: typeof data.performanceRating === 'string' ? data.performanceRating : '',
+    issueDate: typeof data.issueDate === 'string' ? data.issueDate : '',
     start_date: String(data.start_date || data.internship_start_date || ''),
     end_date: String(data.end_date || data.internship_end_date || data.completionDate || ''),
     internship_start_date: String(data.internship_start_date || data.start_date || ''),
@@ -84,10 +100,42 @@ function normalizeVerifyPayload(data: Record<string, unknown>): VerifyResult {
     completionDate: String(data.completionDate || data.end_date || ''),
     marks: String(data.marks || ''),
     attendance: String(data.attendance || ''),
+    assessmentRows: Array.isArray(data.assessmentRows)
+      ? (data.assessmentRows as CertificateAssessmentRow[])
+      : undefined,
     certificate_url: String(data.certificate_url || ''),
     verify_url: typeof data.verify_url === 'string' ? data.verify_url : undefined,
     has_uploaded_pdf: Boolean(data.has_uploaded_pdf),
   }
+}
+
+async function downloadServerPdf(certNo: string): Promise<Blob> {
+  const encoded = encodeURIComponent((certNo || '').trim().toUpperCase())
+  const base = (getApiBase() || '').replace(/\/$/, '')
+  const url = `${base}/api/certificates/verify/${encoded}/pdf`
+  const res = await fetch(url, { credentials: 'include' })
+  if (!res.ok) {
+    let msg = 'Could not download certificate PDF'
+    try {
+      const j = (await res.json()) as { error?: string }
+      if (j.error) msg = j.error
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  const blob = await res.blob()
+  if (!blob || blob.size < 100) throw new Error('Invalid PDF received')
+  return blob
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export const certificateService = {
@@ -117,24 +165,32 @@ export const certificateService = {
     }
   },
 
-  async downloadVerifiedPdf(certNo: string): Promise<Blob> {
-    const encoded = encodeURIComponent((certNo || '').trim().toUpperCase())
-    const base = (getApiBase() || '').replace(/\/$/, '')
-    const url = `${base}/api/certificates/verify/${encoded}/pdf`
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) {
-      let msg = 'Could not download certificate PDF'
-      try {
-        const j = (await res.json()) as { error?: string }
-        if (j.error) msg = j.error
-      } catch {
-        /* ignore */
-      }
-      throw new Error(msg)
+  /** Client-rendered PDF (React layout). Falls back to server PDF for custom uploads. */
+  async downloadCertificate(
+    verify: CertificateVerifySuccess,
+    options?: { showSignature?: boolean }
+  ): Promise<void> {
+    const certNo = verify.certificate_no || verify.certificateId
+    const safeName = certNo.replace(/[^\w-]+/g, '_') || 'certificate'
+    if (verify.has_uploaded_pdf) {
+      const blob = await downloadServerPdf(certNo)
+      triggerBlobDownload(blob, `XpertIntern-${safeName}.pdf`)
+      return
     }
-    const blob = await res.blob()
-    if (!blob || blob.size < 100) throw new Error('Invalid PDF received')
-    return blob
+    const display = certificateDisplayFromVerify(verify)
+    await downloadCertificatePdf(display, {
+      filename: `XpertIntern-${safeName}.pdf`,
+      showSignature: options?.showSignature ?? true,
+    })
+  },
+
+  async downloadVerifiedPdf(certNo: string): Promise<Blob> {
+    const verify = await this.verify(certNo)
+    if (!verify.valid) throw new Error(verify.message || 'Certificate not found')
+    if (verify.has_uploaded_pdf) return downloadServerPdf(certNo)
+    const display = certificateDisplayFromVerify(verify)
+    const { buildCertificatePdfBlob } = await import('@/lib/certificatePdfExport')
+    return buildCertificatePdfBlob(display, { showSignature: true }) // lazy chunk for html2canvas
   },
 
   async listMy(): Promise<{
@@ -144,7 +200,7 @@ export const certificateService = {
     return data
   },
 
-  async generateFromQuiz(courseId: string): Promise<Blob> {
+  async generateFromQuiz(courseId: string): Promise<void> {
     const token = useAuthStore.getState().token
     const base = (getApiBase() || '').replace(/\/$/, '')
     const url = `${base}/api/certificates/generate-from-quiz`
@@ -155,16 +211,23 @@ export const certificateService = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: 'include',
-      body: JSON.stringify({ courseId }),
+      body: JSON.stringify({ courseId, clientPdf: true }),
     })
     const ct = res.headers.get('content-type') || ''
-    if (ct.includes('application/json')) {
-      const j = (await res.json()) as { error?: string }
-      throw new Error(j.error || 'Could not generate certificate')
+    if (!res.ok) {
+      if (ct.includes('application/json')) {
+        const j = (await res.json()) as { error?: string }
+        throw new Error(j.error || 'Could not generate certificate')
+      }
+      throw new Error('Could not generate certificate')
     }
-    if (!res.ok) throw new Error('Could not generate certificate')
-    const blob = await res.blob()
-    if (!blob || blob.size < 100) throw new Error('Invalid or empty certificate file from server.')
-    return blob
+    const payload = (await res.json()) as { certNo?: string; display?: Record<string, unknown> }
+    const displayRaw = payload.display
+    if (!displayRaw || displayRaw.valid === false) {
+      throw new Error('Could not load certificate details after generation')
+    }
+    const verify = normalizeVerifyPayload(displayRaw)
+    if (!verify.valid) throw new Error(verify.message || 'Could not generate certificate')
+    await this.downloadCertificate(verify, { showSignature: true })
   },
 }

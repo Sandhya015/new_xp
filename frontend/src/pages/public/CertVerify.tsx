@@ -62,16 +62,9 @@ export function CertVerify() {
 
   const handleDownload = async () => {
     if (!result || !result.valid) return
-    const no = result.certificate_no || certId
     setDownloading(true)
     try {
-      const blob = await certificateService.downloadVerifiedPdf(no)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `XpertIntern-${no.replace(/[^\w-]+/g, '_')}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
+      await certificateService.downloadCertificate(result)
     } catch (e: unknown) {
       showAppToast(e instanceof Error ? e.message : 'Download failed')
     } finally {

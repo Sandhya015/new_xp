@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Award, Download, ShieldCheck, Share2 } from 'lucide-react'
+import { Award, Download, Loader2, ShieldCheck, Share2 } from 'lucide-react'
 import { certificateService } from '@/services/certificateService'
+import { showAppToast } from '@/components/AppToastHost'
 
 /**
  * Student Dashboard — My Certificates (SD-WF-14). API wired.
@@ -9,6 +10,7 @@ import { certificateService } from '@/services/certificateService'
 export function Certificates() {
   const [items, setItems] = useState<Array<{ id: string; certNo: string; programName: string; university: string; issueDate: string; status: string }>>([])
   const [loading, setLoading] = useState(true)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   useEffect(() => {
     certificateService
@@ -17,6 +19,22 @@ export function Certificates() {
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
   }, [])
+
+  const handleDownload = async (certNo: string) => {
+    setDownloadingId(certNo)
+    try {
+      const verify = await certificateService.verify(certNo)
+      if (!verify.valid) {
+        showAppToast(verify.message || 'Could not verify certificate')
+        return
+      }
+      await certificateService.downloadCertificate(verify)
+    } catch (e: unknown) {
+      showAppToast(e instanceof Error ? e.message : 'Download failed')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -46,8 +64,18 @@ export function Certificates() {
               <p className="mt-0.5 text-xs text-slate-gray">{c.university} · {c.issueDate}</p>
               <p className="mt-1 text-xs font-mono text-gray-600">ID: {c.certNo}</p>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                  <Download className="h-3.5 w-3.5" /> Download
+                <button
+                  type="button"
+                  disabled={downloadingId === c.certNo}
+                  onClick={() => void handleDownload(c.certNo)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {downloadingId === c.certNo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  Download
                 </button>
                 <Link
                   to={`/verify/${encodeURIComponent(c.certNo)}`}

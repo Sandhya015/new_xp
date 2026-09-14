@@ -131,6 +131,10 @@ def certificate_to_verify_response(c: dict | None, *, cert_no_input: str = "") -
         attendance = s if "%" in s else f"{s}%"
 
     pdf_url = public_pdf_url(cert_no)
+    issue_date = _date_str(c.get("issueDate") or c.get("completionDate") or c.get("internshipEndDate"))
+    session = str(c.get("session") or "").strip()
+    duration = str(c.get("duration") or c.get("internshipDuration") or "").strip()
+    performance_rating = str(c.get("performanceRating") or "Good").strip() or "Good"
     return {
         "status": True,
         "valid": True,
@@ -147,6 +151,10 @@ def certificate_to_verify_response(c: dict | None, *, cert_no_input: str = "") -
         "registration_no": reg_no,
         "domain": domain,
         "mode": mode,
+        "session": session,
+        "duration": duration,
+        "performanceRating": performance_rating,
+        "issueDate": issue_date,
         "start_date": start_date,
         "end_date": end_date,
         "internship_start_date": start_date,

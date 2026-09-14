@@ -141,6 +141,7 @@ def generate_from_quiz():
             ),
         }), 429
 
+    client_pdf = bool(data.get("clientPdf") or data.get("client_pdf"))
     resp = apply_quiz_pass_certificate(
         current_app._get_current_object(),
         user_id=user_id,
@@ -149,6 +150,7 @@ def generate_from_quiz():
         course=c,
         user=user,
         for_pdf_download=True,
+        client_pdf=client_pdf,
     )
     if isinstance(resp, dict):
         return jsonify({"error": "Could not build certificate response"}), 500

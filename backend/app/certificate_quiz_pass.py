@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Union
 
-from flask import Response
+from flask import Response, jsonify
 from app.db import get_certificates_collection, get_enrollments_collection, get_users_collection
 from app.enrollment_lookup import user_course_enrollment_filter
 from app.notifications import schedule_certificate_email
@@ -28,6 +28,7 @@ def apply_quiz_pass_certificate(
     course: dict,
     user: dict,
     for_pdf_download: bool,
+    client_pdf: bool = False,
     cert_source: str = "python-quiz",
 ) -> Union[Response, dict, None]:
     """
@@ -127,6 +128,29 @@ def apply_quiz_pass_certificate(
             {"_id": enrollment["_id"]},
             {"$inc": {"courseCertificate.pdfDownloadCount": 1}},
         )
+        if client_pdf:
+            from app.certificate_verification import certificate_to_verify_response
+
+            body, _code = certificate_to_verify_response(
+                {
+                    "certNo": cert_no,
+                    "studentName": student_name,
+                    "collegeName": (user.get("collegeName") or user.get("university") or "").strip(),
+                    "university": (user.get("university") or user.get("collegeName") or "").strip(),
+                    "registrationNo": (user.get("registrationNo") or user.get("collegeRegNo") or "").strip(),
+                    "course": course_title,
+                    "programName": course_title,
+                    "branch": (user.get("branch") or user.get("stream") or "").strip(),
+                    "domain": course_title,
+                    "mode": "Online",
+                    "internshipEndDate": date_str,
+                    "completionDate": date_str,
+                    "issueDate": date_str,
+                    "status": "valid",
+                },
+                cert_no_input=cert_no,
+            )
+            return jsonify({"certNo": cert_no, "display": body})
         safe_name = "".join(ch for ch in cert_no if ch.isalnum() or ch in "-_")
         return Response(
             pdf_bytes,
