@@ -5,13 +5,13 @@ import re
 import uuid
 from pathlib import Path
 
-from flask import current_app
+from app.storage_paths import local_storage_root
 
 _DOC_PDF_RE = re.compile(r"^[a-f0-9]{32}\.pdf$", re.IGNORECASE)
 
 
 def student_documents_dir() -> Path:
-    base = Path(current_app.instance_path) / "student_documents"
+    base = local_storage_root() / "student_documents"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -41,7 +41,7 @@ def save_attendance_photo(raw: bytes, *, ext: str = "jpg") -> str:
         raise ValueError("Photo is empty or too small")
     safe_ext = "jpg" if ext.lower() in ("jpg", "jpeg") else "png" if ext.lower() == "png" else "jpg"
     key = f"{uuid.uuid4().hex}.{safe_ext}"
-    photos_dir = Path(current_app.instance_path) / "attendance_photos"
+    photos_dir = local_storage_root() / "attendance_photos"
     photos_dir.mkdir(parents=True, exist_ok=True)
     (photos_dir / key).write_bytes(raw)
     return key
@@ -51,7 +51,7 @@ def read_attendance_photo(key: str) -> bytes | None:
     k = (key or "").strip()
     if not k or ".." in k:
         return None
-    path = Path(current_app.instance_path) / "attendance_photos" / k
+    path = local_storage_root() / "attendance_photos" / k
     if not path.is_file():
         return None
     return path.read_bytes()

@@ -6,13 +6,13 @@ import re
 import uuid
 from pathlib import Path
 
-from flask import current_app
+from app.storage_paths import local_storage_root
 
 _CERT_PDF_RE = re.compile(r"^[a-f0-9]{32}\.pdf$", re.IGNORECASE)
 
 
 def certificate_pdfs_dir() -> Path:
-    base = Path(current_app.instance_path) / "certificate_pdfs"
+    base = local_storage_root() / "certificate_pdfs"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
